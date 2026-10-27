@@ -1,0 +1,10 @@
+**/.*/
+!.github/
+docs/agents/
+CLAUDE.md
+END_TERM_PROJECT_GUIDELINES.md
+.env
+.env.*
+!.env.example
+node_modules/
+.DS_Store
