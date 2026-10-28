@@ -91,6 +91,9 @@ function diagnosticNews(
   });
 }
 
+/** A job key is `<file> › <jobId>`. */
+const isJob = (key: string) => key.split(" › ").length === 2;
+
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [origin, setOrigin] = useState<"example" | "pasted" | "uploaded">();
@@ -104,6 +107,8 @@ export function App() {
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
+  // The job picked in the Assumptions section, before Add.
+  const [failPick, setFailPick] = useState("");
   const [verdicts, setVerdicts] = useState<Verdict[]>();
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [target, setTarget] = useState<Target>();
@@ -410,6 +415,18 @@ export function App() {
     setTouched(true);
   };
 
+  // Assumptions, keyed by job key ("job X fails").
+  const assume = scenario.assume ?? {};
+  const removeAssumption = (key: string) => {
+    setScenario((s) => ({
+      ...s,
+      assume: Object.fromEntries(
+        Object.entries(s.assume ?? {}).filter(([k]) => k !== key),
+      ),
+    }));
+    setTouched(true);
+  };
+
   const links: CauseLinks = {
     files,
     focusField,
@@ -441,6 +458,9 @@ export function App() {
   const unsupported = verdicts?.find(
     (v) => v.key === "event" && v.value === "unsupported",
   );
+  const unassumed = (verdicts ?? [])
+    .filter((v) => isJob(v.key) && !Object.hasOwn(assume, v.key))
+    .map((v) => v.key);
 
   let results: ReactNode;
   if (files.length === 0)
@@ -473,7 +493,8 @@ export function App() {
     results = (
       <ul className="verdicts">
         {verdicts.map((v) => (
-          <li key={v.key}>
+          // Sorted by key, so each job row follows its GitHub workflow's row.
+          <li key={v.key} className={isJob(v.key) ? "job" : undefined}>
             <button
               type="button"
               className="verdict"
@@ -671,6 +692,47 @@ export function App() {
                 }
               >
                 Today
+              </button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Assumptions</legend>
+            {Object.keys(assume).length === 0 ? (
+              <p className="hint">None.</p>
+            ) : (
+              <ul className="assumptions">
+                {Object.entries(assume).map(([key, value]) => (
+                  <li key={key}>
+                    job <code>{key}</code> {value}{" "}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${key} ${value}`}
+                      onClick={() => removeAssumption(key)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label htmlFor="assume-fails">Assume this job fails</label>
+            <div className="row">
+              <select
+                id="assume-fails"
+                value={unassumed.includes(failPick) ? failPick : ""}
+                onChange={(e) => setFailPick(e.target.value)}
+              >
+                <option value="">Choose a job</option>
+                {unassumed.map((key) => (
+                  <option key={key}>{key}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!unassumed.includes(failPick)}
+                onClick={() => setInput(["assume", failPick], "fails")}
+              >
+                Add
               </button>
             </div>
           </fieldset>

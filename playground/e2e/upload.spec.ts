@@ -123,7 +123,9 @@ test("picked files go to .github/workflows/, and the ignored ones are counted an
   ]);
   await expect(results(page).getByRole("listitem")).toHaveText([
     "ci.yml runs root EV-0",
+    "ci.yml › build runs root WN-2",
     "docs.yaml skipped root EV-0",
+    "docs.yaml › build no-run root EV-0",
   ]);
 });
 
@@ -182,7 +184,9 @@ for (const [folder, items] of [
     ]);
     await expect(results(page).getByRole("listitem")).toHaveText([
       "ci.yml runs root EV-0",
+      "ci.yml › build runs root WN-2",
       "docs.yaml skipped root EV-0",
+      "docs.yaml › build no-run root EV-0",
     ]);
   });
 
@@ -212,7 +216,10 @@ test("uploading over typed work asks first, then replaces the set without announ
   await paste.getByRole("button", { name: "Add file" }).click();
   await expect(source(page)).toHaveText("Workflow set: 1 pasted file");
   const rows = results(page).getByRole("listitem");
-  await expect(rows).toHaveText(["untitled.yml runs root EV-0"]);
+  await expect(rows).toHaveText([
+    "untitled.yml runs root EV-0",
+    "untitled.yml › build runs root WN-2",
+  ]);
 
   const upload = header(page).getByRole("button", { name: "Upload" });
   const files = [
@@ -241,7 +248,9 @@ test("uploading over typed work asks first, then replaces the set without announ
   await expect(toast(page)).toHaveText("Uploaded 2 files");
   await expect(rows).toHaveText([
     "ci.yml runs root EV-0",
+    "ci.yml › build runs root WN-2",
     "docs.yml skipped root EV-0",
+    "docs.yml › build no-run root EV-0",
   ]);
   // Longer than the 300 ms debounce, so an announcement would have landed (#12 addendum E).
   await page.waitForTimeout(1000);
