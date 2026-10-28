@@ -145,3 +145,83 @@ export function setScenarioValue(
   node[path.at(-1)!] = value;
   return copy as unknown as Scenario;
 }
+
+// What #8 §6 works out from the Event, so a value for it goes on the Event's own fields.
+const FROM_EVENT = new Set([
+  "event_name",
+  "ref",
+  "ref_name",
+  "base_ref",
+  "head_ref",
+  "sha",
+  "run_id",
+]);
+const FROM_EVENT_PAYLOAD = [
+  "action",
+  "pull_request.head.sha",
+  "pull_request.head.ref",
+  "pull_request.head.repo.fork",
+  "pull_request.head.repo.full_name",
+  "pull_request.merge_commit_sha",
+  "head_commit.message",
+];
+
+/**
+ * Returns a copy of the Scenario with a `settle` path's value stored where #8 §5 puts it: a
+ * job output as an Assumption, `vars.<NAME>` as a repository variable, `github.event.*` on
+ * the main Event or the Follow-up event (a `.*.<field>` path takes a list), and the
+ * `owner/repo`, actor login and event policy fields directly. Throws on a path no Scenario
+ * input holds: `matrix.*`, `steps.*`, function results and what the Event works out.
+ */
+export function settleValue(
+  scenario: Scenario,
+  path: string,
+  value: unknown,
+  on: "event" | "followUp" = "event",
+): Scenario {
+  const refuse = (why: string): never => {
+    throw new Error(`refused \`${path}\`: ${why}`);
+  };
+  const set = (at: string[], v = value) => setScenarioValue(scenario, at, v);
+  if (/[()]/.test(path))
+    refuse("function results such as hashFiles() exist only at run time");
+  if (path.includes(" › ")) {
+    if (!/^[^›]+ › [^›]+ › outputs\.[^›]+$/.test(path))
+      refuse("only a job's output is settled by its key");
+    return set(["assume", path], String(value));
+  }
+  const segs = path.split(".");
+  const [context, field] = segs;
+  if (context === "matrix") refuse("there's no matrix expansion");
+  if (context === "steps")
+    refuse("step outputs exist only at run time: settle the job's output");
+  if (context === "vars") {
+    if (segs.length !== 2) refuse("a repository variable is `vars.<NAME>`");
+    return set(["repo", "vars", field!], String(value));
+  }
+  if (path === "repo.repository" || path === "github.repository")
+    return set(["repo", "repository"], String(value));
+  if (path === "event.login" || path === "github.actor")
+    return set([on, "login"], String(value));
+  if (path === "repo.eventPolicy") return set(["repo", "eventPolicy"]);
+  if (context !== "github") refuse("no Scenario input holds it");
+  if (FROM_EVENT.has(field!))
+    refuse("it is worked out from the Event: set it on the Event");
+  if (field !== "event" || segs.length < 3)
+    refuse("it exists only at run time");
+  const rest = segs.slice(2);
+  const joined = rest.join(".");
+  if (
+    FROM_EVENT_PAYLOAD.some((p) => p === joined || p.startsWith(`${joined}.`))
+  )
+    refuse("it is worked out from the Event: set it on the Event");
+  const star = rest.indexOf("*");
+  if (star < 0) return set([on, "payload", ...rest]);
+  const item = rest[star + 1];
+  if (star !== rest.length - 2 || !Array.isArray(value) || REFUSED.has(item!))
+    refuse("a `.*.<field>` path takes a list of values");
+  return set(
+    [on, "payload", ...rest.slice(0, star)],
+    (value as unknown[]).map((v) => ({ [item!]: v })),
+  );
+}

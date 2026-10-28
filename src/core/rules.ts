@@ -207,6 +207,12 @@ const rows: Rule[] = [
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
     confidence: "High",
   },
+  {
+    id: "WN-4",
+    text: "Needs a run-time value the Scenario lacks, such as a step's output, which WhyNoRun never works out: supplying the value settles it, unless the value exists only at run time.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High",
+  },
 ];
 
 export const RULES: Readonly<Record<string, Rule>> = Object.fromEntries(
