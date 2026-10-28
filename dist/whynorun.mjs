@@ -14461,7 +14461,7 @@ function jobVerdicts(file, parsed, workflow, scenario) {
     known.candidates = candidatesOf(name2, known.compared);
     grown = true;
   };
-  const evaluate = (assigned) => {
+  const evaluate2 = (assigned) => {
     const memo = /* @__PURE__ */ new Map();
     const outcome = (id) => {
       const known = memo.get(id);
@@ -14565,7 +14565,7 @@ function jobVerdicts(file, parsed, workflow, scenario) {
   let branches = [];
   const explore = (assigned) => {
     try {
-      branches.push(evaluate(assigned));
+      branches.push(evaluate2(assigned));
     } catch (e) {
       if (!(e instanceof RuntimeValueNeeded)) throw e;
       for (const value of unsettled.get(e.needed).candidates)
@@ -15419,11 +15419,17 @@ function validateScenario(value) {
   );
 }
 var DEFAULTS = [
-  { path: ["repo", "visibility"], value: "public", show: "Visibility: public" },
+  {
+    path: ["repo", "visibility"],
+    value: "public",
+    show: "Visibility: public",
+    allowed: ["public", "private", "internal"]
+  },
   {
     path: ["repo", "predates"],
     value: true,
-    show: "Created before 2026-09-17: yes"
+    show: "Created before 2026-09-17: yes",
+    allowed: [true, false]
   },
   {
     path: ["repo", "defaultBranch"],
@@ -15433,17 +15439,20 @@ var DEFAULTS = [
   {
     path: ["repo", "tokenDefault"],
     value: "restricted",
-    show: "Token default: restricted"
+    show: "Token default: restricted",
+    allowed: ["restricted", "permissive"]
   },
   {
     path: ["repo", "eventPolicy"],
     value: "none",
-    show: "`pull_request_target` event policy: none"
+    show: "`pull_request_target` event policy: none",
+    allowed: ["none", "allows", "blocks"]
   },
   {
     path: ["event", "approval"],
     value: "approved",
-    show: "Approval of a fork contributor's run: approved"
+    show: "Approval of a fork contributor's run: approved",
+    allowed: ["approved", "awaiting"]
   },
   { path: ["event", "actor"], value: "member" },
   { path: ["event", "changed"], value: [] },
@@ -15462,6 +15471,9 @@ var DEFAULTS = [
 ];
 var SHOW_DEFAULTS = DEFAULTS.flatMap(
   (d) => d.show ? [d.show] : []
+);
+var ASSUMED = new Map(
+  DEFAULTS.flatMap((d) => d.allowed ? [[d.path.join("."), d.allowed]] : [])
 );
 var USER_MAPS = [
   ["event", "payload"],
@@ -16125,6 +16137,12 @@ var rows = [
     text: "Needs a run-time value the Scenario lacks, such as a step's output, which WhyNoRun never works out: supplying the value settles it, unless the value exists only at run time.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
     confidence: "High"
+  },
+  {
+    id: "WN-5",
+    text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High"
   }
 ];
 var RULES = Object.fromEntries(
@@ -16146,8 +16164,8 @@ var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { scenario } = withDefaults(input);
-  const { event, repo } = scenario;
+  const { scenario, filled } = withDefaults(input);
+  const { event } = scenario;
   const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
     return key === void 0 ? [] : [
@@ -16180,19 +16198,31 @@ function simulate(files, input) {
       unmatchedAssumptions: []
     };
   }
-  const verdicts = [];
-  for (const { key, bytes, ...file } of parsed) {
-    if (file.diagnostics.length > 0) continue;
-    const workflow = bytes > MAX_BYTES ? {
-      key,
-      value: "skipped",
-      causes: [{ rule: "PL-9", spans: [], inputs: [] }]
-    } : { key, ...trigger(file, event, repo.defaultBranch) };
-    verdicts.push(
-      workflow,
-      ...jobVerdicts(key, file, workflow, scenario),
-      ...accessVerdicts(key, file, scenario)
-    );
+  const verdicts = evaluate(parsed, scenario);
+  for (const path of filled) {
+    const allowed = ASSUMED.get(path);
+    if (!allowed) continue;
+    const [group, field] = path.split(".");
+    const value = scenario[group][field];
+    const decided = /* @__PURE__ */ new Set();
+    for (const other of allowed) {
+      if (other === value) continue;
+      const alt = {
+        ...scenario,
+        [group]: { ...scenario[group], [field]: other }
+      };
+      const values = new Map(
+        evaluate(parsed, alt).map((v) => [v.key, v.value])
+      );
+      for (const v of verdicts)
+        if (values.get(v.key) !== v.value) decided.add(v.key);
+    }
+    for (const v of verdicts)
+      if (decided.has(v.key))
+        v.causes = [
+          ...v.causes,
+          { rule: "WN-5", spans: [], inputs: [{ path, value }] }
+        ];
   }
   verdicts.sort((a, b) => compare(a.key, b.key));
   return {
@@ -16209,6 +16239,24 @@ function unmatched(scenario, verdicts) {
     const candidates = jobs.filter(([f, j]) => f === file || j === id).map((parts) => parts.join(" \u203A "));
     return [{ key, candidates }];
   });
+}
+function evaluate(parsed, scenario) {
+  const { event, repo } = scenario;
+  const verdicts = [];
+  for (const { key, bytes, ...file } of parsed) {
+    if (file.diagnostics.length > 0) continue;
+    const workflow = bytes > MAX_BYTES ? {
+      key,
+      value: "skipped",
+      causes: [{ rule: "PL-9", spans: [], inputs: [] }]
+    } : { key, ...trigger(file, event, repo.defaultBranch) };
+    verdicts.push(
+      workflow,
+      ...jobVerdicts(key, file, workflow, scenario),
+      ...accessVerdicts(key, file, scenario)
+    );
+  }
+  return verdicts;
 }
 var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
@@ -16298,9 +16346,10 @@ function show(args, stdin) {
     ...shown.map((v) => {
       const root = v.causes[0];
       const line = root?.spans[0]?.line;
+      const assumed = v.causes.filter((c) => c.rule === "WN-5").flatMap((c) => c.inputs).map(({ path, value }) => `; WN-5 assumed ${path} = ${String(value)}`).join("");
       return [
         v.key,
-        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""})`
+        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""}${assumed})`
       ];
     }),
     ...diagnostics.map((d) => [

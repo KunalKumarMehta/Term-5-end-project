@@ -255,6 +255,12 @@ const rows: Rule[] = [
     url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
     confidence: "High",
   },
+  {
+    id: "WN-5",
+    text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High",
+  },
 ];
 
 export const RULES: Readonly<Record<string, Rule>> = Object.fromEntries(

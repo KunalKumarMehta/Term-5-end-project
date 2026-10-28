@@ -37,6 +37,7 @@ import {
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
 import { PasteDialog } from "./PasteDialog";
+import { RepoFacts, sourceOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
@@ -474,6 +475,14 @@ export function App() {
       return { ...s, event };
     });
 
+  /** Sets a Repo fact, which makes it set (#9 §6); emptied, it is unset so its default applies. */
+  const setRepoFact = (field: Fact, value: unknown) =>
+    setScenario((s) => {
+      const repo = { ...s.repo, [field]: value };
+      if (value === "") delete repo[field];
+      return { ...s, repo };
+    });
+
   /** Compare on copies Scenario 1 into Scenario 2 and opens its tab; off drops Scenario 2. */
   const setCompare = (on: boolean) => {
     setScenarios((ss) => (on ? [ss[0]!, ss[0]!] : [ss[0]!]));
@@ -534,6 +543,7 @@ export function App() {
   const linksFor = (i: number): CauseLinks => ({
     files,
     focusField: (id) => focusField(id, i),
+    source: (path) => sourceOf(scenarios[i]!, path),
     showLines: (span) => {
       setActive(span.path);
       setPane("yaml");
@@ -928,9 +938,13 @@ export function App() {
                 Today
               </button>
             </div>
+            <RepoFacts scenario={scenario} onChange={setRepoFact} />
             <label htmlFor="repo-repository">
               <code>owner/repo</code>{" "}
               <span className="optional">(optional)</span>
+              {scenario.repo.repository !== undefined && (
+                <span className="source-tag set"> set</span>
+              )}
             </label>
             <input
               id="repo-repository"

@@ -516,3 +516,25 @@ dialog form {
     color: var(--muted);
   }
 }
+
+/* #9 §6: each Repo fact's source tag; assumed is italic with a dotted underline. */
+.source-tag {
+  color: var(--muted);
+  font-size: 0.75em;
+  text-transform: uppercase;
+}
+
+.source-tag.assumed {
+  font-style: italic;
+  text-decoration: underline dotted;
+}
+
+input.assumed,
+select.assumed {
+  border-bottom: 2px dotted var(--muted);
+  font-style: italic;
+}
+
+.assumed-cause {
+  color: var(--muted);
+}
