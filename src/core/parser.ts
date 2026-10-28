@@ -25,6 +25,7 @@ import {
   parseDocument,
   type Document,
   type Node,
+  type Pair,
 } from "yaml";
 
 /** A 1-based position range in one file. */
@@ -59,6 +60,18 @@ export interface ParsedWorkflow {
   jobs: WorkflowJob[];
   /** Each job's positions by job id. */
   jobSpans: Map<string, JobSpans>;
+  /** The workflow-level `permissions:` block. */
+  permissions?: Permissions;
+}
+
+/** A `permissions:` block as written: the parser drops it, so it's read from the YAML (PERM-11). */
+export interface Permissions {
+  /** The `permissions` key. */
+  span: Span;
+  /** `read-all` or `write-all`; a mapping lists `scopes` instead. */
+  all?: string;
+  /** Each listed scope's level, at its `scope: level` pair. */
+  scopes: Map<string, { level: string; span: Span }>;
 }
 
 /** A job's positions; a job reached through an alias points every field at the alias. */
@@ -68,6 +81,9 @@ export interface JobSpans {
   needs?: Span;
   /** Only when job-level `continue-on-error` is literally `true`. */
   continueOnError?: Span;
+  permissions?: Permissions;
+  /** The `environment` key. */
+  environment?: Span;
 }
 
 const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
@@ -187,10 +203,43 @@ function convert(
 function indexOn(
   doc: Document,
   span: (node: Node) => Span,
-): Pick<ParsedWorkflow, "onSpan" | "onEntries" | "jobSpans"> {
+): Pick<ParsedWorkflow, "onSpan" | "onEntries" | "jobSpans" | "permissions"> {
   const onEntries = new Map<string, Span>();
   const jobSpans = new Map<string, JobSpans>();
   if (!isMap(doc.contents)) return { onSpan: undefined, onEntries, jobSpans };
+
+  // A block reached through an alias points every span at the alias, as `on:` does below.
+  const permissions = (
+    pair: Pair | undefined,
+    own: Span | undefined,
+  ): Permissions | undefined => {
+    if (!pair) return undefined;
+    const via = own ?? (isAlias(pair.value) ? span(pair.value) : undefined);
+    const value = resolve(doc, pair.value);
+    const scopes = new Map<string, { level: string; span: Span }>();
+    for (const p of isMap(value) ? value.items : []) {
+      const scope = name(doc, p.key);
+      const level = name(doc, p.value);
+      if (scope === undefined || level === undefined) continue;
+      const end = span((p.value ?? p.key) as Node);
+      scopes.set(scope, {
+        level,
+        span: via ?? {
+          ...span(p.key as Node),
+          endLine: end.endLine,
+          endCol: end.endCol,
+        },
+      });
+    }
+    return {
+      span: own ?? span(pair.key as Node),
+      all: isMap(value) ? undefined : name(doc, value),
+      scopes,
+    };
+  };
+  const root = doc.contents.items.find(
+    (p) => name(doc, p.key) === "permissions",
+  );
 
   const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
   const jobs = resolve(doc, jobsPair?.value);
@@ -205,18 +254,22 @@ function indexOn(
     };
     const coe = field("continue-on-error");
     const coeValue = resolve(doc, coe?.pair.value);
+    const env = field("environment");
     jobSpans.set(id, {
       id: span(item.key as Node),
       if: field("if")?.span,
       needs: field("needs")?.span,
       continueOnError:
         isScalar(coeValue) && coeValue.value === true ? coe!.span : undefined,
+      permissions: permissions(field("permissions")?.pair, own),
+      environment: env && (own ?? span(env.pair.key as Node)),
     });
   }
 
+  const workflow = { jobSpans, permissions: permissions(root, undefined) };
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
   if (!pair || !isScalar(pair.key))
-    return { onSpan: undefined, onEntries, jobSpans };
+    return { ...workflow, onSpan: undefined, onEntries };
 
   // `on: *events` points every entry at the alias, on the on: line.
   const own = isAlias(pair.value) ? span(pair.value) : undefined;
@@ -253,7 +306,7 @@ function indexOn(
       });
     }
   }
-  return { onSpan: span(pair.key), onEntries, jobSpans };
+  return { ...workflow, onSpan: span(pair.key), onEntries };
 }
 
 function resolve(doc: Document, node: unknown): unknown {

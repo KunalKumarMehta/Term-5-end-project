@@ -24,6 +24,14 @@ function run(...argv: string[]) {
   return { code, stdout: text(stdout), stderr: text(stderr) };
 }
 
+// Access key lines (#62), left out by tests not about access.
+const withoutAccess = (stdout: string) =>
+  stdout.replace(/^.* › (?:token\.[a-z-]+|secrets): .*\n/gm, "");
+const runsOnly = (result: ReturnType<typeof run>) => ({
+  ...result,
+  stdout: withoutAccess(result.stdout),
+});
+
 const showOutput = [
   `whynorun ${version}`,
   "",
@@ -55,7 +63,9 @@ test("an unknown command is misuse: exits 2 with usage on stderr", () => {
 
 test("show in a fixture repo prints the version, the Platform baseline and one line per GitHub workflow and per job", () => {
   process.chdir(fixture);
-  expect(run("show", "--event", "push", "--date", "2026-12-03")).toEqual({
+  expect(
+    runsOnly(run("show", "--event", "push", "--date", "2026-12-03")),
+  ).toEqual({
     code: 0,
     stdout: showOutput,
     stderr: "",
@@ -64,28 +74,35 @@ test("show in a fixture repo prints the version, the Platform baseline and one l
 
 test("show --repo <dir> reads another folder's .github/workflows/", () => {
   expect(
-    run("show", "--repo", fixture, "--event", "push", "--date", "2026-12-03"),
+    runsOnly(
+      run("show", "--repo", fixture, "--event", "push", "--date", "2026-12-03"),
+    ),
   ).toEqual({ code: 0, stdout: showOutput, stderr: "" });
 });
 
-test.each(["all", "access"])(
-  "show --flow %s prints what's available",
-  (flow) => {
-    expect(
-      run(
-        "show",
-        "--repo",
-        fixture,
-        "--event",
-        "push",
-        "--date",
-        "2026-12-03",
-        "--flow",
-        flow,
-      ),
-    ).toEqual({ code: 0, stdout: showOutput, stderr: "" });
-  },
-);
+test("show --flow all prints every Verdict: the runs, and each job's access keys after it", () => {
+  const all = run(
+    "show",
+    "--repo",
+    fixture,
+    "--event",
+    "push",
+    "--date",
+    "2026-12-03",
+    "--flow",
+    "all",
+  );
+  expect(runsOnly(all)).toEqual({ code: 0, stdout: showOutput, stderr: "" });
+  // No permissions: anywhere, so the restricted token default decides (PERM-1).
+  expect(all.stdout).toContain(
+    "ci.yml › test: runs (root WN-2, line 6)\n" +
+      "ci.yml › test › secrets: available (root FK-0)\n" +
+      "ci.yml › test › token.actions: none (root PERM-1)\n",
+  );
+  expect(all.stdout.match(/ › (token\.[a-z-]+|secrets): /g)).toHaveLength(
+    3 * 18,
+  );
+});
 
 test("show prints a broken file's Diagnostic at file:line in place of its Verdicts, and the other files' Verdicts", () => {
   const broken = fileURLToPath(
@@ -101,7 +118,7 @@ test("show prints a broken file's Diagnostic at file:line in place of its Verdic
     "2026-12-03",
   );
   expect(code).toBe(0);
-  expect(stdout).toMatch(
+  expect(withoutAccess(stdout)).toMatch(
     /\n\n\.github\/workflows\/broken\.yml:3: Unexpected value 'branchez'\nci\.yml: runs \(root EV-0, line 3\)\nci\.yml › test: runs \(root WN-2, line 6\)\ndocs\.yml: skipped \(root EV-0, line 2\)\ndocs\.yml › build: no-run \(root EV-0, line 2\)\n$/,
   );
 });
@@ -167,9 +184,11 @@ test.each(["checks", "concurrency"])(
 );
 
 const filters = fileURLToPath(new URL("fixtures/filters", import.meta.url));
-// The Verdict lines: everything after the last blank line.
-const verdictLines = (stdout: string) =>
+// Everything after the last blank line.
+const lastBlock = (stdout: string) =>
   stdout.slice(stdout.lastIndexOf("\n\n", stdout.length - 2) + 2);
+// The GitHub workflow and job lines, for tests not about access.
+const verdictLines = (stdout: string) => lastBlock(withoutAccess(stdout));
 
 test("show --ref with a tag ref skips a GitHub workflow with only a branches: filter, root BR-3 on its line", () => {
   const { code, stdout } = run(
@@ -279,6 +298,38 @@ test("show --changed <file> reads the changed files from that file", () => {
   );
   expect(code).toBe(0);
   expect(verdictLines(stdout)).toBe(runs);
+});
+
+const access = fileURLToPath(new URL("fixtures/access", import.meta.url));
+
+test("show --flow access prints one line per access key with its root and YAML line, and nothing else", () => {
+  const { code, stdout } = run(
+    "show",
+    "--repo",
+    access,
+    "--event",
+    "push",
+    "--date",
+    "2026-12-03",
+    "--flow",
+    "access",
+  );
+  expect(code).toBe(0);
+  const none = (scope: string) =>
+    `ci.yml › test › token.${scope}: none (root PERM-3, line 6)`;
+  expect(lastBlock(stdout)).toBe(
+    [
+      "ci.yml › test › secrets: available (root FK-0)",
+      ...["actions", "artifact-metadata", "attestations", "checks"].map(none),
+      none("code-quality"),
+      "ci.yml › test › token.contents: read (root PERM-3, line 7)",
+      ...["copilot-requests", "deployments", "discussions"].map(none),
+      ...["id-token", "issues", "packages", "pages"].map(none),
+      "ci.yml › test › token.pull-requests: write (root PERM-3, line 8)",
+      ...["security-events", "statuses", "vulnerability-alerts"].map(none),
+      "",
+    ].join("\n"),
+  );
 });
 
 test("show without --changed takes an empty diff, so a paths: filter skips (PA-3)", () => {

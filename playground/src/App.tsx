@@ -20,6 +20,7 @@ import {
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
+import { Access, isAccess } from "./Access";
 import { ConfirmDialog, type Confirm } from "./ConfirmDialog";
 import { Editor, type Target } from "./Editor";
 import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
@@ -106,6 +107,8 @@ export function App() {
   const [form, setForm] = useState(0);
   const [labelError, setLabelError] = useState<string>();
   const [diffOnly, setDiffOnly] = useState(false);
+  // The results tab (#9 §1); Merge readiness and Concurrency arrive with their tickets.
+  const [tab, setTab] = useState<"access" | "all">("all");
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
@@ -544,20 +547,23 @@ export function App() {
       </div>
     );
   else if (compare)
-    results = (
-      <Grid
-        columns={columns}
-        files={files
-          .filter((f) => isLoaded(f.path))
-          .map((f) => basename(f.path))
-          .sort()}
-        diagnosed={new Set(diagnostics.map((d) => basename(d.path)))}
-        diffOnly={diffOnly}
-        setDiffOnly={setDiffOnly}
-        open={open}
-        onOpen={openExplanation}
-      />
-    );
+    results =
+      tab === "access" ? (
+        <Access columns={columns} open={open} onOpen={openExplanation} />
+      ) : (
+        <Grid
+          columns={columns}
+          files={files
+            .filter((f) => isLoaded(f.path))
+            .map((f) => basename(f.path))
+            .sort()}
+          diagnosed={new Set(diagnostics.map((d) => basename(d.path)))}
+          diffOnly={diffOnly}
+          setDiffOnly={setDiffOnly}
+          open={open}
+          onOpen={openExplanation}
+        />
+      );
   else if (columns[0]!.blocked === "has no simulation date")
     results = (
       <p className="whole-tab">
@@ -569,12 +575,20 @@ export function App() {
     results = <UnsupportedPanel verdict={unsupported} {...linksFor(0)} />;
   else if (verdicts.length === 0)
     results = <p>No Verdicts: every file has Diagnostics (see above).</p>;
+  else if (tab === "access")
+    results = <Access columns={columns} open={open} onOpen={openExplanation} />;
   else
     results = (
       <ul className="verdicts">
         {verdicts.map((v) => (
-          // Sorted by key, so each job row follows its GitHub workflow's row.
-          <li key={v.key} className={isJob(v.key) ? "job" : undefined}>
+          // Sorted by key, so each job row follows its GitHub workflow's row, and its
+          // access keys follow the job's.
+          <li
+            key={v.key}
+            className={
+              isJob(v.key) ? "job" : isAccess(v.key) ? "access" : undefined
+            }
+          >
             <button
               type="button"
               className="verdict"
@@ -884,9 +898,22 @@ export function App() {
 
         <section className="pane" data-id="results" aria-label="Results">
           <div role="tablist" aria-label="Results" className="tabs">
-            <button type="button" role="tab" aria-selected>
-              All Verdicts
-            </button>
+            {(
+              [
+                ["access", "Access"],
+                ["all", "All Verdicts"],
+              ] as const
+            ).map(([id, name]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => setTab(id)}
+              >
+                {name}
+              </button>
+            ))}
           </div>
           {diagnostics.length > 0 && (
             <ul className="banner diagnostics" aria-label="Diagnostics">
