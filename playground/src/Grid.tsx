@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Verdict } from "../../src/core";
+import { isCheck, type Verdict } from "../../src/core";
 
 const TONES: Record<string, string> = {
   runs: "good",
@@ -55,7 +55,7 @@ function groupOf(key: string): string {
   const parts = key.split(" › ");
   const last = parts.at(-1)!;
   if (key === "event") return "Event";
-  if (parts[0] === "check") return "Required checks";
+  if (isCheck(key)) return "Required checks";
   if (last.startsWith("concurrency")) return "Concurrency";
   if (last.startsWith("token.") || last === "secrets") return "Access";
   return "Runs";

@@ -15836,7 +15836,7 @@ function byRef(parsed, event, defaultBranch) {
     const span = parsed.onEntries.get(key2);
     return span ? [span] : [];
   };
-  const named2 = { path: "event.name", value: name2 };
+  const named = { path: "event.name", value: name2 };
   if (!Object.hasOwn(parsed.events, name2))
     return {
       value: "skipped",
@@ -15844,13 +15844,13 @@ function byRef(parsed, event, defaultBranch) {
         {
           rule: "EV-0",
           spans: parsed.onSpan ? [parsed.onSpan] : [],
-          inputs: [named2]
+          inputs: [named]
         }
       ]
     };
   const settings = settingsOf(parsed, name2);
   const has = (key2) => Object.hasOwn(settings, key2);
-  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named2] };
+  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
   const after = [];
   if (name2 !== "push") {
     const defaults = name2 === "merge_group" ? ["checks_requested"] : PR_DEFAULT_TYPES;
@@ -15869,7 +15869,7 @@ function byRef(parsed, event, defaultBranch) {
   }
   const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
   if (name2 !== "merge_group")
-    after.push({ rule: copy, spans: [], inputs: [named2] });
+    after.push({ rule: copy, spans: [], inputs: [named] });
   const given = name2 === "push" ? event.ref : event.base;
   const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
   const ref = given ?? `refs/heads/${defaultBranch}`;
@@ -16564,27 +16564,43 @@ function checkVerdicts(producers, { event, repo }, queued) {
       causes: [cause3("WN-3", [{ path: "event.type", value: event.type }])]
     }));
   const notes = repo.strict ? [cause3("RQ-10", [{ path: "repo.strict", value: true }])] : [];
-  const unqueued = cause3("RQ-6", [{ path: "repo.mergeQueue", value: true }]);
+  const filtered = (workflow) => /^(BR|PA|SK)-/.test(workflow.causes[0]?.rule ?? "") ? [cause3("RQ-1")] : [];
+  const unqueued = () => [
+    cause3("RQ-6", [{ path: "repo.mergeQueue", value: true }])
+  ];
   return names.map((name2) => {
-    const pr = named(name2, producers, cause3("RQ-1"));
-    const queue = queued && named(name2, queued, unqueued);
+    const pr = derivedBadge(name2, producers, filtered);
+    const queue = queued && derivedBadge(name2, queued, unqueued);
     const { causes, ...rest } = queue && RANK.indexOf(queue.value) < RANK.indexOf(pr.value) ? queue : pr;
     return { key: `check \u203A ${name2}`, ...rest, causes: [...causes, ...notes] };
   });
 }
+var isCheck = (key) => key.startsWith("check \u203A ");
+var reports = (p) => !(p.job.value === "no-run" && p.workflow.value === "skipped");
 var prefixed = (p, name2) => p.name !== void 0 && (p.via === "remote" ? name2.startsWith(`${p.name} / `) : p.via === "matrix" && name2.startsWith(`${p.name} (`));
 function match(producers, name2) {
   return producers.find((p) => p.name === name2 && p.via !== "remote") ?? producers.find((p) => prefixed(p, name2));
 }
-function named(name2, producers, skipped) {
+var orUnreported = (v, root) => ({
+  value: "uncertain",
+  causes: [root, ...v.causes],
+  possible: [
+    .../* @__PURE__ */ new Set([...v.possible ?? [v.value], "pending and blocks merge"])
+  ].sort(),
+  settle: []
+});
+function derivedBadge(name2, producers, skipped) {
   const computed = badge(name2, producers, skipped);
   const producer = match(producers, name2);
-  if (producer?.via === "remote" && producer.job.value === "runs")
+  const caller = producer?.via === "remote" ? producers.find(
+    (p) => p.via === "remote" && prefixed(p, name2) && p.job.value === "runs"
+  ) : void 0;
+  if (caller)
     return {
       value: "uncertain",
       causes: [
-        { rule: "WN-6", spans: [producer.uses], inputs: [] },
-        ...producer.job.causes
+        { rule: "WN-6", spans: [caller.uses], inputs: [] },
+        ...caller.job.causes
       ],
       settle: []
     };
@@ -16594,20 +16610,10 @@ function named(name2, producers, skipped) {
       causes: [computed.causes[0], cause3("RQ-9"), ...computed.causes.slice(1)]
     };
   if (producer?.via === "matrix")
-    return {
-      value: "uncertain",
-      causes: [
-        cause3("RQ-9", [{ path: "repo.required", value: name2 }]),
-        ...computed.causes
-      ],
-      possible: [
-        .../* @__PURE__ */ new Set([
-          ...computed.possible ?? [computed.value],
-          "pending and blocks merge"
-        ])
-      ].sort(),
-      settle: []
-    };
+    return orUnreported(
+      computed,
+      cause3("RQ-9", [{ path: "repo.required", value: name2 }])
+    );
   return computed;
 }
 function badge(name2, producers, skipped) {
@@ -16621,32 +16627,37 @@ function badge(name2, producers, skipped) {
     (p) => p.via !== "remote" && p.name?.toLowerCase() === name2.toLowerCase()
   );
   const matched = exact.length > 0 ? exact : cased.length > 0 ? cased : producers.filter((p) => prefixed(p, name2));
-  const jobs = /* @__PURE__ */ new Map();
-  for (const p of matched)
-    jobs.set(p.job.key, [...jobs.get(p.job.key) ?? [], p]);
-  if (jobs.size === 0) {
-    const unknown = producers.find((p) => p.needed !== void 0);
-    if (!unknown) return pending(cause3("RQ-0", [typed]));
+  const byJob = (ps) => {
+    const jobs2 = /* @__PURE__ */ new Map();
+    for (const p of ps)
+      jobs2.set(p.job.key, [...jobs2.get(p.job.key) ?? [], p]);
+    return [...jobs2.values()];
+  };
+  const jobs = byJob(matched);
+  if (jobs.length === 0) {
+    const unknown = byJob(
+      producers.filter((p) => p.needed !== void 0 && reports(p))
+    ).map((stages) => stages[0]);
+    if (unknown.length === 0) return pending(cause3("RQ-0", [typed]));
     return {
       value: "uncertain",
       causes: [
         {
           rule: "WN-4",
-          spans: unknown.spans?.name ? [unknown.spans.name] : [],
+          spans: unknown.flatMap((p) => p.spans?.name ? [p.spans.name] : []),
           inputs: []
         },
         cause3("RQ-0", [typed])
       ],
-      settle: settleable(unknown.needed) ? [unknown.needed] : []
+      settle: [...new Set(unknown.map((p) => p.needed))].filter(settleable)
     };
   }
-  const badges = [...jobs.values()].map((stages) => {
-    const all = stages.map((p) => stage(p, pending, skipped));
-    const reported = all.filter((b) => b.causes[0]?.rule !== skipped.rule);
-    return (reported.length > 0 ? reported : all).reduce(
+  const live = jobs.map((stages) => stages.filter(reports)).filter((stages) => stages.length > 0);
+  const badges = (live.length > 0 ? live : jobs.slice(0, 1)).map(
+    (stages) => stages.map((p) => producerBadge(p, pending, skipped)).reduce(
       (a, b) => RANK.indexOf(b.value) < RANK.indexOf(a.value) ? b : a
-    );
-  });
+    )
+  );
   const ids = (ps) => ps.flatMap((p) => p.spans ? [p.spans.id] : []);
   const values = [...new Set(badges.map((b) => b.value))].sort();
   if (badges.length > 1)
@@ -16655,7 +16666,7 @@ function badge(name2, producers, skipped) {
       causes: [
         {
           rule: "RQ-0",
-          spans: [...jobs.values()].flatMap((ps) => ids(ps.slice(0, 1))),
+          spans: live.flatMap((ps) => ids(ps.slice(0, 1))),
           inputs: [typed]
         }
       ],
@@ -16664,22 +16675,13 @@ function badge(name2, producers, skipped) {
     };
   const result = badges[0];
   if (exact.length > 0 || cased.length === 0) return result;
-  return {
-    value: "uncertain",
-    causes: [
-      { rule: "RQ-0", spans: ids(matched.slice(0, 1)), inputs: [typed] },
-      ...result.causes
-    ],
-    possible: [
-      .../* @__PURE__ */ new Set([
-        ...result.possible ?? [result.value],
-        "pending and blocks merge"
-      ])
-    ].sort(),
-    settle: []
-  };
+  return orUnreported(result, {
+    rule: "RQ-0",
+    spans: ids(matched.slice(0, 1)),
+    inputs: [typed]
+  });
 }
-function stage({ job, workflow, spans }, pending, skipped) {
+function producerBadge({ job, workflow, spans }, pending, skipped) {
   if (job.value === "runs")
     return { value: "passes", causes: [cause3("RQ-4"), ...job.causes] };
   if (job.value === "fails") {
@@ -16699,7 +16701,8 @@ function stage({ job, workflow, spans }, pending, skipped) {
   if (job.value === "skipped")
     return job.causes[0]?.rule === "JG-3" ? { value: "passes", causes: [cause3("RQ-2"), ...job.causes] } : { value: "may not block", causes: [cause3("RQ-3"), ...job.causes] };
   if (job.value === "no-run") {
-    if (workflow.value === "skipped") return pending(skipped, ...job.causes);
+    if (workflow.value === "skipped")
+      return pending(...skipped(workflow), ...job.causes);
     if (workflow.value === "pending") return pending(...job.causes);
     if (workflow.value === "fails")
       return {
@@ -16717,21 +16720,24 @@ function stage({ job, workflow, spans }, pending, skipped) {
 
 // src/core/names.ts
 var isMatrix = (job) => job.strategy !== void 0 && (!isMapping(job.strategy) || job.strategy.find("matrix") !== void 0);
-function namesOf(file, files) {
+function namesOf(file, files, nameOf2) {
   const called2 = new Map(calls(file).map((c) => [c.job.id.value, c]));
   return file.jobs.flatMap((job) => {
     const id = job.id.value;
-    const name2 = checkName(job);
+    const caller = nameOf2(job);
     const call = called2.get(id);
-    if (!call) return [{ id, name: name2, ...isMatrix(job) && { via: "matrix" } }];
+    if (!call)
+      return [{ id, ...caller, ...isMatrix(job) && { via: "matrix" } }];
     if (call.path === void 0)
-      return [{ id, name: name2, via: "remote", uses: call.span }];
+      return [{ id, ...caller, via: "remote", uses: call.span }];
     const callee = files.get(calleeKey(call.path) ?? "");
     return (callee?.jobs ?? []).map((inner) => {
-      const own = checkName(inner);
+      const own = nameOf2(inner);
+      const needed = caller.needed ?? own.needed;
       return {
         id: `${id}/${inner.id.value}`,
-        name: name2 === void 0 || own === void 0 ? void 0 : `${name2} / ${own}`,
+        name: caller.name === void 0 || own.name === void 0 ? void 0 : `${caller.name} / ${own.name}`,
+        ...needed !== void 0 && { needed },
         via: isMatrix(inner) ? "matrix" : "callee"
       };
     });
@@ -16889,7 +16895,7 @@ var rows = [
     id: "PA-4",
     text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
-    confidence: "High"
+    confidence: "Med"
   },
   {
     id: "PA-5",
@@ -17195,7 +17201,7 @@ var rows = [
     id: "RQ-9",
     text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
+    confidence: "Med"
   },
   {
     id: "RQ-10",
@@ -17256,6 +17262,7 @@ function utf8Length(text) {
   return bytes;
 }
 var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
+var isJobKey = (key) => key.split(" \u203A ").length === 2 && !isCheck(key);
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
@@ -17338,7 +17345,7 @@ function simulate(files, input) {
   };
 }
 function unmatched(scenario, verdicts) {
-  const jobs = verdicts.map((v) => v.key.split(" \u203A ")).filter((parts) => parts.length === 2 && parts[0] !== "check");
+  const jobs = verdicts.filter((v) => isJobKey(v.key)).map((v) => v.key.split(" \u203A "));
   return Object.keys(scenario.assume ?? {}).flatMap((key) => {
     const [file, id] = key.split(" \u203A ");
     if (jobs.some(([f, j]) => f === file && j === id)) return [];
@@ -17369,27 +17376,31 @@ function evaluate2(parsed, scenario) {
       queued.push(...unread);
     }
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
-    const run = (s) => bytes > MAX_BYTES ? {
-      key,
-      value: "skipped",
-      causes: [{ rule: "PL-9", spans: [], inputs: [] }]
-    } : {
-      key,
-      ...called(
-        policy(
-          awaiting(trigger(file, s.event, repo.defaultBranch), s.event),
-          s
-        ),
-        file,
-        files
-      )
+    const run = (s, merging = false) => {
+      if (bytes > MAX_BYTES)
+        return {
+          key,
+          value: "skipped",
+          causes: [{ rule: "PL-9", spans: [], inputs: [] }]
+        };
+      const triggered = trigger(file, s.event, repo.defaultBranch);
+      return {
+        key,
+        ...called(
+          merging ? triggered : policy(awaiting(triggered, s.event), s),
+          file,
+          files
+        )
+      };
     };
     const workflow = run(scenario);
-    const stage2 = (workflow2, scenario2) => {
+    const callees = calls(file).flatMap(({ job, path }) => {
+      const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
+      return callee ? [{ job, callee }] : [];
+    });
+    const jobsWithCallees = (workflow2, scenario2) => {
       const jobs2 = jobVerdicts(`${key} \u203A `, file, workflow2, scenario2);
-      for (const { job, path } of calls(file)) {
-        const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
-        if (!callee) continue;
+      for (const { job, callee } of callees) {
         const caller = jobs2.find((v) => v.key === `${key} \u203A ${job.id.value}`);
         jobs2.push(
           ...jobVerdicts(
@@ -17403,49 +17414,41 @@ function evaluate2(parsed, scenario) {
       }
       return jobs2;
     };
-    const producing = (s, jobs2, workflow2, note = []) => namesOf(file, files).map((named2) => {
-      const v = jobs2.find((v2) => v2.key === `${key} \u203A ${named2.id}`);
-      const own = file.jobs.find((j) => j.id.value === named2.id);
-      return {
-        ...named2,
-        ...own && nameOf(own, s),
-        job: { ...v, causes: [...note, ...v.causes] },
-        workflow: workflow2,
-        spans: file.jobSpans.get(named2.id)
-      };
-    });
-    const jobs = stage2(workflow, scenario);
+    const producing = (s, jobs2, workflow2, note = []) => (
+      // Each `name:`, a caller's too, is evaluated against the Scenario (WN-4).
+      namesOf(file, files, (job) => nameOf(job, s)).map((named) => {
+        const v = jobs2.find((v2) => v2.key === `${key} \u203A ${named.id}`);
+        return {
+          ...named,
+          job: { ...v, causes: [...note, ...v.causes] },
+          workflow: workflow2,
+          spans: file.jobSpans.get(named.id)
+        };
+      })
+    );
+    const jobs = jobsWithCallees(workflow, scenario);
     producers.push(...producing(scenario, jobs, workflow));
     if (pushed) {
       const w = run(pushed);
-      producers.push(...producing(pushed, stage2(w, pushed), w, [pa4]));
+      producers.push(
+        ...producing(pushed, jobsWithCallees(w, pushed), w, [pa4])
+      );
     }
     if (queue) {
-      const grouped = bytes > MAX_BYTES ? workflow : {
-        key,
-        ...called(
-          trigger(file, queue.event, repo.defaultBranch),
-          file,
-          files
-        )
-      };
-      queued.push(...producing(queue, stage2(grouped, queue), grouped));
+      const w = run(queue, true);
+      queued.push(...producing(queue, jobsWithCallees(w, queue), w));
     }
     verdicts.push(
       workflow,
       ...jobs,
-      ...accessVerdicts(`${key} \u203A `, file, scenario)
-    );
-    for (const { job, path } of calls(file)) {
-      const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
-      if (!callee) continue;
-      verdicts.push(
-        ...accessVerdicts(`${key} \u203A ${job.id.value}/`, callee, scenario, {
+      ...accessVerdicts(`${key} \u203A `, file, scenario),
+      ...callees.flatMap(
+        ({ job, callee }) => accessVerdicts(`${key} \u203A ${job.id.value}/`, callee, scenario, {
           parsed: file,
           job
         })
-      );
-    }
+      )
+    );
   }
   verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;

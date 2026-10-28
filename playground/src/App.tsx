@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  isJobKey,
   isLoaded,
   producedChecks,
   setScenarioValue,
@@ -96,12 +97,6 @@ function diagnosticNews(
       : [`· ${basename(path)} Diagnostics cleared`];
   });
 }
-
-/** A job key is `<file> › <jobId>`; a required check's `check › <name>` isn't, as no file is named check. */
-const isJob = (key: string) => {
-  const parts = key.split(" › ");
-  return parts.length === 2 && parts[0] !== "check";
-};
 
 /** A nested payload's leaves as `[path segments, value]`; a list is one leaf. */
 function leaves(node: unknown, at: string[] = []): [string[], unknown][] {
@@ -592,7 +587,7 @@ export function App() {
   );
   // The jobs the form's Scenario could assume to fail.
   const unassumed = (runs[form] ?? [])
-    .filter((v) => isJob(v.key) && !Object.hasOwn(assume, v.key))
+    .filter((v) => isJobKey(v.key) && !Object.hasOwn(assume, v.key))
     .map((v) => v.key);
 
   // Addendum C: a Scenario is blocked by a missing date, else by being unsupported.
@@ -634,7 +629,7 @@ export function App() {
       onRequireProduced={() => {
         // Ordinary Repo facts: the button stores nothing about itself (#9 §4).
         const required = scenario.repo.required ?? [];
-        const { names, left } = producedChecks(files);
+        const { names, left } = producedChecks(files, scenario);
         const added = names.filter((n) => !required.includes(n));
         setInput(["repo", "required"], [...required, ...added]);
         setToast({ id: Date.now(), node: producedNews(added.length, left) });
@@ -713,7 +708,7 @@ export function App() {
           <li
             key={v.key}
             className={
-              isJob(v.key) ? "job" : isAccess(v.key) ? "access" : undefined
+              isJobKey(v.key) ? "job" : isAccess(v.key) ? "access" : undefined
             }
           >
             <button
@@ -1076,7 +1071,7 @@ export function App() {
               <ul className="assumptions">
                 {Object.entries(assume).map(([key, value]) => (
                   <li key={key}>
-                    {isJob(key) ? (
+                    {isJobKey(key) ? (
                       <>
                         job <code>{key}</code> {value}
                       </>

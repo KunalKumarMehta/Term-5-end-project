@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import type { ProducedChecks, Verdict } from "../../src/core";
+import { isCheck, type ProducedChecks, type Verdict } from "../../src/core";
 import { Value, same, type Column } from "./Grid";
 
 const count = (n: number, one: string, many = `${one}s`) =>
@@ -121,8 +121,6 @@ export function RequiredChecks({
     </div>
   );
 }
-
-const isCheck = (key: string) => key.startsWith("check › ");
 
 /** The Merge readiness tab (#9 §1): one row per `check › <name>`, each Scenario a column. */
 export function MergeReadiness({

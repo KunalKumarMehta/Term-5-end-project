@@ -145,7 +145,7 @@ const rows: Rule[] = [
     id: "PA-4",
     text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
-    confidence: "High",
+    confidence: "Med",
   },
   {
     id: "PA-5",
@@ -451,7 +451,7 @@ const rows: Rule[] = [
     id: "RQ-9",
     text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High",
+    confidence: "Med",
   },
   {
     id: "RQ-10",

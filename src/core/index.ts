@@ -1,5 +1,11 @@
 import { accessVerdicts } from "./access";
-import { checkVerdicts, nameOf, unreadable, type Producer } from "./checks";
+import {
+  checkVerdicts,
+  isCheck,
+  nameOf,
+  unreadable,
+  type Producer,
+} from "./checks";
 import { jobVerdicts } from "./jobs";
 import { namesOf } from "./names";
 import {
@@ -26,6 +32,7 @@ import {
 import { filterDiagnostics, trigger } from "./triggers";
 
 export { isAccess } from "./access";
+export { isCheck } from "./checks";
 export { PLATFORM_BASELINE } from "./baseline";
 export type { Diagnostic, Span } from "./parser";
 export { RULES, type Rule } from "./rules";
@@ -105,6 +112,10 @@ const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 
 /** Whether GitHub reads the file at this path: a `.yml`/`.yaml` file directly in `.github/workflows/`. */
 export const isLoaded = (path: string): boolean => loaded.test(path);
+
+/** Whether a Verdict key is a job's `<file> › <jobId>`; `check › <name>` has two segments too. */
+export const isJobKey = (key: string): boolean =>
+  key.split(" › ").length === 2 && !isCheck(key);
 
 /**
  * Simulates the Workflow set for the Scenario. Pure, synchronous and deterministic.
@@ -234,9 +245,13 @@ export interface ProducedChecks {
 
 /**
  * "Require every produced check" (#9 §4): the check names every job of every GitHub workflow
- * produces, whatever the Event.
+ * produces, whatever the Event, each `name:` evaluated against the Scenario.
  */
-export function producedChecks(files: WorkflowFile[]): ProducedChecks {
+export function producedChecks(
+  files: WorkflowFile[],
+  input: Scenario,
+): ProducedChecks {
+  const { scenario } = withDefaults(input);
   const parsed = new Map(
     files.flatMap((file) => {
       const key = loaded.exec(file.path)?.[1];
@@ -249,8 +264,9 @@ export function producedChecks(files: WorkflowFile[]): ProducedChecks {
   const left = { matrix: 0, remote: 0, expression: 0 };
   for (const file of parsed.values()) {
     if (calleeOnly(file)) continue;
-    for (const { name, via } of namesOf(file, parsed))
-      // shortcut: every `name:` expression is left out until #72 evaluates them (WN-4).
+    for (const { name, via } of namesOf(file, parsed, (job) =>
+      nameOf(job, scenario),
+    ))
       if (via === "remote" || via === "matrix") left[via]++;
       else if (name === undefined) left.expression++;
       else names.add(name);
@@ -264,9 +280,8 @@ function unmatched(
   verdicts: Verdict[],
 ): UnmatchedAssumption[] {
   const jobs = verdicts
-    .map((v) => v.key.split(" › "))
-    // A required check's key, `check › <name>`, has two segments too; no file is named check.
-    .filter((parts) => parts.length === 2 && parts[0] !== "check");
+    .filter((v) => isJobKey(v.key))
+    .map((v) => v.key.split(" › "));
   return Object.keys(scenario.assume ?? {}).flatMap((key) => {
     const [file, id] = key.split(" › ");
     if (jobs.some(([f, j]) => f === file && j === id)) return [];
@@ -318,33 +333,35 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
     // A file GitHub would reject gets no Verdicts; a callee's jobs appear under its callers.
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
     // PL-9: GitHub starts no runs from it, but it isn't a Diagnostic, so its keys stay (ADR 0001).
-    const run = (s: Scenario): Verdict =>
-      bytes > MAX_BYTES
-        ? {
-            key,
-            value: "skipped",
-            causes: [{ rule: "PL-9", spans: [], inputs: [] }],
-          }
-        : {
-            key,
-            ...called(
-              policy(
-                awaiting(trigger(file, s.event, repo.defaultBranch!), s.event),
-                s,
-              ),
-              file,
-              files,
-            ),
-          };
+    // A merge group has no fork or pull_request_target policy to apply.
+    const run = (s: Scenario, merging = false): Verdict => {
+      if (bytes > MAX_BYTES)
+        return {
+          key,
+          value: "skipped",
+          causes: [{ rule: "PL-9", spans: [], inputs: [] }],
+        };
+      const triggered = trigger(file, s.event, repo.defaultBranch!);
+      return {
+        key,
+        ...called(
+          merging ? triggered : policy(awaiting(triggered, s.event), s),
+          file,
+          files,
+        ),
+      };
+    };
     const workflow = run(scenario);
-    // The file's jobs, then a local callee's, one level deep, under the caller job that ran
-    // them (#6).
-    const stage = (workflow: Verdict, scenario: Scenario) => {
+    // The local callees, one level deep, each with the caller job that runs it (#6).
+    const callees = calls(file).flatMap(({ job, path }) => {
+      const callee =
+        path === undefined ? undefined : files.get(calleeKey(path)!);
+      return callee ? [{ job, callee }] : [];
+    });
+    // The file's jobs, then each local callee's under the caller job that ran them.
+    const jobsWithCallees = (workflow: Verdict, scenario: Scenario) => {
       const jobs = jobVerdicts(`${key} › `, file, workflow, scenario);
-      for (const { job, path } of calls(file)) {
-        const callee =
-          path === undefined ? undefined : files.get(calleeKey(path)!);
-        if (!callee) continue;
+      for (const { job, callee } of callees) {
         const caller = jobs.find((v) => v.key === `${key} › ${job.id.value}`)!;
         jobs.push(
           ...jobVerdicts(
@@ -364,54 +381,39 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
       workflow: Verdict,
       note: Cause[] = [],
     ): Producer[] =>
-      namesOf(file, files).map((named) => {
+      // Each `name:`, a caller's too, is evaluated against the Scenario (WN-4).
+      namesOf(file, files, (job) => nameOf(job, s)).map((named) => {
         const v = jobs.find((v) => v.key === `${key} › ${named.id}`)!;
-        // A file's own job's `name:` is evaluated against the Scenario (WN-4).
-        const own = file.jobs.find((j) => j.id.value === named.id);
         return {
           ...named,
-          ...(own && nameOf(own, s)),
           job: { ...v, causes: [...note, ...v.causes] },
           workflow,
           spans: file.jobSpans.get(named.id),
         };
       });
-    const jobs = stage(workflow, scenario);
+    const jobs = jobsWithCallees(workflow, scenario);
     producers.push(...producing(scenario, jobs, workflow));
     if (pushed) {
       const w = run(pushed);
-      producers.push(...producing(pushed, stage(w, pushed), w, [pa4]));
+      producers.push(
+        ...producing(pushed, jobsWithCallees(w, pushed), w, [pa4]),
+      );
     }
     if (queue) {
-      const grouped: Verdict =
-        bytes > MAX_BYTES
-          ? workflow
-          : {
-              key,
-              ...called(
-                trigger(file, queue.event, repo.defaultBranch!),
-                file,
-                files,
-              ),
-            };
-      queued.push(...producing(queue, stage(grouped, queue), grouped));
+      const w = run(queue, true);
+      queued.push(...producing(queue, jobsWithCallees(w, queue), w));
     }
     verdicts.push(
       workflow,
       ...jobs,
       ...accessVerdicts(`${key} › `, file, scenario),
-    );
-    for (const { job, path } of calls(file)) {
-      const callee =
-        path === undefined ? undefined : files.get(calleeKey(path)!);
-      if (!callee) continue;
-      verdicts.push(
-        ...accessVerdicts(`${key} › ${job.id.value}/`, callee, scenario, {
+      ...callees.flatMap(({ job, callee }) =>
+        accessVerdicts(`${key} › ${job.id.value}/`, callee, scenario, {
           parsed: file,
           job,
         }),
-      );
-    }
+      ),
+    );
   }
   verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;
