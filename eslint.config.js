@@ -10,6 +10,7 @@ export default defineConfig([
     "playground/dist/",
     "test-results/",
     "playwright-report/",
+    "src/core/generated/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,

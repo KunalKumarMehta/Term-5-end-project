@@ -1,17 +1,103 @@
+import { parseWorkflowFile, type Span } from "./parser";
+import { validateScenario, withDefaults, type Scenario } from "./scenario";
+
+export { PLATFORM_BASELINE } from "./baseline";
+export type { Span } from "./parser";
+export { RULES, type Rule } from "./rules";
+export {
+  SHOW_DEFAULTS,
+  setScenarioValue,
+  validateScenario,
+  withDefaults,
+} from "./scenario";
+export type * from "./scenario";
+
 export interface WorkflowFile {
+  /** Path from the repo root, such as `.github/workflows/ci.yml`. */
   path: string;
   text: string;
 }
 
+export interface Cause {
+  /** One rule ID from the rule catalogue. */
+  rule: string;
+  /** The YAML the cause rests on. */
+  spans: Span[];
+  /** The Scenario inputs it used. */
+  inputs: { path: string; value: unknown }[];
+}
+
+export interface Verdict {
+  /** The outcome-independent subject key (ADR 0001). */
+  key: string;
+  value: string;
+  /** The Explanation, ordered from the root cause. */
+  causes: Cause[];
+  /** Only on an `uncertain` Verdict, and only when there are at most 3 outcomes. */
+  possible?: string[];
+  /** Only on an `uncertain` Verdict: the input paths that would decide it. */
+  settle?: string[];
+}
+
 export interface SimulationResult {
-  verdicts: unknown[];
+  verdicts: Verdict[];
   diagnostics: unknown[];
 }
 
-// Stub: the real simulate() arrives with core flow 1.
+const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
+
+/**
+ * Simulates the Workflow set for the Scenario. Pure, synchronous and deterministic.
+ * Throws a TypeError when the Scenario doesn't match its schema.
+ */
 export function simulate(
-  _files: WorkflowFile[],
-  _scenario: object,
+  files: WorkflowFile[],
+  input: Scenario,
 ): SimulationResult {
-  return { verdicts: [], diagnostics: [] };
+  const problems = validateScenario(input);
+  if (problems.length > 0) throw new TypeError(problems.join("; "));
+  const { event } = withDefaults(input).scenario;
+
+  // Until later tickets support them, every Event but a member's push is outside the model.
+  if (event.name !== "push" || event.actor !== "member") {
+    const inputs = [
+      { path: "event.name", value: event.name },
+      { path: "event.actor", value: event.actor },
+    ];
+    return {
+      verdicts: [
+        {
+          key: "event",
+          value: "unsupported",
+          causes: [{ rule: "WN-3", spans: [], inputs }],
+        },
+      ],
+      diagnostics: [],
+    };
+  }
+
+  const verdicts: Verdict[] = [];
+  for (const file of files) {
+    const key = loaded.exec(file.path)?.[1];
+    if (key === undefined) continue;
+    const parsed = parseWorkflowFile(file.path, file.text);
+    // A file GitHub would reject gets no Verdicts; its Diagnostics land with #54.
+    if (!parsed.ok) continue;
+    const listed = Object.hasOwn(parsed.events, event.name);
+    const span = listed ? parsed.onEntries.get(event.name) : parsed.onSpan;
+    verdicts.push({
+      key,
+      value: listed ? "runs" : "skipped",
+      causes: [
+        {
+          rule: "EV-0",
+          spans: span ? [span] : [],
+          inputs: [{ path: "event.name", value: event.name }],
+        },
+      ],
+    });
+  }
+  // Code-unit order, so the result never depends on the host's locale.
+  verdicts.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { verdicts, diagnostics: [] };
 }

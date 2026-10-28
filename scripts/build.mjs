@@ -16,6 +16,10 @@ const { metafile } = await build({
   format: "esm",
   target: "node22",
   define: { __VERSION__: JSON.stringify(version) },
+  // yaml's Node entry is CommonJS and calls require("process"), which ESM output lacks.
+  banner: {
+    js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);',
+  },
   metafile: true,
 });
 
