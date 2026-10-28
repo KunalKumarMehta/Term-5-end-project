@@ -55,9 +55,12 @@ export function sourceOf(
   path: string,
 ): "assumed" | "set" | undefined {
   const [group, field] = path.split(".");
-  if (group !== "repo" || !FACTS.some((f) => f.field === field))
-    return undefined;
-  return Object.hasOwn(scenario.repo, field!) ? "set" : "assumed";
+  if (group !== "repo") return undefined;
+  const set = Object.hasOwn(scenario.repo, field!);
+  // owner/repo has no default: unset, it is simply not given.
+  if (field === "repository") return set ? "set" : undefined;
+  if (!FACTS.some((f) => f.field === field)) return undefined;
+  return set ? "set" : "assumed";
 }
 
 /** The Repo facts fields after the simulation date, each with its source tag. */

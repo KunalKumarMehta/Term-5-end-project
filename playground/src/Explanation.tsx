@@ -1,11 +1,51 @@
-import { Fragment, useEffect, useRef, type ReactNode, type Ref } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   RULES,
+  validateScenario,
   type Cause,
+  type SettleHint,
   type Span,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
+
+export const OWNER_REPO_ERROR = "Use the form owner/repo, e.g. acme/app";
+
+/** #12 addendum B: the Scenario schema's owner/repo check, wherever owner/repo is entered. */
+export const isOwnerRepo = (value: string) =>
+  validateScenario({
+    event: { name: "push" },
+    repo: { date: "2000-01-01", repository: value },
+  }).length === 0;
+
+/** A settle value as an expression would write it: `'true'`, `false`, `['a', 'b']`. */
+export const literal = (value: unknown): string =>
+  typeof value === "string"
+    ? `'${value}'`
+    : Array.isArray(value)
+      ? `[${value.map(literal).join(", ")}]`
+      : typeof value === "object" && value !== null
+        ? JSON.stringify(value)
+        : String(value);
+
+/** #12 §6: free text read for its path, so it is never invalid (owner/repo aside). */
+function parse(path: string, text: string): unknown {
+  if (!path.startsWith("github.event.")) return text;
+  if (path.includes(".*.")) return text.split("\n").filter((l) => l !== "");
+  if (text === "true" || text === "false") return text === "true";
+  if (text === "null") return null;
+  return text.trim() !== "" && Number.isFinite(Number(text))
+    ? Number(text)
+    : text;
+}
 
 /** Renders `code` spans in the core's prose as code, and everything else as text. */
 export function prose(text: string): ReactNode {
@@ -25,12 +65,14 @@ const FIELDS: Record<string, { id: string; label: string }> = {
   "event.base": { id: "event-base", label: "Base branch" },
   "event.changed": { id: "event-changed", label: "Changed files" },
   "event.message": { id: "event-message", label: "Head commit message" },
+  "event.login": { id: "event-login", label: "Actor login" },
   "repo.date": { id: "sim-date", label: "Simulation date" },
   "repo.visibility": { id: "repo-visibility", label: "Visibility" },
   "repo.predates": { id: "repo-predates", label: "Created before 2026-09-17" },
   "repo.defaultBranch": { id: "repo-default-branch", label: "Default branch" },
   "repo.tokenDefault": { id: "repo-token-default", label: "Token default" },
   "repo.eventPolicy": { id: "repo-event-policy", label: "Event policy" },
+  "repo.repository": { id: "repo-repository", label: "owner/repo" },
 };
 
 /** A span's last line, leaving out a line the span only reaches at its first column. */
@@ -178,6 +220,122 @@ function Excerpt({
   );
 }
 
+/** Stores a settle path's value in the Scenario the Verdict belongs to. */
+export type OnSettle = (path: string, value: unknown) => void;
+
+/** #9 §7: the box at the end of an Uncertain Verdict's Explanation. */
+function SettleIt({
+  verdict,
+  onSettle,
+}: {
+  verdict: Verdict;
+  onSettle: OnSettle;
+}) {
+  const settle = verdict.settle ?? [];
+  const root = verdict.causes[0]?.rule;
+  return (
+    <section className="settle" aria-label="Settle it">
+      <h3>Settle it</h3>
+      {settle.length === 0 ? (
+        <p>
+          Nothing you can enter decides this:{" "}
+          {root === "WN-4"
+            ? "the value exists only at run time."
+            : `a gap in GitHub's docs (${root}).`}
+        </p>
+      ) : (
+        <ul>
+          {settle.map((path) => (
+            <SettlePath
+              key={path}
+              path={path}
+              hint={verdict.hints?.find((h) => h.path === path)}
+              onSettle={onSettle}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function SettlePath({
+  path,
+  hint,
+  onSettle,
+}: {
+  path: string;
+  hint: SettleHint | undefined;
+  onSettle: OnSettle;
+}) {
+  const id = useId();
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string>();
+  const list = path.includes(".*.");
+  const repository = path === "repo.repository";
+  // A candidate owner/repo literal that fails the check gets no button (#12 addendum B).
+  const candidates = (hint?.candidates ?? []).filter(
+    (c) => !repository || (typeof c === "string" && isOwnerRepo(c)),
+  );
+  const submit = () => {
+    if (repository && !isOwnerRepo(text)) return setError(OWNER_REPO_ERROR);
+    setError(undefined);
+    onSettle(path, parse(path, text));
+  };
+  const field = {
+    id,
+    value: text,
+    "aria-invalid": error !== undefined,
+    "aria-describedby": `${id}-error`,
+  };
+  return (
+    <li>
+      <p>
+        <code>{path}</code>
+        {hint && <>: {prose(hint.text)}</>}
+      </p>
+      <div className="row">
+        {candidates.map((c) => (
+          <button
+            key={literal(c)}
+            type="button"
+            onClick={() => onSettle(path, list ? [c] : c)}
+          >
+            {literal(c)}
+          </button>
+        ))}
+      </div>
+      <label htmlFor={id}>
+        {list ? "Values, one per line" : "Another value"}
+      </label>
+      <div className="row">
+        {list ? (
+          <textarea
+            {...field}
+            rows={2}
+            onChange={(e) => setText(e.target.value)}
+          />
+        ) : (
+          <input
+            {...field}
+            onChange={(e) => {
+              setText(e.target.value);
+              setError(undefined);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+        )}
+        <button type="button" onClick={submit}>
+          Settle
+        </button>
+      </div>
+      <p id={`${id}-error`} className="error" role="alert">
+        {error}
+      </p>
+    </li>
+  );
+}
+
 /**
  * The Explanation panel; a full-screen sheet on narrow screens (#12 §10). It shows the
  * open Verdict as the latest run gives it, so it updates after any re-simulation.
@@ -189,6 +347,7 @@ export function Explanation({
   onClose,
   sheet,
   onScroll,
+  onSettle,
   ...links
 }: {
   subject: string;
@@ -198,6 +357,7 @@ export function Explanation({
   onClose: () => void;
   sheet: Ref<HTMLElement>;
   onScroll: (top: number) => void;
+  onSettle: OnSettle;
 } & CauseLinks) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), [subject, scenario]);
@@ -220,7 +380,12 @@ export function Explanation({
         </button>
       </div>
       {verdict ? (
-        <Causes causes={verdict.causes} {...links} />
+        <>
+          <Causes causes={verdict.causes} {...links} />
+          {verdict.value === "uncertain" && (
+            <SettleIt verdict={verdict} onSettle={onSettle} />
+          )}
+        </>
       ) : (
         <p>The latest results have no Verdict for this subject.</p>
       )}

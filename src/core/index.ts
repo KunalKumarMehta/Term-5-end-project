@@ -15,6 +15,7 @@ export { RULES, type Rule } from "./rules";
 export {
   SHOW_DEFAULTS,
   setScenarioValue,
+  settleValue,
   validateScenario,
   withDefaults,
 } from "./scenario";
@@ -45,6 +46,16 @@ export interface Verdict {
   possible?: string[];
   /** Only on an `uncertain` Verdict: the input paths that would decide it. */
   settle?: string[];
+  /** Beside a non-empty `settle`, one per path in its order, for the Settle it box. */
+  hints?: SettleHint[];
+}
+
+export interface SettleHint {
+  path: string;
+  /** Where the value comes from, such as "output `src` of `dorny/paths-filter` in job `changes`". */
+  text: string;
+  /** The literals the expression compares the path with: the one-click values. */
+  candidates: unknown[];
 }
 
 /** An Assumption whose key matches no subject: "assumed subject not found". */

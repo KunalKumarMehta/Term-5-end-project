@@ -12,6 +12,7 @@ import {
   RULES,
   isLoaded,
   setScenarioValue,
+  settleValue,
   simulate,
   type ActorKind,
   type Diagnostic,
@@ -27,7 +28,10 @@ import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
 import {
   Causes,
   Explanation,
+  OWNER_REPO_ERROR,
   basename,
+  isOwnerRepo,
+  literal,
   prose,
   type CauseLinks,
 } from "./Explanation";
@@ -93,6 +97,25 @@ function diagnosticNews(
 /** A job key is `<file> › <jobId>`. */
 const isJob = (key: string) => key.split(" › ").length === 2;
 
+/** A nested payload's leaves as `[path segments, value]`; a list is one leaf. */
+function leaves(node: unknown, at: string[] = []): [string[], unknown][] {
+  return typeof node === "object" && node !== null && !Array.isArray(node)
+    ? Object.entries(node).flatMap(([k, v]) => leaves(v, [...at, k]))
+    : [[at, node]];
+}
+
+/** A copy of the Scenario without the field at `path`, leaving empty parents behind. */
+function unset(scenario: Scenario, path: string[]): Scenario {
+  const copy = JSON.parse(JSON.stringify(scenario)) as Record<string, unknown>;
+  let node: Record<string, unknown> | undefined = copy;
+  for (const seg of path.slice(0, -1))
+    node = Object.hasOwn(node ?? {}, seg)
+      ? (node![seg] as Record<string, unknown>)
+      : undefined;
+  if (node) delete node[path.at(-1)!];
+  return copy as unknown as Scenario;
+}
+
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [origin, setOrigin] = useState<"example" | "pasted" | "uploaded">();
@@ -107,6 +130,8 @@ export function App() {
   // The Scenario the form shows, and the last label it refused (#12 §6).
   const [form, setForm] = useState(0);
   const [labelError, setLabelError] = useState<string>();
+  // An owner/repo the check refused, shown while the Scenario keeps its last value (addendum B).
+  const [repoDraft, setRepoDraft] = useState<string>();
   const [diffOnly, setDiffOnly] = useState(false);
   // The results tab (#9 §1); Merge readiness and Concurrency arrive with their tickets.
   const [tab, setTab] = useState<"access" | "all">("all");
@@ -441,7 +466,7 @@ export function App() {
 
   /** Sets an optional Event field; emptied, it is unset so its default applies. */
   const setEventField = (
-    field: "type" | "ref" | "base" | "message",
+    field: "type" | "ref" | "base" | "message" | "login",
     value: string,
   ) =>
     setScenario((s) => {
@@ -464,7 +489,39 @@ export function App() {
     setLabels((ls) => (on ? [ls[0]!, "Scenario 2"] : [ls[0]!]));
     setForm(on ? 1 : 0);
     setLabelError(undefined);
+    setRepoDraft(undefined);
     if (open?.i === 1) setOpen(undefined);
+  };
+
+  /** Checks owner/repo as typed; a refused value changes nothing, an empty one unsets it. */
+  const setRepository = (value: string) => {
+    if (value !== "" && !isOwnerRepo(value)) return setRepoDraft(value);
+    setRepoDraft(undefined);
+    setScenario((s) =>
+      value === ""
+        ? unset(s, ["repo", "repository"])
+        : setScenarioValue(s, ["repo", "repository"], value),
+    );
+  };
+
+  /** #9 §7: settles a value in Scenario `i` only, which then re-simulates. */
+  const settle = (i: number, path: string, value: unknown) => {
+    setScenarios((ss) =>
+      ss.map((s, j) => (j === i ? settleValue(s, path, value) : s)),
+    );
+    if (i === 0) setTouched(true);
+    setToast({
+      id: Date.now(),
+      node: (
+        <>
+          Settled{" "}
+          <code>
+            {path} = {literal(value)}
+          </code>{" "}
+          in {labels[i]}
+        </>
+      ),
+    });
   };
 
   /** #12 §6: labels stay unique, and a cleared one becomes "Scenario N". Returns the label kept. */
@@ -481,13 +538,7 @@ export function App() {
 
   // Assumptions, keyed by job key ("job X fails").
   const assume = scenario.assume ?? {};
-  const removeAssumption = (key: string) =>
-    setScenario((s) => ({
-      ...s,
-      assume: Object.fromEntries(
-        Object.entries(s.assume ?? {}).filter(([k]) => k !== key),
-      ),
-    }));
+  const remove = (path: string[]) => setScenario((s) => unset(s, path));
 
   const linksFor = (i: number): CauseLinks => ({
     files,
@@ -723,6 +774,7 @@ export function App() {
                 onClick={() => {
                   setForm(i);
                   setLabelError(undefined);
+                  setRepoDraft(undefined);
                 }}
               >
                 {l}
@@ -836,6 +888,30 @@ export function App() {
               value={scenario.event.message ?? ""}
               onChange={(e) => setEventField("message", e.target.value)}
             />
+            <label htmlFor="event-login">
+              Actor login <span className="optional">(optional)</span>
+            </label>
+            <input
+              id="event-login"
+              aria-describedby="event-login-hint"
+              value={scenario.event.login ?? ""}
+              onChange={(e) => setEventField("login", e.target.value)}
+            />
+            <p id="event-login-hint" className="hint">
+              Matters only when a GitHub workflow compares{" "}
+              <code>github.actor</code> with a literal
+            </p>
+            <Entries
+              label="Event payload values"
+              entries={leaves(scenario.event.payload ?? {}).map(
+                ([path, value]) => [
+                  ["event", "payload", ...path],
+                  `github.event.${path.join(".")}`,
+                  value,
+                ],
+              )}
+              remove={remove}
+            />
           </fieldset>
           <fieldset>
             <legend>Repo facts</legend>
@@ -863,6 +939,39 @@ export function App() {
               </button>
             </div>
             <RepoFacts scenario={scenario} onChange={setRepoFact} />
+            <label htmlFor="repo-repository">
+              <code>owner/repo</code>{" "}
+              <span className="optional">(optional)</span>
+              {scenario.repo.repository !== undefined && (
+                <span className="source-tag set"> set</span>
+              )}
+            </label>
+            <input
+              id="repo-repository"
+              spellCheck={false}
+              value={repoDraft ?? scenario.repo.repository ?? ""}
+              aria-invalid={repoDraft !== undefined}
+              aria-describedby="repo-repository-hint repo-repository-error"
+              onChange={(e) => setRepository(e.target.value)}
+            />
+            <p id="repo-repository-hint" className="hint">
+              Matters only when a GitHub workflow compares{" "}
+              <code>github.repository</code> with a literal
+            </p>
+            <p id="repo-repository-error" className="error" role="alert">
+              {repoDraft !== undefined && OWNER_REPO_ERROR}
+            </p>
+            <Entries
+              label="Repository variables"
+              entries={Object.entries(scenario.repo.vars ?? {}).map(
+                ([name, value]) => [
+                  ["repo", "vars", name],
+                  `vars.${name}`,
+                  value,
+                ],
+              )}
+              remove={remove}
+            />
           </fieldset>
           <fieldset>
             <legend>Assumptions</legend>
@@ -872,11 +981,20 @@ export function App() {
               <ul className="assumptions">
                 {Object.entries(assume).map(([key, value]) => (
                   <li key={key}>
-                    job <code>{key}</code> {value}{" "}
+                    {isJob(key) ? (
+                      <>
+                        job <code>{key}</code> {value}
+                      </>
+                    ) : (
+                      // A job output, keyed by the producing job (#8 §5).
+                      <code>
+                        {key} = {literal(value)}
+                      </code>
+                    )}{" "}
                     <button
                       type="button"
                       aria-label={`Remove ${key} ${value}`}
-                      onClick={() => removeAssumption(key)}
+                      onClick={() => remove(["assume", key])}
                     >
                       Remove
                     </button>
@@ -963,6 +1081,7 @@ export function App() {
                 onClose={() => closeExplanation(open)}
                 sheet={sheet}
                 onScroll={(top) => (sheetScroll.current = top)}
+                onSettle={(path, value) => settle(open.i, path, value)}
                 {...linksFor(open.i)}
               />
             )}
@@ -1024,6 +1143,38 @@ export function App() {
         toastRegion,
       )}
     </>
+  );
+}
+
+/** Stored `path = value` entries in the section #8 §5 puts them in; nothing when there are none. */
+function Entries({
+  label,
+  entries,
+  remove,
+}: {
+  label: string;
+  /** Each entry's Scenario path, its settle path and its value. */
+  entries: [string[], string, unknown][];
+  remove: (path: string[]) => void;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <ul className="assumptions" aria-label={label}>
+      {entries.map(([at, path, value]) => (
+        <li key={path}>
+          <code>
+            {path} = {literal(value)}
+          </code>{" "}
+          <button
+            type="button"
+            aria-label={`Remove ${path}`}
+            onClick={() => remove(at)}
+          >
+            Remove
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

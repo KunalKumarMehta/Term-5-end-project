@@ -1,6 +1,23 @@
 // The one adapter over @actions/workflow-parser and @actions/expressions (pinned to 0.3.61).
 // Diff their .d.ts files on every upgrade: the API shifts between minor releases.
-import { Evaluator, Lexer, Parser, data } from "@actions/expressions";
+import {
+  Evaluator,
+  Lexer,
+  Parser,
+  data,
+  type Expr,
+} from "@actions/expressions";
+import {
+  Binary,
+  ContextAccess,
+  FunctionCall,
+  Grouping,
+  IndexAccess,
+  Literal,
+  Logical,
+  Star,
+  Unary,
+} from "@actions/expressions/ast";
 import type { FunctionDefinition } from "@actions/expressions/funcs/info";
 import { truthy } from "@actions/expressions/result";
 import {
@@ -320,8 +337,110 @@ function name(doc: Document, node: unknown): string | undefined {
     : undefined;
 }
 
-/** Thrown by stubs for values that exist only at run time, such as hashFiles(). */
-export class RuntimeValueNeeded extends Error {}
+/** Thrown when an expression reads a value the resolver says the Scenario lacks. */
+export class RuntimeValueNeeded extends Error {
+  constructor(
+    /** What the resolver named the missing value. */
+    readonly needed: string,
+    /** The literals the expression compares the read path with, in order. */
+    readonly compared: unknown[] = [],
+  ) {
+    super(needed);
+  }
+}
+
+/**
+ * Answers a read of a context path (one segment per key, `*` for a star): its value, that
+ * the Scenario lacks it, or undefined to read the contexts as given. `compared` gives the
+ * literals the expression compares the path with.
+ */
+export type Resolve = (
+  path: string[],
+  compared: () => unknown[],
+) => { value: unknown } | { needed: string } | undefined;
+
+/** The context path an expression reads, when it is one: `a.b`, `a['b']` and `a.*.b`. */
+function pathOf(e: Expr): string[] | undefined {
+  if (e instanceof ContextAccess) return [e.name.lexeme];
+  if (!(e instanceof IndexAccess)) return undefined;
+  const base = pathOf(e.expr);
+  if (!base) return undefined;
+  if (e.index instanceof Star) return [...base, "*"];
+  if (e.index instanceof Literal && e.index.literal instanceof data.StringData)
+    return [...base, e.index.literal.value];
+  return undefined;
+}
+
+const samePath = (a: string[] | undefined, b: string[]) =>
+  a !== undefined &&
+  a.length === b.length &&
+  a.every((s, i) => s.toLowerCase() === b[i]!.toLowerCase());
+
+const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">="]);
+
+const plain = (d: data.ExpressionData): unknown =>
+  d instanceof data.Null
+    ? null
+    : "value" in d
+      ? (d as { value: unknown }).value
+      : undefined;
+
+/** The literals `root` compares `path` with, through an operator or a function's arguments. */
+function comparedWith(root: Expr, path: string[]): unknown[] {
+  const found: unknown[] = [];
+  const visit = (e: Expr) => {
+    let pair: Expr[] = [];
+    if (e instanceof Binary) {
+      if (COMPARISONS.has(e.operator.lexeme)) pair = [e.left, e.right];
+      visit(e.left);
+      visit(e.right);
+    } else if (e instanceof FunctionCall) {
+      pair = e.args;
+      e.args.forEach(visit);
+    } else if (e instanceof Logical) e.args.forEach(visit);
+    else if (e instanceof Unary) visit(e.expr);
+    else if (e instanceof Grouping) visit(e.group);
+    if (pair.some((p) => samePath(pathOf(p), path)))
+      for (const p of pair)
+        if (p instanceof Literal) found.push(plain(p.literal));
+  };
+  visit(root);
+  return [...new Set(found)];
+}
+
+const toData = (value: unknown): data.ExpressionData =>
+  JSON.parse(
+    JSON.stringify(value ?? null),
+    data.reviver,
+  ) as data.ExpressionData;
+
+// Reads context paths through the resolver first: it knows which values the Scenario lacks,
+// and reads user-keyed maps with Object.hasOwn, which the library's Dictionary doesn't.
+class Reader extends Evaluator {
+  constructor(
+    private readonly root: Expr,
+    context: data.Dictionary,
+    functions: Map<string, FunctionDefinition>,
+    private readonly resolve: Resolve,
+  ) {
+    super(root, context, functions);
+  }
+  private read(e: Expr): data.ExpressionData | undefined {
+    const path = pathOf(e);
+    if (!path) return undefined;
+    const compared = () => comparedWith(this.root, path);
+    const got = this.resolve(path, compared);
+    if (!got) return undefined;
+    if ("needed" in got) throw new RuntimeValueNeeded(got.needed, compared());
+    return toData(got.value);
+  }
+  override visitContextAccess(e: ContextAccess): data.ExpressionData {
+    return this.read(e) ?? super.visitContextAccess(e);
+  }
+  override visitIndexAccess(e: IndexAccess): data.ExpressionData {
+    return this.read(e) ?? super.visitIndexAccess(e);
+  }
+}
 
 /** What a job's status functions return, worked out from its `needs`. */
 export interface Status {
@@ -338,9 +457,6 @@ const stubs = (status: Status): FunctionDefinition[] => [
   stub("always", 0, () => new data.BooleanData(true)),
   stub("failure", 0, () => new data.BooleanData(status.failure)),
   stub("cancelled", 0, () => new data.BooleanData(false)),
-  stub("hashFiles", 1, () => {
-    throw new RuntimeValueNeeded("hashFiles()");
-  }),
 ];
 
 function stub(
@@ -356,6 +472,7 @@ export function evaluateCondition(
   source: string,
   contexts: Record<string, unknown>,
   status: Status,
+  resolve: Resolve = () => undefined,
 ): boolean {
   const funcs = stubs(status);
   const { tokens } = new Lexer(source).lex();
@@ -365,11 +482,12 @@ export function evaluateCondition(
     data.reviver,
   ) as data.Dictionary;
   return truthy(
-    new Evaluator(
+    new Reader(
       expr,
       dict,
       // The Evaluator looks functions up by lower-cased name.
       new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
+      resolve,
     ).evaluate(),
   );
 }

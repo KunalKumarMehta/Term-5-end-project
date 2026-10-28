@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import {
   RULES,
+  settleValue,
   simulate as coreSimulate,
   withDefaults,
   type Event,
+  type Scenario,
   type Verdict,
 } from "./index";
 
@@ -1489,6 +1491,337 @@ test("a uses: caller job gets no access keys until reusable workflows land", () 
     push,
   );
   expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › call"]);
+});
+
+// A member's pull_request touching src: ci.yml runs, and e2e reads the changes job's output.
+const memberPr = {
+  event: {
+    name: "pull_request",
+    ref: "feature",
+    base: "main",
+    changed: ["src/app.ts"],
+  },
+  repo: { date },
+};
+
+test("on the example, ci.yml › e2e waits on dorny/paths-filter's output: Uncertain [runs, skipped], root WN-4 at its if:, settled by the changes job's output", () => {
+  const e2e = byKey(simulate(example, memberPr).verdicts, "ci.yml › e2e")!;
+  expect(e2e).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: ["ci.yml › changes › outputs.src"],
+    hints: [
+      {
+        path: "ci.yml › changes › outputs.src",
+        text: "output `src` of `dorny/paths-filter` in job `changes`",
+        candidates: ["true"],
+      },
+    ],
+  });
+  expect(e2e.causes[0]).toMatchObject({
+    rule: "WN-4",
+    spans: [{ path: ".github/workflows/ci.yml", line: 55 }],
+  });
+
+  const settled = (value: string) =>
+    byKey(
+      simulate(example, {
+        ...memberPr,
+        assume: { "ci.yml › changes › outputs.src": value },
+      }).verdicts,
+      "ci.yml › e2e",
+    )!;
+  expect(settled("true")).toEqual({
+    key: "ci.yml › e2e",
+    value: "runs",
+    causes: [expect.objectContaining({ rule: "WN-2" })],
+  });
+  expect(settled("false")).toMatchObject({ value: "skipped" });
+  expect(chainOf([settled("false")], "ci.yml › e2e")).toEqual([["JG-3", 55]]);
+});
+
+// gate: id 3, if 4 · after: id 8, needs 9 · report: id 13, needs 14, if 15 · both: id 19, needs 20, if 21
+const gated = wf(
+  "ci.yml",
+  "on: push\njobs:\n" +
+    job("gate", "    if: vars.DEPLOY == 'yes'\n") +
+    job("after", "    needs: gate\n") +
+    job("report", "    needs: gate\n    if: always()\n") +
+    job(
+      "both",
+      "    needs: [gate, after]\n    if: always() && (vars.DEPLOY == 'yes' || vars.FORCE == 'yes')\n",
+    ),
+);
+
+test("uncertainty spreads only as far as it must: a needs dependent stays Uncertain, an if: always() dependent runs (JG-1), and settle is the union in needs order", () => {
+  const { verdicts } = simulate([gated], push);
+  expect(byKey(verdicts, "ci.yml › gate")).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: ["vars.DEPLOY"],
+    hints: [
+      {
+        path: "vars.DEPLOY",
+        text: "repository variable `DEPLOY`",
+        candidates: ["yes"],
+      },
+    ],
+  });
+  expect(byKey(verdicts, "ci.yml › after")).toMatchObject({
+    value: "uncertain",
+    settle: ["vars.DEPLOY"],
+  });
+  expect(chainOf(verdicts, "ci.yml › after")).toEqual([
+    ["WN-4", 4],
+    ["JG-1", 9],
+  ]);
+  // Runs whichever way gate goes: decided, its own root first, gate's cause kept.
+  expect(byKey(verdicts, "ci.yml › report")).toMatchObject({ value: "runs" });
+  expect(byKey(verdicts, "ci.yml › report")).not.toHaveProperty("settle");
+  expect(chainOf(verdicts, "ci.yml › report")).toEqual([
+    ["JG-1", 15],
+    ["WN-4", 4],
+    ["WN-2", 13],
+  ]);
+  expect(byKey(verdicts, "ci.yml › both")).toMatchObject({
+    value: "uncertain",
+    settle: ["vars.DEPLOY", "vars.FORCE"],
+  });
+  expect(byKey(verdicts, "ci.yml › both")!.causes[0]!.rule).toBe("WN-4");
+
+  // A repository variable settles it, matched as GitHub does, ignoring case.
+  const set = simulate([gated], {
+    ...push,
+    repo: { date, vars: { deploy: "yes" } },
+  }).verdicts;
+  for (const id of ["gate", "after", "report", "both"])
+    expect(byKey(set, `ci.yml › ${id}`)).toMatchObject({ value: "runs" });
+});
+
+test.each([
+  [
+    "&& stops at a false left side",
+    "github.event_name == 'pull_request' && vars.X == 'y'",
+    "skipped",
+  ],
+  [
+    "|| stops at a true left side",
+    "github.event_name == 'push' || vars.X == 'y'",
+    "runs",
+  ],
+  ["both branches give the same value", "vars.X == 'y' || true", "runs"],
+])(
+  "an expression whose outcome never depends on the missing value is decided: %s",
+  (_, condition, value) => {
+    const { verdicts } = simulate(
+      [wf("ci.yml", `on: push\njobs:\n${job("a", `    if: ${condition}\n`)}`)],
+      push,
+    );
+    expect(byKey(verdicts, "ci.yml › a")).toMatchObject({ value });
+    expect(byKey(verdicts, "ci.yml › a")).not.toHaveProperty("possible");
+  },
+);
+
+test("two jobs comparing one variable with different literals are both Uncertain, each offering its own literal", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        "on: push\njobs:\n" +
+          job("a", "    if: vars.ENV == 'staging'\n") +
+          job("b", "    if: vars.ENV == 'prod'\n"),
+      ),
+    ],
+    push,
+  );
+  expect(byKey(verdicts, "ci.yml › a")).toMatchObject({
+    value: "uncertain",
+    hints: [{ candidates: ["staging", "prod"] }],
+  });
+  expect(byKey(verdicts, "ci.yml › b")).toMatchObject({ value: "uncertain" });
+});
+
+// One job per condition, on a member's pull_request.
+const reading = (conditions: Record<string, string>) =>
+  wf(
+    "pr.yml",
+    "on: pull_request\njobs:\n" +
+      Object.entries(conditions)
+        .map(([id, condition]) => job(id, `    if: ${condition}\n`))
+        .join(""),
+  );
+const pr = { event: { name: "pull_request" }, repo: { date } };
+const github = reading({
+  repo: "github.repository == 'acme/app'",
+  owner: "github.repository_owner == 'acme'",
+  actor: "github.actor == 'octocat'",
+  labels: "contains(github.event.pull_request.labels.*.name, 'safe to test')",
+  draft: "github.event.pull_request.draft == false",
+  fork: "github.event.pull_request.head.repo.fork == false",
+  base: "github.base_ref == 'main' && github.event_name == 'pull_request'",
+  workflow: "github.workflow == 'CI'",
+});
+
+test("github.* read from the Event: worked-out fields decide, repository, actor and payload values settle, and other github.* fields exist only at run time", () => {
+  const { verdicts } = simulate([github], pr);
+  const uncertain = (id: string) => byKey(verdicts, `pr.yml › ${id}`)!;
+  expect(uncertain("repo")).toMatchObject({
+    value: "uncertain",
+    settle: ["repo.repository"],
+    // The owner job's literal too: the Settle it box offers only valid owner/repo values.
+    hints: [{ candidates: ["acme/app", "acme"] }],
+  });
+  expect(uncertain("owner")).toMatchObject({ settle: ["repo.repository"] });
+  expect(uncertain("actor")).toMatchObject({
+    value: "uncertain",
+    settle: ["event.login"],
+    hints: [{ candidates: ["octocat"] }],
+  });
+  expect(uncertain("labels")).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: ["github.event.pull_request.labels.*.name"],
+    hints: [
+      {
+        text: "`github.event.pull_request.labels.*.name` on the Event",
+        candidates: ["safe to test"],
+      },
+    ],
+  });
+  expect(uncertain("draft")).toMatchObject({
+    settle: ["github.event.pull_request.draft"],
+    hints: [{ candidates: [false] }],
+  });
+  for (const id of ["fork", "base"])
+    expect(uncertain(id)).toMatchObject({ value: "runs" });
+  expect(uncertain("workflow")).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: [],
+  });
+  expect(uncertain("workflow").causes[0]).toMatchObject({
+    rule: "WN-4",
+    spans: [{ line: 39 }],
+  });
+  expect(uncertain("workflow")).not.toHaveProperty("hints");
+
+  const settled = simulate([github], {
+    event: {
+      name: "pull_request",
+      login: "octocat",
+      payload: { pull_request: { draft: false, labels: [{ name: "x" }] } },
+    },
+    repo: { date, repository: "acme/app" },
+  }).verdicts;
+  expect(
+    ["repo", "owner", "actor", "labels", "draft"].map(
+      (id) => byKey(settled, `pr.yml › ${id}`)!.value,
+    ),
+  ).toEqual(["runs", "runs", "runs", "skipped", "runs"]);
+  // A push has no pull_request, so its fields are empty, not Uncertain.
+  expect(
+    byKey(
+      simulate(
+        [
+          wf(
+            "ci.yml",
+            `on: push\njobs:\n${job("a", "    if: github.event.pull_request.draft\n")}`,
+          ),
+        ],
+        push,
+      ).verdicts,
+      "ci.yml › a",
+    ),
+  ).toMatchObject({ value: "skipped" });
+});
+
+test("settleValue stores each path where it belongs, a .*.<field> path as a list, and refuses paths no Scenario input holds", () => {
+  const base = { event: { name: "pull_request" }, repo: { date } };
+  const s = [
+    ["github.event.pull_request.labels.*.name", ["safe to test", "docs"]],
+    ["github.event.pull_request.draft", false],
+    ["vars.DEPLOY", "yes"],
+    ["ci.yml › changes › outputs.src", "true"],
+    ["repo.repository", "acme/app"],
+    ["event.login", "octocat"],
+  ].reduce<Scenario>(
+    (acc, [path, value]) => settleValue(acc, path as string, value),
+    base,
+  );
+  expect(s).toEqual({
+    event: {
+      name: "pull_request",
+      login: "octocat",
+      payload: {
+        pull_request: {
+          labels: [{ name: "safe to test" }, { name: "docs" }],
+          draft: false,
+        },
+      },
+    },
+    repo: { date, vars: { DEPLOY: "yes" }, repository: "acme/app" },
+    assume: { "ci.yml › changes › outputs.src": "true" },
+  });
+  expect(
+    byKey(simulate([github], s).verdicts, "pr.yml › labels"),
+  ).toMatchObject({ value: "runs" });
+  // On the Follow-up event, for the Verdicts that read run B's Event.
+  expect(
+    settleValue(
+      { ...base, followUp: { name: "pull_request" } },
+      "github.event.pull_request.draft",
+      true,
+      "followUp",
+    ).followUp,
+  ).toEqual({
+    name: "pull_request",
+    payload: { pull_request: { draft: true } },
+  });
+
+  for (const [path, reason] of [
+    ["matrix.os", /matrix/],
+    ["steps.filter.outputs.src", /steps/],
+    ["hashFiles('**/package-lock.json')", /run time/],
+    ["github.event_name", /set it on the Event/],
+    ["github.ref", /set it on the Event/],
+    ["github.event.action", /set it on the Event/],
+    ["github.event.pull_request.head.sha", /set it on the Event/],
+    ["github.event.pull_request.head", /set it on the Event/],
+    ["github.event.head_commit.message", /set it on the Event/],
+    ["github.workflow", /run time/],
+    ["github.event.__proto__.x", /refused/],
+    ["vars.__proto__.x", /refused/],
+  ] as const)
+    expect(() => settleValue(base, path, "x"), path).toThrow(reason);
+});
+
+test("prototype pollution (#14 §6.7): vars.CONSTRUCTOR, vars.__proto__ and the payload path __proto__.x are ordinary user keys, and nothing reaches Object.prototype", () => {
+  const files = [
+    reading({
+      ctor: "vars.CONSTRUCTOR == 'a'",
+      proto: "vars.__proto__ == 'b'",
+      payload: "github.event.__proto__.x == 'c'",
+    }),
+  ];
+  const unset = simulate(files, pr).verdicts;
+  expect(
+    ["ctor", "proto", "payload"].map((id) => byKey(unset, `pr.yml › ${id}`)),
+  ).toMatchObject([
+    { value: "uncertain", settle: ["vars.CONSTRUCTOR"] },
+    { value: "uncertain", settle: ["vars.__proto__"] },
+    { value: "uncertain", settle: ["github.event.__proto__.x"] },
+  ]);
+
+  // As a link, draft or Test file would bring them in: JSON, where __proto__ is an own key.
+  const scenario = JSON.parse(
+    `{"event":{"name":"pull_request","payload":{"__proto__":{"x":"c"}}},
+      "repo":{"date":"${date}","vars":{"CONSTRUCTOR":"a","__proto__":"b"}}}`,
+  ) as Scenario;
+  const set = simulate(files, scenario).verdicts;
+  for (const id of ["ctor", "proto", "payload"])
+    expect(byKey(set, `pr.yml › ${id}`)).toMatchObject({ value: "runs" });
+  expect(({} as Record<string, unknown>).x).toBeUndefined();
+  expect(Object.getPrototypeOf({})).toBe(Object.prototype);
 });
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {

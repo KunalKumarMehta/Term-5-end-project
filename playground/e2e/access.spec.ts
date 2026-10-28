@@ -61,13 +61,13 @@ test("the ci.yml › test card shows the job's run Verdict in its header and col
   ).toHaveText("ci.yml › test runs");
 });
 
-test("every job with steps has a card, and a skipped job's card shows its skip with its access", async ({
+test("every job with steps has a card, and an Uncertain job's card shows its possible outcomes with its access", async ({
   page,
 }) => {
   await expect(results(page).getByRole("region")).toHaveText([
     /^ci\.yml › build/,
     /^ci\.yml › changes/,
-    /^ci\.yml › e2e skipped/,
+    /^ci\.yml › e2e uncertain \(runs, skipped\)/,
     /^ci\.yml › test/,
     /^deploy\.yml › deploy no-run/,
     /^triage\.yml › triage no-run/,

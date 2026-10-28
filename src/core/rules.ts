@@ -250,6 +250,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "WN-4",
+    text: "Needs a run-time value the Scenario lacks, such as a step's output, which WhyNoRun never works out: supplying the value settles it, unless the value exists only at run time.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High",
+  },
+  {
     id: "WN-5",
     text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
