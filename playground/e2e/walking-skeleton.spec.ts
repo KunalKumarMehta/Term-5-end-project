@@ -150,7 +150,8 @@ test("an unsupported event shows the Unsupported panel, its inputs linked to the
   page,
 }) => {
   await paste(page, CI);
-  await page.getByLabel("Event name").fill("pull_request");
+  // A fork contributor pushing is an impossible combination (#6).
+  await page.getByLabel("Event name").fill("push");
   await page.getByLabel("Actor kind").selectOption("fork");
   await page.getByLabel("Simulation date").fill("2026-12-03");
 
@@ -160,7 +161,7 @@ test("an unsupported event shows the Unsupported panel, its inputs linked to the
   );
   await panel.getByRole("link", { name: "Actor kind = fork" }).click();
   await expect(page.getByLabel("Actor kind")).toBeFocused();
-  await panel.getByRole("link", { name: "Event name = pull_request" }).click();
+  await panel.getByRole("link", { name: "Event name = push" }).click();
   await expect(page.getByLabel("Event name")).toBeFocused();
 });
 

@@ -538,6 +538,7 @@ export function App() {
 
   // Assumptions, keyed by job key ("job X fails").
   const assume = scenario.assume ?? {};
+  const approvalSource = sourceOf(scenario, "event.approval");
   const remove = (path: string[]) => setScenario((s) => unset(s, path));
 
   const linksFor = (i: number): CauseLinks => ({
@@ -849,6 +850,34 @@ export function App() {
               <option value="fork">Fork contributor</option>
               <option value="dependabot">dependabot[bot]</option>
             </select>
+            {scenario.event.actor === "fork" && (
+              // #9 §6: only a fork contributor's run waits for approval.
+              <>
+                <label htmlFor="event-approval">
+                  Approval{" "}
+                  {/* aria-hidden: the field reads it as its description, not in its name. */}
+                  <span
+                    id="event-approval-source"
+                    className={`source-tag ${approvalSource}`}
+                    aria-hidden
+                  >
+                    {approvalSource}
+                  </span>
+                </label>
+                <select
+                  id="event-approval"
+                  className={approvalSource}
+                  aria-describedby="event-approval-source"
+                  value={scenario.event.approval ?? "approved"}
+                  onChange={(e) =>
+                    setInput(["event", "approval"], e.target.value)
+                  }
+                >
+                  <option value="approved">approved</option>
+                  <option value="awaiting">awaiting</option>
+                </select>
+              </>
+            )}
             <label htmlFor="event-ref">Ref</label>
             <input
               id="event-ref"

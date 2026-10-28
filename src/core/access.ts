@@ -1,5 +1,5 @@
 // Access keys (#6, ADR 0001): every job with steps gets its 17 token scopes and its secrets,
-// computed as if the job runs (PERM-1, PERM-3..5, PERM-8, FK-0, PL-16).
+// computed as if the job runs (PERM-1..6, PERM-8, FK-0, FK-2, FK-8, PL-16).
 import type { Cause, Verdict } from "./index";
 import type { ParsedWorkflow, Permissions, Span } from "./parser";
 import type { Scenario } from "./scenario";
@@ -84,6 +84,46 @@ function scope(
   return { value: "none", causes: [cause("PERM-3", block.span)] };
 }
 
+/**
+ * A fork's or Dependabot's run on top of the resolved level (PERM-2, PERM-6, PERM-8, FK-8).
+ * The actor's rule is the root where it changes the level, and Dependabot's is always cited.
+ */
+function byActor(
+  name: string,
+  access: Access,
+  blocked: boolean,
+  actor: string,
+): Access {
+  if (actor === "member") return access;
+  const inputs = [{ path: "event.actor", value: actor }];
+  const fk8 = actor === "dependabot" ? [cause("FK-8", undefined, inputs)] : [];
+  // GitHub doesn't document what these get, so nothing can settle it.
+  if (access.value === "write" && WRITE_OR_NONE.has(name))
+    return {
+      value: "uncertain",
+      causes: [cause("PERM-8", undefined, inputs), ...access.causes, ...fk8],
+      possible: ["none", "write"],
+      settle: [],
+    };
+  if (access.value !== "write")
+    return { ...access, causes: [...access.causes, ...fk8] };
+  // Dependabot starts read-only, but its `permissions:` can raise it (FK-8).
+  if (actor === "dependabot")
+    return blocked
+      ? { ...access, causes: [...access.causes, ...fk8] }
+      : { value: "read", causes: [...fk8, ...access.causes] };
+  // A fork's pull_request: every write becomes read, even one its block asks for.
+  const root = access.causes[0]!;
+  return {
+    value: "read",
+    causes: [
+      { rule: "PERM-2", spans: root.spans, inputs },
+      ...(blocked ? [cause("PERM-6")] : []),
+      ...access.causes,
+    ],
+  };
+}
+
 /** The access Verdicts of a loaded GitHub workflow's jobs with steps. */
 export function accessVerdicts(
   file: string,
@@ -91,6 +131,7 @@ export function accessVerdicts(
   scenario: Scenario,
 ): Verdict[] {
   const tokenDefault = scenario.repo.tokenDefault!;
+  const actor = scenario.event.actor!;
   return parsed.jobs.flatMap((job) => {
     // shortcut: `uses:` callers get their callee's access with #66 (reusable workflows).
     if (job.type !== "job") return [];
@@ -102,23 +143,38 @@ export function accessVerdicts(
       own && parsed.permissions
         ? [cause("PERM-4", parsed.permissions.span)]
         : [];
+    const block = own ?? parsed.permissions;
     const tokens = SCOPES.map((name) => {
-      const access = scope(name, own ?? parsed.permissions, tokenDefault);
+      const access = scope(name, block, tokenDefault);
       return {
         key: `${key} › token.${name}`,
-        ...access,
-        causes: [...access.causes, ...replaced],
+        ...byActor(
+          name,
+          { ...access, causes: [...access.causes, ...replaced] },
+          block !== undefined,
+          actor,
+        ),
       };
     });
+    const actorInput = [{ path: "event.actor", value: actor }];
     const secrets: Verdict = {
       key: `${key} › secrets`,
-      value: "available",
-      causes: [
-        cause("FK-0", undefined, [
-          { path: "event.actor", value: scenario.event.actor },
-        ]),
-        ...(spans?.environment ? [cause("PL-16", spans.environment)] : []),
-      ],
+      ...(actor === "fork"
+        ? { value: "empty", causes: [cause("FK-2", undefined, actorInput)] }
+        : actor === "dependabot"
+          ? {
+              value: "dependabot-only",
+              causes: [cause("FK-8", undefined, actorInput)],
+            }
+          : {
+              value: "available",
+              causes: [
+                cause("FK-0", undefined, actorInput),
+                ...(spans?.environment
+                  ? [cause("PL-16", spans.environment)]
+                  : []),
+              ],
+            }),
     };
     return [...tokens, secrets];
   });

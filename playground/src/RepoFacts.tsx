@@ -49,11 +49,16 @@ const FACTS: {
   },
 ];
 
-/** #9 §6: a Repo fact is *assumed* while unset, so its default applies, and set once changed. */
+/**
+ * #9 §6: a Repo fact, or a fork contributor's Approval, is *assumed* while unset, so its
+ * default applies, and set once changed.
+ */
 export function sourceOf(
   scenario: Scenario,
   path: string,
 ): "assumed" | "set" | undefined {
+  if (path === "event.approval")
+    return Object.hasOwn(scenario.event, "approval") ? "set" : "assumed";
   const [group, field] = path.split(".");
   if (group !== "repo") return undefined;
   const set = Object.hasOwn(scenario.repo, field!);

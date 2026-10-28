@@ -124,12 +124,19 @@ export function simulate(
       (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col,
     );
 
-  // Until later tickets support them, every Event but a member's push or pull_request
-  // is outside the model.
-  if (!SUPPORTED.has(event.name) || event.actor !== "member") {
+  // Events outside v1 (and those later tickets add), and the impossible combinations (#6):
+  // a fork contributor pushing, and a private repo with a fork contributor (WN-3).
+  const fork = event.actor === "fork";
+  const privateFork = fork && scenario.repo.visibility === "private";
+  if (
+    !SUPPORTED.has(event.name) ||
+    (fork && event.name === "push") ||
+    privateFork
+  ) {
     const inputs = [
       { path: "event.name", value: event.name },
       { path: "event.actor", value: event.actor },
+      ...(privateFork ? [{ path: "repo.visibility", value: "private" }] : []),
     ];
     return {
       verdicts: [
@@ -223,7 +230,10 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
             value: "skipped",
             causes: [{ rule: "PL-9", spans: [], inputs: [] }],
           }
-        : { key, ...trigger(file, event, repo.defaultBranch!) };
+        : {
+            key,
+            ...awaiting(trigger(file, event, repo.defaultBranch!), event),
+          };
     verdicts.push(
       workflow,
       ...jobVerdicts(key, file, workflow, scenario),
@@ -231,6 +241,35 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
     );
   }
   return verdicts;
+}
+
+/**
+ * A fork contributor's `pull_request` awaiting approval: a run GitHub would create is
+ * `pending` (root FK-4, then PL-5), so its jobs are `no-run` (#8 §2).
+ */
+function awaiting(
+  verdict: Omit<Verdict, "key">,
+  event: Scenario["event"],
+): Omit<Verdict, "key"> {
+  if (event.actor !== "fork" || event.approval !== "awaiting") return verdict;
+  if (verdict.value !== "runs" && !verdict.possible?.includes("runs"))
+    return verdict;
+  const causes = [
+    {
+      rule: "FK-4",
+      spans: [],
+      inputs: [{ path: "event.approval", value: "awaiting" }],
+    },
+    { rule: "PL-5", spans: [], inputs: [] },
+    ...verdict.causes,
+  ];
+  if (verdict.value === "runs") return { value: "pending", causes };
+  // An uncertain run stays uncertain, with pending in place of runs.
+  return {
+    ...verdict,
+    causes,
+    possible: verdict.possible!.map((p) => (p === "runs" ? "pending" : p)),
+  };
 }
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

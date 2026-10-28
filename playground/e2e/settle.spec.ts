@@ -31,8 +31,6 @@ test("settling the example's ci.yml › e2e in Scenario 1 makes it run there, wh
   page,
 }) => {
   await results(page).getByRole("button", { name: "Load example" }).click();
-  // Fork contributors arrive with #64, so a member's pull_request.
-  await page.getByLabel("Actor kind").selectOption("member");
   await page.getByRole("banner").getByLabel("Compare").check();
   await expect(row(page, "ci.yml › e2e").getByRole("cell")).toHaveText([
     "",
