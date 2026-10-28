@@ -23,6 +23,8 @@ const FIELDS: Record<string, { id: string; label: string }> = {
   "event.actor": { id: "event-actor", label: "Actor kind" },
   "event.ref": { id: "event-ref", label: "Ref" },
   "event.base": { id: "event-base", label: "Base branch" },
+  "event.changed": { id: "event-changed", label: "Changed files" },
+  "event.message": { id: "event-message", label: "Head commit message" },
   "repo.date": { id: "sim-date", label: "Simulation date" },
 };
 

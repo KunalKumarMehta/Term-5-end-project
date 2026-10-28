@@ -146,14 +146,19 @@ export function App() {
         return;
       }
       const dated = scenario.repo.date !== "";
+      // The Changed files field keeps the blank line being typed; simulate() gets only paths.
+      const changed = scenario.event.changed;
+      let input = changed
+        ? setScenarioValue(
+            scenario,
+            ["event", "changed"],
+            changed.filter((path) => path !== ""),
+          )
+        : scenario;
+      if (!dated) input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
       let result;
       try {
-        result = simulate(
-          files,
-          dated
-            ? scenario
-            : setScenarioValue(scenario, ["repo", "date"], ANY_DATE),
-        );
+        result = simulate(files, input);
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
         last.current.failed = true;
@@ -401,7 +406,10 @@ export function App() {
   };
 
   /** Sets an optional Event field; emptied, it is unset so its default applies. */
-  const setEventField = (field: "type" | "ref" | "base", value: string) => {
+  const setEventField = (
+    field: "type" | "ref" | "base" | "message",
+    value: string,
+  ) => {
     setScenario((s) => {
       const event = { ...s.event, [field]: value };
       if (value === "") delete event[field];
@@ -646,6 +654,27 @@ export function App() {
               placeholder="the default branch"
               value={scenario.event.base ?? ""}
               onChange={(e) => setEventField("base", e.target.value)}
+            />
+            <label htmlFor="event-changed">Changed files</label>
+            <textarea
+              id="event-changed"
+              rows={3}
+              spellCheck={false}
+              aria-describedby="event-changed-hint"
+              value={(scenario.event.changed ?? []).join("\n")}
+              onChange={(e) =>
+                setInput(["event", "changed"], e.target.value.split("\n"))
+              }
+            />
+            <p id="event-changed-hint" className="hint">
+              One path per line, taken as the complete diff
+            </p>
+            <label htmlFor="event-message">Head commit message</label>
+            <textarea
+              id="event-message"
+              rows={2}
+              value={scenario.event.message ?? ""}
+              onChange={(e) => setEventField("message", e.target.value)}
             />
           </fieldset>
           <fieldset>

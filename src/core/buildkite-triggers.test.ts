@@ -191,6 +191,106 @@ test.each<[string, string, Event, string]>([
     { name: "push", ref: "release/a/b" },
     "skipped",
   ],
+  // Changed-file cases (#59).
+  [
+    "pull request paths: ordered re-inclusion",
+    "pull_request:\n    paths: ['**', '!docs/**', 'docs/required/**']",
+    {
+      name: "pull_request",
+      base: "main",
+      type: "opened",
+      changed: ["docs/readme.md", "src/main.go"],
+    },
+    "runs",
+  ],
+  [
+    "pull request paths-ignore runs for one unignored path",
+    "pull_request:\n    paths-ignore: ['docs/**']",
+    {
+      name: "pull_request",
+      base: "main",
+      type: "opened",
+      changed: ["docs/readme.md", "src/main.go"],
+    },
+    "runs",
+  ],
+  [
+    "nonmatching pull request paths",
+    "pull_request:\n    paths: ['web/**']",
+    {
+      name: "pull_request",
+      base: "main",
+      type: "opened",
+      changed: ["docs/readme.md", "src/main.go"],
+    },
+    "skipped",
+  ],
+  [
+    "empty changed paths are a known empty diff",
+    "pull_request:\n    paths: ['src/**']",
+    { name: "pull_request", type: "opened", changed: [] },
+    "skipped",
+  ],
+  [
+    "push paths match",
+    "push:\n    paths: ['src/**', '!src/generated/**']",
+    {
+      name: "push",
+      ref: "main",
+      changed: ["docs/readme.md", "src/generated/api.go", "src/main.go"],
+    },
+    "runs",
+  ],
+  [
+    "nonmatching push paths",
+    "push:\n    paths: ['src/**', '!src/generated/**']",
+    {
+      name: "push",
+      ref: "main",
+      changed: ["docs/readme.md", "src/generated/api.go"],
+    },
+    "skipped",
+  ],
+  [
+    "branch-mismatched push path filter",
+    "push:\n    branches: [release]\n    paths: ['src/**', '!src/generated/**']",
+    { name: "push", ref: "main", changed: ["src/main.go"] },
+    "skipped",
+  ],
+  ...(["release", "main"] as const).map(
+    (base): [string, string, Event, string] => [
+      `pull request non-path exclusion: base ${base}, closed`,
+      "pull_request:\n    branches: [main]\n    paths: ['src/**']",
+      { name: "pull_request", base, type: "closed", changed: ["src/a.go"] },
+      "skipped",
+    ],
+  ),
+  [
+    "ordered path match per path",
+    "push:\n    paths: ['**', '!docs/**', 'docs/required/**']",
+    { name: "push", changed: ["docs/required/release.md"] },
+    "runs",
+  ],
+  [
+    "ignored-only path match",
+    "push:\n    paths-ignore: ['docs/**']",
+    { name: "push", changed: ["docs/readme.md"] },
+    "skipped",
+  ],
+  ...["README.md", "docs/README.md"].map(
+    (path): [string, string, Event, string] => [
+      `globstar path ${path}`,
+      "push:\n    paths: ['**/README.md']",
+      { name: "push", changed: [path] },
+      "runs",
+    ],
+  ),
+  [
+    "documented character class",
+    "push:\n    paths: ['src/file[0-9].go']",
+    { name: "push", changed: ["src/file7.go"] },
+    "runs",
+  ],
 ])("%s", (_, on, event, value) => {
   const text = `on:\n  ${on}\n${jobs}`;
   const { verdicts, diagnostics } = simulate(

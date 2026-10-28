@@ -609,6 +609,285 @@ test("the example Workflow set on a member's push to main: ci.yml and deploy.yml
   ]);
 });
 
+test("the example Workflow set on a member's pull_request from feature to main: a docs-only change skips ci.yml at its paths: line (PA-2), a src change runs it", () => {
+  const pr = (changed: string[]) =>
+    simulate(example, {
+      event: { name: "pull_request", ref: "feature", base: "main", changed },
+      repo: { date },
+    }).verdicts.find((v) => v.key === "ci.yml")!;
+  const docs = pr(["docs/README.md"]);
+  expect(docs.value).toBe("skipped");
+  expect(docs.causes[0]).toMatchObject({
+    rule: "PA-2",
+    spans: [{ path: ".github/workflows/ci.yml", line: 5 }],
+    inputs: [{ path: "event.changed", value: ["docs/README.md"] }],
+  });
+  const src = pr(["src/app.ts"]);
+  expect(src.value).toBe("runs");
+  expect(src.causes[0]).toMatchObject({ rule: "PA-2", spans: [{ line: 5 }] });
+});
+
+const many = (n: number, name = (i: number) => `docs/${i}.md`) =>
+  Array.from({ length: n }, (_, i) => name(i));
+
+test.each<[string, string, Event, [string, string, number | undefined]]>([
+  // PA-2: paths runs when one changed file matches, rooted at that pattern.
+  [
+    "a changed file a paths: pattern matches",
+    "  push:\n    paths:\n      - 'docs/**'\n      - 'src/**'\n",
+    { name: "push", changed: ["README.md", "src/a.ts"] },
+    ["runs", "PA-2", 5],
+  ],
+  [
+    "no changed file a paths: pattern matches",
+    "  push:\n    paths: ['src/**']\n",
+    { name: "push", changed: ["docs/a.md"] },
+    ["skipped", "PA-2", 3],
+  ],
+  [
+    "a changed file a later ! pattern excludes",
+    "  push:\n    paths: ['src/**', '!src/generated/**']\n",
+    { name: "push", changed: ["src/generated/api.ts"] },
+    ["skipped", "PA-2", 3],
+  ],
+  [
+    "every changed file paths-ignore matches",
+    "  pull_request:\n    paths-ignore: ['docs/**', '*.md']\n",
+    { name: "pull_request", changed: ["docs/a.md", "README.md"] },
+    ["skipped", "PA-2", 3],
+  ],
+  [
+    "one changed file paths-ignore doesn't match",
+    "  pull_request:\n    paths-ignore: ['docs/**']\n",
+    { name: "pull_request", changed: ["docs/a.md", "src/a.ts"] },
+    ["runs", "PA-2", 3],
+  ],
+  // PA-7: the whole path from the repository root.
+  [
+    "a nested file a root-level pattern doesn't match",
+    "  push:\n    paths: ['*.md']\n",
+    { name: "push", changed: ["docs/a.md"] },
+    ["skipped", "PA-2", 3],
+  ],
+  // PA-3: no changed files, no run.
+  [
+    "no changed files to paths:",
+    "  push:\n    paths: ['src/**']\n",
+    { name: "push" },
+    ["skipped", "PA-3", 3],
+  ],
+  [
+    "no changed files to paths-ignore:",
+    "  pull_request:\n    paths-ignore: ['docs/**']\n",
+    { name: "pull_request", changed: [] },
+    ["skipped", "PA-3", 3],
+  ],
+  // BR-6: a branch filter and a path filter must both pass.
+  [
+    "a branch that passes and paths that don't",
+    "  push:\n    branches: [main]\n    paths: ['src/**']\n",
+    { name: "push", ref: "main", changed: ["docs/a.md"] },
+    ["skipped", "PA-2", 4],
+  ],
+  [
+    "paths that pass and a branch that doesn't",
+    "  push:\n    branches: [main]\n    paths: ['src/**']\n",
+    { name: "push", ref: "dev", changed: ["src/a.ts"] },
+    ["skipped", "BR-4", 3],
+  ],
+  [
+    "a base branch and paths that both pass",
+    "  pull_request:\n    branches: [main]\n    paths: ['src/**']\n",
+    { name: "pull_request", base: "main", changed: ["src/a.ts"] },
+    ["runs", "PA-2", 4],
+  ],
+  // PA-5: only the first 3,000 changed files are read.
+  [
+    "a paths: match only after the first 3,000 files",
+    "  push:\n    paths: ['src/**']\n",
+    { name: "push", changed: [...many(3000), "src/a.ts"] },
+    ["skipped", "PA-5", 3],
+  ],
+  [
+    "a paths: match within the first 3,000 files",
+    "  push:\n    paths: ['src/**']\n",
+    { name: "push", changed: ["src/a.ts", ...many(3000)] },
+    ["runs", "PA-2", 3],
+  ],
+  // PA-6: path filters aren't evaluated for a tag push.
+  [
+    "a tag push to a tags: filter and paths:",
+    "  push:\n    tags: ['v*']\n    paths: ['src/**']\n",
+    { name: "push", ref: "refs/tags/v1", changed: ["docs/a.md"] },
+    ["runs", "BR-4", 3],
+  ],
+  [
+    "a tag push to paths-ignore: alone",
+    "  push:\n    paths-ignore: ['docs/**']\n",
+    { name: "push", ref: "refs/tags/v1", changed: ["docs/a.md"] },
+    ["runs", "EV-0", 2],
+  ],
+  // SK-1: a skip instruction in the head commit's message.
+  ...[
+    "[skip ci]",
+    "[ci skip]",
+    "[no ci]",
+    "[skip actions]",
+    "[actions skip]",
+  ].map((skip): [string, string, Event, [string, string, number]] => [
+    `a push whose message holds ${skip}`,
+    "  push:\n",
+    { name: "push", message: `Fix typo ${skip}` },
+    ["skipped", "SK-1", 2],
+  ]),
+  [
+    "a pull request whose head commit ends in a skip-checks trailer",
+    "  pull_request:\n    paths: ['src/**']\n",
+    {
+      name: "pull_request",
+      changed: ["src/a.ts"],
+      message: "Fix typo\n\n\nskip-checks: true",
+    },
+    ["skipped", "SK-1", 2],
+  ],
+  [
+    "a skip-checks trailer after only one empty line",
+    "  push:\n",
+    { name: "push", message: "Fix typo\n\nskip-checks: true" },
+    ["runs", "EV-0", 2],
+  ],
+  [
+    "a message with no skip instruction",
+    "  push:\n",
+    { name: "push", message: "Skip CI for docs" },
+    ["runs", "EV-0", 2],
+  ],
+])("%s: %j", (_, on, event, expected) => {
+  expect(summary(verdictOf(`on:\n${on}`, event))).toEqual(expected);
+});
+
+test("a path decision explains the changed files, BR-6, the whole-path rule and the deciding pattern's glob features", () => {
+  const v = verdictOf(
+    "on:\n  pull_request:\n    branches: [main]\n    paths: ['src/*.ts']\n",
+    { name: "pull_request", base: "main", changed: ["src/a.ts"] },
+  );
+  expect(v.causes.map((c) => c.rule)).toEqual([
+    "PA-2",
+    "BR-6",
+    "PA-7",
+    "GL-1",
+    "BR-4",
+    "BR-2",
+    "EV-1",
+    "DB-3",
+  ]);
+  expect(v.causes[0]).toMatchObject({
+    spans: [{ line: 4, col: 13 }],
+    inputs: [{ path: "event.changed", value: ["src/a.ts"] }],
+  });
+  const skipped = verdictOf("on:\n  push:\n", {
+    name: "push",
+    message: "Release [skip ci]",
+  });
+  expect(skipped.causes[0]).toEqual({
+    rule: "SK-1",
+    spans: [expect.objectContaining({ line: 2 })],
+    inputs: [{ path: "event.message", value: "Release [skip ci]" }],
+  });
+});
+
+test("paths-ignore with more than 3,000 changed files is uncertain (PA-5), with nothing to settle it", () => {
+  const v = verdictOf("on:\n  push:\n    paths-ignore: ['docs/**']\n", {
+    name: "push",
+    changed: [...many(3000), "src/a.ts"],
+  });
+  expect(v).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: [],
+  });
+  expect(summary(v)).toEqual(["uncertain", "PA-5", 3]);
+});
+
+test("a tag push to a GitHub workflow with only paths: is uncertain (PA-6), with nothing to settle it and no likeliest reading", () => {
+  const v = verdictOf("on:\n  push:\n    paths: ['src/**']\n", {
+    name: "push",
+    ref: "refs/tags/v1",
+    changed: ["src/a.ts"],
+  });
+  expect(v).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: [],
+  });
+  expect(summary(v)).toEqual(["uncertain", "PA-6", 3]);
+  expect(v.causes[0]!.inputs).toEqual([
+    { path: "event.ref", value: "refs/tags/v1" },
+  ]);
+  expect(RULES["PA-6"]!.text).not.toMatch(/probabl|likel/i);
+});
+
+test("a skip instruction decides a GitHub workflow a filter left uncertain", () => {
+  const v = verdictOf("on:\n  push:\n    paths: ['src/**']\n", {
+    name: "push",
+    ref: "refs/tags/v1",
+    message: "[skip ci]",
+  });
+  expect(v.value).toBe("skipped");
+  expect(v).not.toHaveProperty("possible");
+  expect(v.causes.map((c) => c.rule).slice(0, 2)).toEqual(["SK-1", "PA-6"]);
+});
+
+test("paths and paths-ignore on one event is a PA-1 Diagnostic at paths-ignore, and only that file loses its Verdicts", () => {
+  const { verdicts, diagnostics } = simulate(
+    [
+      wf(
+        "bad.yml",
+        `on:\n  pull_request:\n    paths: ['src/**']\n    paths-ignore: ['docs/**']\n${jobs}`,
+      ),
+      good,
+    ],
+    push,
+  );
+  expect(verdicts.map((v) => v.key)).toEqual(["good.yml"]);
+  expect(diagnostics).toEqual([
+    {
+      rule: "PA-1",
+      path: ".github/workflows/bad.yml",
+      line: 4,
+      col: 5,
+      endLine: 4,
+      endCol: 17,
+      message:
+        "you may only define one of `paths` and `paths-ignore` for a single event",
+    },
+  ]);
+});
+
+test("a GitHub workflow file over 500 KB is skipped with root PL-9, not a Diagnostic, so it keeps its key", () => {
+  const big = `on: push\n${jobs}${"# padding\n".repeat(52_000)}`;
+  const { verdicts, diagnostics } = simulate([wf("big.yml", big), good], push);
+  expect(diagnostics).toEqual([]);
+  expect(verdicts).toEqual([
+    {
+      key: "big.yml",
+      value: "skipped",
+      causes: [{ rule: "PL-9", spans: [], inputs: [] }],
+    },
+    expect.objectContaining({ key: "good.yml", value: "runs" }),
+  ]);
+  // Just under the limit, it is read.
+  const under = `on: push\n${jobs}`.padEnd(500 * 1024, "#");
+  expect(
+    simulate([wf("big.yml", under)], push).verdicts[0]!.causes[0]!.rule,
+  ).toBe("EV-0");
+  // The limit counts UTF-8 bytes, not characters.
+  expect(
+    simulate([wf("big.yml", `${under.slice(0, -1)}é`)], push).verdicts[0]!
+      .causes[0]!.rule,
+  ).toBe("PL-9");
+});
+
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {
     expect(rule.text).not.toBe("");

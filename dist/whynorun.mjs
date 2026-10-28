@@ -103,7 +103,7 @@ var require_visit = __commonJS({
     "use strict";
     var identity = require_identity();
     var BREAK = /* @__PURE__ */ Symbol("break visit");
-    var SKIP = /* @__PURE__ */ Symbol("skip children");
+    var SKIP2 = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove node");
     function visit(node, visitor) {
       const visitor_ = initVisitor(visitor);
@@ -115,7 +115,7 @@ var require_visit = __commonJS({
         visit_(null, node, visitor_, Object.freeze([]));
     }
     visit.BREAK = BREAK;
-    visit.SKIP = SKIP;
+    visit.SKIP = SKIP2;
     visit.REMOVE = REMOVE;
     function visit_(key, node, visitor, path) {
       const ctrl = callVisitor(key, node, visitor, path);
@@ -163,7 +163,7 @@ var require_visit = __commonJS({
         await visitAsync_(null, node, visitor_, Object.freeze([]));
     }
     visitAsync.BREAK = BREAK;
-    visitAsync.SKIP = SKIP;
+    visitAsync.SKIP = SKIP2;
     visitAsync.REMOVE = REMOVE;
     async function visitAsync_(key, node, visitor, path) {
       const ctrl = await callVisitor(key, node, visitor, path);
@@ -5568,7 +5568,7 @@ var require_cst_visit = __commonJS({
   "node_modules/yaml/dist/parse/cst-visit.js"(exports) {
     "use strict";
     var BREAK = /* @__PURE__ */ Symbol("break visit");
-    var SKIP = /* @__PURE__ */ Symbol("skip children");
+    var SKIP2 = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove item");
     function visit(cst, visitor) {
       if ("type" in cst && cst.type === "document")
@@ -5576,7 +5576,7 @@ var require_cst_visit = __commonJS({
       _visit(Object.freeze([]), cst, visitor);
     }
     visit.BREAK = BREAK;
-    visit.SKIP = SKIP;
+    visit.SKIP = SKIP2;
     visit.REMOVE = REMOVE;
     visit.itemAtPath = (cst, path) => {
       let item = cst;
@@ -14737,6 +14737,19 @@ function filter(sequence, input) {
 
 // src/core/triggers.ts
 var KINDS = ["branches", "tags"];
+var SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|\n\n\nskip-checks: ?true\s*$/;
+var DIFF_LIMIT = 3e3;
+var GLOBS = [
+  ["GL-1", /\*/],
+  ["GL-2", /.[?+]/],
+  ["GL-3", /\[/],
+  ["GL-4", /^!|\\/]
+];
+var globCauses = (pattern, spans) => GLOBS.filter(([, re]) => re.test(pattern)).map(([rule]) => ({
+  rule,
+  spans,
+  inputs: []
+}));
 var PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
 var settingsOf = (parsed, event) => {
   const value = parsed.events[event];
@@ -14747,12 +14760,12 @@ function filterDiagnostics(parsed) {
   for (const event of Object.keys(parsed.events)) {
     const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
     const settings = settingsOf(parsed, event);
-    for (const kind of KINDS) {
+    for (const kind of [...KINDS, "paths"]) {
       const ignore = `${kind}-ignore`;
       if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
         found.push({
           ...at(`${event}.${ignore}`),
-          rule: "BR-1",
+          rule: kind === "paths" ? "PA-1" : "BR-1",
           message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
         });
       for (const key of [kind, ignore]) {
@@ -14774,6 +14787,95 @@ function filterDiagnostics(parsed) {
   return found;
 }
 function trigger(parsed, event, defaultBranch) {
+  const decided = byRef(parsed, event, defaultBranch);
+  if (decided.value === "skipped") return decided;
+  const result = byPaths(parsed, event, decided);
+  const message = event.message;
+  if (result.value === "skipped" || message === void 0 || !SKIP.test(message))
+    return result;
+  const entry = parsed.onEntries.get(event.name);
+  return {
+    value: "skipped",
+    causes: [
+      {
+        rule: "SK-1",
+        spans: entry ? [entry] : [],
+        inputs: [{ path: "event.message", value: message }]
+      },
+      ...result.causes
+    ]
+  };
+}
+function byPaths(parsed, event, decided) {
+  const name2 = event.name;
+  const settings = settingsOf(parsed, name2);
+  const has = (key2) => Object.hasOwn(settings, key2);
+  const key = has("paths") ? "paths" : "paths-ignore";
+  const list = settings[key];
+  if (!Array.isArray(list) || list.length === 0) return decided;
+  const patterns = list.map(String);
+  const spans = (at2) => {
+    const span = parsed.onEntries.get(`${name2}.${at2}`);
+    return span ? [span] : [];
+  };
+  const keySpans = spans(key);
+  const include = key === "paths";
+  const ref = event.ref ?? "";
+  if (name2 === "push" && ref.startsWith("refs/tags/")) {
+    const tagged = {
+      rule: "PA-6",
+      spans: keySpans,
+      inputs: [{ path: "event.ref", value: ref }]
+    };
+    if (include && !has("tags") && !has("tags-ignore"))
+      return {
+        value: "uncertain",
+        causes: [tagged, ...decided.causes],
+        possible: ["runs", "skipped"],
+        settle: []
+      };
+    return { ...decided, causes: [...decided.causes, tagged] };
+  }
+  const changed = event.changed ?? [];
+  const input = { path: "event.changed", value: changed };
+  const filtered = KINDS.some((k) => has(k) || has(`${k}-ignore`));
+  const combine = (value, own2) => {
+    const both = filtered ? [own2[0], { rule: "BR-6", spans: [], inputs: [] }, ...own2.slice(1)] : own2;
+    if (value === "uncertain")
+      return {
+        value,
+        causes: [...both, ...decided.causes],
+        possible: ["runs", "skipped"],
+        settle: []
+      };
+    if (value === "runs" && decided.value === "uncertain")
+      return { ...decided, causes: [...decided.causes, ...both] };
+    return { value, causes: [...both, ...decided.causes] };
+  };
+  if (changed.length === 0)
+    return combine("skipped", [
+      { rule: "PA-3", spans: keySpans, inputs: [input] }
+    ]);
+  if (!include && changed.length > DIFF_LIMIT)
+    return combine("uncertain", [
+      { rule: "PA-5", spans: keySpans, inputs: [input] }
+    ]);
+  const compiled = compilePatterns(patterns);
+  const kept = (file) => !(include ? skip : filter)(compiled, file).skip;
+  const deciding = changed.slice(0, DIFF_LIMIT).find(kept);
+  const by = deciding === void 0 || !include ? -1 : skip(compiled, deciding).by;
+  const at = by >= 0 ? spans(`${key}.${by}`) : keySpans;
+  const own = [
+    { rule: "PA-2", spans: at, inputs: [input] },
+    { rule: "PA-7", spans: [], inputs: [] },
+    ...by >= 0 ? globCauses(patterns[by], at) : []
+  ];
+  if (deciding !== void 0) return combine("runs", own);
+  if (changed.slice(DIFF_LIMIT).some(kept))
+    own.unshift({ rule: "PA-5", spans: keySpans, inputs: [input] });
+  return combine("skipped", own);
+}
+function byRef(parsed, event, defaultBranch) {
   const name2 = event.name;
   const spans = (key2) => {
     const span = parsed.onEntries.get(key2);
@@ -14862,19 +14964,12 @@ function trigger(parsed, event, defaultBranch) {
   const anyCase = decide(patterns, "i");
   if (anyCase.skip !== base.skip)
     return uncertain("GL-6", anyCase.by >= 0 ? anyCase.by : base.by);
-  const deciding = patterns[base.by] ?? "";
-  const glob = [
-    ["GL-1", /\*/],
-    ["GL-2", /.[?+]/],
-    ["GL-3", /\[/],
-    ["GL-4", /^!|\\/]
-  ];
   return {
     value: base.skip ? "skipped" : "runs",
     causes: [
       { rule: include ? "BR-4" : "BR-5", spans: at(base.by), inputs: [input] },
       matched,
-      ...glob.filter(([, re]) => re.test(deciding)).map(([rule]) => ({ rule, spans: at(base.by), inputs: [] })),
+      ...globCauses(patterns[base.by] ?? "", at(base.by)),
       ...after
     ]
   };
@@ -14944,6 +15039,12 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "BR-6",
+    text: "With both a branch or tag filter and a path filter on one event, both must pass for the GitHub workflow to run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "High"
+  },
+  {
     id: "BR-8",
     text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
     url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
@@ -14986,6 +15087,54 @@ var rows = [
     confidence: "Low"
   },
   {
+    id: "PA-1",
+    text: "`paths` and `paths-ignore` can't both appear on one event: GitHub rejects the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "High"
+  },
+  {
+    id: "PA-2",
+    text: "With `paths`, the GitHub workflow runs if at least one changed file matches, the patterns tried in order with the last match winning. With `paths-ignore`, it is skipped only if every changed file matches.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High"
+  },
+  {
+    id: "PA-3",
+    text: "With a path filter, if no files changed the GitHub workflow doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High"
+  },
+  {
+    id: "PA-5",
+    text: "A diff of more than 3,000 files runs a `paths` GitHub workflow only if a match is among the first 3,000 files; GitHub's docs don't say how `paths-ignore` treats such a diff.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High"
+  },
+  {
+    id: "PA-6",
+    text: "Path filters are not evaluated for pushes of tags; GitHub's docs don't say whether a push GitHub workflow with only `paths:` then runs or is skipped.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "Low"
+  },
+  {
+    id: "PA-7",
+    text: "Path patterns match the whole path from the repository root.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#patterns-to-match-file-paths",
+    confidence: "High"
+  },
+  {
+    id: "SK-1",
+    text: "`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in the head commit's message, or a final `skip-checks: true` trailer after two empty lines, skips `push` and `pull_request` runs.",
+    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs",
+    confidence: "High"
+  },
+  {
+    id: "PL-9",
+    text: "GitHub doesn't start runs from a workflow file larger than 500 KB.",
+    url: "https://docs.github.com/en/actions/reference/limits",
+    confidence: "High"
+  },
+  {
     id: "DB-2",
     text: "A `push` runs the GitHub workflow as it is in the pushed commit.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push",
@@ -15010,6 +15159,15 @@ var RULES = Object.fromEntries(
 
 // src/core/index.ts
 var SUPPORTED = /* @__PURE__ */ new Set(["push", "pull_request"]);
+var MAX_BYTES = 500 * 1024;
+function utf8Length(text) {
+  let bytes = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0);
+    bytes += c < 128 ? 1 : c < 2048 ? 2 : c < 65536 ? 3 : 4;
+  }
+  return bytes;
+}
 var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 function simulate(files, input) {
   const problems = validateScenario(input);
@@ -15017,7 +15175,13 @@ function simulate(files, input) {
   const { event, repo } = withDefaults(input).scenario;
   const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
-    return key === void 0 ? [] : [{ key, ...parseWorkflowFile(file.path, file.text) }];
+    return key === void 0 ? [] : [
+      {
+        key,
+        bytes: utf8Length(file.text),
+        ...parseWorkflowFile(file.path, file.text)
+      }
+    ];
   });
   for (const p of parsed)
     if (p.diagnostics.length === 0) p.diagnostics = filterDiagnostics(p);
@@ -15041,9 +15205,16 @@ function simulate(files, input) {
     };
   }
   const verdicts = [];
-  for (const { key, ...workflow } of parsed) {
+  for (const { key, bytes, ...workflow } of parsed) {
     if (workflow.diagnostics.length > 0) continue;
-    verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch) });
+    if (bytes > MAX_BYTES)
+      verdicts.push({
+        key,
+        value: "skipped",
+        causes: [{ rule: "PL-9", spans: [], inputs: [] }]
+      });
+    else
+      verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch) });
   }
   verdicts.sort((a, b) => compare(a.key, b.key));
   return { verdicts, diagnostics };
@@ -15053,16 +15224,17 @@ var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 // src/cli/main.ts
 var ACTORS = ["member", "fork", "dependabot"];
 var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref>] [--base <branch>]
-                     [--actor member|fork|dependabot] [--repo <dir>] [--flow access|all]
+                     [--actor member|fork|dependabot] [--changed <file>|-] [--repo <dir>]
+                     [--flow access|all]
        whynorun --version
 `;
-function main(argv) {
+function main(argv, stdin = () => readFileSync(0, "utf8")) {
   if (argv.length === 1 && argv[0] === "--version") {
     process.stdout.write(`whynorun ${"0.0.0"}
 `);
     return 0;
   }
-  if (argv[0] === "show") return show(argv.slice(1));
+  if (argv[0] === "show") return show(argv.slice(1), stdin);
   return misuse();
 }
 function misuse(message) {
@@ -15070,7 +15242,7 @@ function misuse(message) {
 ${USAGE}` : USAGE);
   return 2;
 }
-function show(args) {
+function show(args, stdin) {
   let values;
   try {
     ({ values } = parseArgs({
@@ -15081,6 +15253,7 @@ function show(args) {
         ref: { type: "string" },
         base: { type: "string" },
         actor: { type: "string" },
+        changed: { type: "string" },
         repo: { type: "string", default: "." },
         flow: { type: "string", default: "all" }
       }
@@ -15088,7 +15261,7 @@ function show(args) {
   } catch (err) {
     return misuse(err.message);
   }
-  const { event, date, ref, base, actor, repo, flow } = values;
+  const { event, date, ref, base, actor, changed, repo, flow } = values;
   if (flow === "checks" || flow === "concurrency")
     return misuse(
       `--flow ${flow} needs required checks or a Follow-up event, which flags can't describe: use --from <test file>`
@@ -15104,6 +15277,15 @@ function show(args) {
   if (ref !== void 0) scenario.event.ref = ref;
   if (base !== void 0) scenario.event.base = base;
   if (actor !== void 0) scenario.event.actor = actor;
+  if (changed !== void 0) {
+    let text;
+    try {
+      text = changed === "-" ? stdin() : readFileSync(changed, "utf8");
+    } catch {
+      return misuse(`can't read --changed ${changed}`);
+    }
+    scenario.event.changed = text.split(/\r?\n/).filter((line) => line !== "");
+  }
   if (validateScenario(scenario).length > 0)
     return misuse(`--event or --date is invalid: --date must be YYYY-MM-DD`);
   const dir = join2(resolve2(repo), ".github", "workflows");
