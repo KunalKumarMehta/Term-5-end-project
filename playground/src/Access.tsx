@@ -1,20 +1,21 @@
 import { useState } from "react";
-import type { Verdict } from "../../src/core";
+import { isAccess, type Verdict } from "../../src/core";
 import { Value, same, type Column } from "./Grid";
 
-/** Whether a subject key is a job's token scope or secrets (#6). */
-export const isAccess = (key: string) =>
-  / › (token\.[a-z-]+|secrets)$/.test(key);
+export { isAccess };
 
 /** The Access tab (#9 §1): one card per job with access keys, each Scenario a column. */
 export function Access({
   columns,
   open,
   onOpen,
+  noVerdicts,
 }: {
   columns: Column[];
   open?: { key: string; i: number };
   onOpen: (key: string, i: number) => void;
+  /** Why a Scenario has no Verdicts at all. */
+  noVerdicts: string;
 }) {
   const live = columns.filter((c) => !c.blocked && c.verdicts);
   const jobs = [
@@ -38,7 +39,7 @@ export function Access({
         {live.length > 0 && (
           <p>
             {live.every((c) => c.verdicts!.length === 0)
-              ? "No Verdicts: every file has Diagnostics (see above)."
+              ? noVerdicts
               : "No job here runs steps, so none gets a token or secrets. A job with steps: would get a card here."}
           </p>
         )}

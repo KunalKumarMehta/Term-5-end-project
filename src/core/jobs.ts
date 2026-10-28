@@ -6,13 +6,15 @@ import {
   RuntimeValueNeeded,
   evaluateCondition,
   evaluateTemplate,
+  evaluateValue,
   type Checkout,
   type JobSpans,
   type ParsedWorkflow,
   type Resolve,
   type Span,
 } from "./parser";
-import type { Scenario } from "./scenario";
+import { FROM_EVENT, settleable, type Scenario } from "./scenario";
+import { PR_DEFAULT_TYPES } from "./triggers";
 
 type Conclusion = "success" | "failure" | "skipped";
 
@@ -57,21 +59,11 @@ const cause = (
   inputs: Cause["inputs"] = [],
 ): Cause => ({ rule, spans: span ? [span] : [], inputs });
 
-// The github.* fields worked out from the Event (#8 §6); any other is a run-time value.
-const FROM_EVENT = new Set([
-  "event_name",
-  "ref",
-  "ref_name",
-  "head_ref",
-  "base_ref",
-  "sha",
-  "run_id",
-]);
 // A payload object the event never has resolves to empty, as on GitHub.
 // shortcut: only the objects the other supported event has; list each event's payload
 // keys when an event without either arrives.
 const ABSENT: Record<string, string[]> = {
-  push: ["pull_request"],
+  push: ["pull_request", "action"],
   pull_request: ["head_commit"],
   pull_request_target: ["head_commit"],
 };
@@ -101,24 +93,56 @@ function covered(version: string): boolean | undefined {
 
 /**
  * One Verdict per job of a loaded GitHub workflow, keyed `<prefix><jobId>`: the prefix is
- * `<file> › `, or `<callerFile> › <callerJob>/` for a local callee (#6).
+ * `<file> › `, or `<callerFile> › <callerJob>/` for a local callee (#6), whose `inputs` come
+ * from its caller job (lower-cased names, `${{ }}` text evaluated in the caller's run).
  */
 export function jobVerdicts(
   prefix: string,
   parsed: ParsedWorkflow,
   workflow: Verdict,
   scenario: Scenario,
+  inputs?: Map<string, unknown>,
 ): Verdict[] {
   const key = (id: string) => prefix + id;
   const ids = parsed.jobs.map((j) => j.id.value);
-  // An uncertain GitHub workflow leaves its jobs uncertain, settled by the same inputs.
-  if (workflow.value === "uncertain")
-    return ids.map((id) => ({
-      key: key(id),
-      value: "uncertain",
-      causes: workflow.causes,
-      settle: workflow.settle,
-    }));
+  // An uncertain GitHub workflow leaves its jobs uncertain: no-run when it doesn't run, else
+  // their own Verdict, settled by the workflow's inputs and then their own.
+  if (
+    workflow.value === "uncertain" &&
+    workflow.possible?.includes("runs") !== false
+  )
+    return jobVerdicts(
+      prefix,
+      parsed,
+      { ...workflow, value: "runs" },
+      scenario,
+      inputs,
+    ).map((v) => {
+      const own = v.value === "uncertain";
+      const values = own ? v.possible : [v.value];
+      const settle = [
+        ...new Set([...(workflow.settle ?? []), ...(v.settle ?? [])]),
+      ];
+      const hints = [
+        ...(workflow.hints ?? []),
+        ...(own ? (v.hints ?? []) : []),
+      ];
+      return {
+        key: v.key,
+        value: "uncertain",
+        causes: [...workflow.causes, ...(own ? v.causes : [])],
+        ...(values &&
+          values.length < 3 && {
+            possible: [...new Set(["no-run", ...values])].sort(),
+          }),
+        settle,
+        ...(settle.length > 0 && {
+          hints: hints.filter(
+            (h, i) => hints.findIndex((o) => o.path === h.path) === i,
+          ),
+        }),
+      };
+    });
   if (workflow.value !== "runs")
     return ids.map((id) => ({
       key: key(id),
@@ -136,6 +160,14 @@ export function jobVerdicts(
   const contexts = { github, vars: { ...scenario.repo.vars }, inputs: {} };
   const { event, repo } = scenario;
   const unsettled = new Map<string, Unsettled>();
+  // The activity types a run with no type on its Event may have: GitHub's defaults, narrowed
+  // by the workflow's `types:` (a callee's caller narrows nothing here).
+  const listed = (
+    parsed.events as Record<string, { types?: unknown } | undefined>
+  )[event.name]?.types;
+  const activityTypes = PR_DEFAULT_TYPES.filter(
+    (t) => !Array.isArray(listed) || listed.length === 0 || listed.includes(t),
+  );
 
   /** A declared output: its literal value, or the expression a step fills it from. */
   const outputOf = (
@@ -171,6 +203,28 @@ export function jobVerdicts(
         return { value: assigned.get(name) };
       };
       const [context, ...rest] = path.map((s, i) => (i ? s : s.toLowerCase()));
+      if (context === "inputs" && inputs && rest.length > 0) {
+        const name = rest[0]!.toLowerCase();
+        const given = inputs.get(name);
+        if (rest.length > 1 || given === undefined) return { value: null };
+        if (typeof given !== "string" || !given.includes("${{"))
+          return { value: given };
+        // The caller's run shares github and vars; its needs, matrix and inputs exist only
+        // at run time, so reading one leaves the whole input unknown.
+        let runTime = false;
+        const self = resolver(id, needs, assigned, reads);
+        const value = evaluateValue(
+          given,
+          { ...contexts, inputs: {}, needs: {}, matrix: {}, strategy: {} },
+          (p, inner) => {
+            if (["github", "vars"].includes(p[0]!.toLowerCase()))
+              return self(p, () => [...inner(), ...compared()]);
+            runTime = true;
+            return { value: null };
+          },
+        );
+        return runTime ? lack(`inputs.${name}`) : { value };
+      }
       if (context === "vars" && rest.length > 0) {
         const vars = scenario.repo.vars ?? {};
         const found = ownKey(vars, rest[0]!);
@@ -224,6 +278,9 @@ export function jobVerdicts(
         if (found === undefined) {
           if (ABSENT[event.name]?.includes(walk[0]!.toLowerCase()))
             return { value: null };
+          // A pull request Event with no activity type is one of the types the run takes.
+          if (at === github.event && seg.toLowerCase() === "action")
+            return walk.length > 1 ? { value: null } : lack("event.type");
           // A member's own repo is the base repo, so its full_name is the owner/repo fact.
           if (
             walk.join(".").toLowerCase() === "pull_request.head.repo.full_name"
@@ -238,6 +295,7 @@ export function jobVerdicts(
 
   const candidatesOf = (name: string, compared: unknown[]): unknown[] => {
     if (name.includes(".*.")) return [...compared.map((c) => [c]), [], [OTHER]];
+    if (name === "event.type") return activityTypes;
     const nonEmpty = name === "repo.repository" || name === "event.login";
     return [
       ...new Set([
@@ -261,8 +319,7 @@ export function jobVerdicts(
         rule: "WN-4",
         span: spans(id).if ?? spans(id).id,
         job: id,
-        // Other github.* fields exist only at run time.
-        settle: !name.startsWith("github.") || name.startsWith("github.event."),
+        settle: settleable(name),
         compared,
         candidates: candidatesOf(name, compared),
       });
@@ -373,16 +430,13 @@ export function jobVerdicts(
       } catch (e) {
         if (!(e instanceof RuntimeValueNeeded)) throw e;
         const name = `CO-5 ${id} ${i}`;
-        const context = e.needed.split(".")[0]!;
         const yes = ask(
           name,
           {
             rule: "WN-4",
             span: input.span,
             job: id,
-            settle:
-              !RUN_TIME.has(context) &&
-              (context !== "github" || e.needed.startsWith("github.event.")),
+            settle: settleable(e.needed),
             compared: [],
             candidates: [false, true],
             path: e.needed,
@@ -593,7 +647,8 @@ export function jobVerdicts(
           hints: settle.map(([name, u]) => ({
             path: u.path ?? name,
             text: hint(u.path ?? name),
-            candidates: u.compared,
+            // The activity types the run may have, not the ones that would skip it.
+            candidates: name === "event.type" ? activityTypes : u.compared,
           })),
         }),
       };
@@ -629,6 +684,8 @@ export function jobVerdicts(
       return "the `owner/repo` Repo fact, which `github.repository` reads";
     if (path === "event.login")
       return "the actor login on the Event, which `github.actor` reads";
+    if (path === "event.type")
+      return "the activity type on the Event, which `github.event.action` reads";
     return `\`${path}\` on the Event`;
   };
 

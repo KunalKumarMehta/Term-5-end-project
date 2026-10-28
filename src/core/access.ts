@@ -211,6 +211,10 @@ const passes = (job: ReusableWorkflowJob) =>
   job["inherit-secrets"] === true || job["secret-values"] !== undefined;
 
 /** A local caller job, whose `permissions:` cap its callee's jobs and whose `secrets:` feed them. */
+/** Whether a subject key is a job's token scope or secrets (#6). */
+export const isAccess = (key: string): boolean =>
+  / › (token\.[a-z-]+|secrets)$/.test(key);
+
 export interface Caller {
   parsed: ParsedWorkflow;
   job: ReusableWorkflowJob;

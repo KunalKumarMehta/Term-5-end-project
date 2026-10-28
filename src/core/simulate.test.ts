@@ -382,6 +382,7 @@ test("an uncertain GitHub workflow leaves its jobs uncertain, for the same cause
     key: "ci.yml › a",
     value: "uncertain",
     causes: verdicts[0]!.causes,
+    possible: ["no-run", "runs"],
     settle: [],
   });
 });
@@ -1714,6 +1715,73 @@ test("a callee job whose caller job is skipped by its if: is no-run, with its ch
   });
 });
 
+test("a callee job's if: reads inputs.* from its caller job's with:, then the callee's declared defaults; a with: value WhyNoRun can't work out is Uncertain (WN-4)", () => {
+  const callee = wf(
+    "lib.yml",
+    "on:\n  workflow_call:\n    inputs:\n      go:\n        type: boolean\n" +
+      "      env:\n        type: string\n        default: staging\n" +
+      "      n:\n        type: number\n        default: 4\njobs:\n" +
+      job("publish", "    if: inputs.go\n") +
+      job("stage", "    if: inputs.env == 'staging'\n") +
+      job("four", "    if: inputs.n == 4\n"),
+  );
+  const run = (withs: string) =>
+    runVerdicts(
+      simulate(
+        [
+          wf(
+            "ci.yml",
+            caller(
+              "./.github/workflows/lib.yml",
+              withs && `    with:\n${withs}`,
+            ),
+          ),
+          callee,
+        ],
+        push,
+      ).verdicts,
+    ).filter((v) => v.key.includes("/"));
+  const values = (verdicts: Verdict[]) =>
+    verdicts.map((v) => [v.key.split("/")[1], v.value]);
+
+  expect(values(run("      go: true\n"))).toEqual([
+    ["four", "runs"],
+    ["publish", "runs"],
+    ["stage", "runs"],
+  ]);
+  // No with: a boolean input with no default is false.
+  expect(values(run(""))).toEqual([
+    ["four", "runs"],
+    ["publish", "skipped"],
+    ["stage", "runs"],
+  ]);
+  expect(
+    values(
+      run("      go: ${{ github.event_name == 'push' }}\n      env: prod\n"),
+    ),
+  ).toEqual([
+    ["four", "runs"],
+    ["publish", "runs"],
+    ["stage", "skipped"],
+  ]);
+
+  // A repository variable settles it; a caller job's needs output doesn't exist before the run.
+  const vars = run("      env: ${{ vars.ENV }}\n");
+  expect(byKey(vars, "ci.yml › deploy/stage")).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: ["vars.ENV"],
+  });
+  const needs = run("      go: ${{ needs.build.outputs.go }}\n");
+  const publish = byKey(needs, "ci.yml › deploy/publish")!;
+  expect(publish).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: [],
+  });
+  expect(publish.causes[0]!.rule).toBe("WN-4");
+});
+
 test.each([
   [
     "passes a secret the callee doesn't declare",
@@ -2390,6 +2458,47 @@ test("settleValue stores each path where it belongs, a .*.<field> path as a list
     expect(() => settleValue(base, path, "x"), path).toThrow(reason);
 });
 
+test("github.event.action comes from the Event: empty on a push, the activity type on a pull_request, and one of GitHub's default types, settled by the Event's activity type, when it has none", () => {
+  const opened = "github.event.action == 'opened'";
+  const onPush = wf(
+    "ci.yml",
+    `on: push\njobs:\n${job("a", `    if: ${opened}\n`)}`,
+  );
+  expect(byKey(simulate([onPush], push).verdicts, "ci.yml › a")).toMatchObject({
+    value: "skipped",
+  });
+
+  const files = [
+    reading({ opened, closed: "github.event.action == 'closed'" }),
+  ];
+  const typed = { ...pr, event: { name: "pull_request", type: "opened" } };
+  expect(
+    byKey(simulate(files, typed).verdicts, "pr.yml › opened"),
+  ).toMatchObject({ value: "runs" });
+
+  const untyped = simulate(files, pr).verdicts;
+  // None of opened, synchronize and reopened is closed.
+  expect(byKey(untyped, "pr.yml › closed")).toMatchObject({ value: "skipped" });
+  const a = byKey(untyped, "pr.yml › opened")!;
+  expect(a).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: ["event.type"],
+    hints: [
+      {
+        path: "event.type",
+        candidates: ["opened", "synchronize", "reopened"],
+      },
+    ],
+  });
+  expect(a.causes[0]!.rule).toBe("WN-4");
+  const settled = settleValue(pr, "event.type", "opened");
+  expect(settled.event.type).toBe("opened");
+  expect(
+    byKey(simulate(files, settled).verdicts, "pr.yml › opened"),
+  ).toMatchObject({ value: "runs" });
+});
+
 test("prototype pollution (#14 §6.7): vars.CONSTRUCTOR, vars.__proto__ and the payload path __proto__.x are ordinary user keys, and nothing reaches Object.prototype", () => {
   const files = [
     reading({
@@ -2399,13 +2508,18 @@ test("prototype pollution (#14 §6.7): vars.CONSTRUCTOR, vars.__proto__ and the 
     }),
   ];
   const unset = simulate(files, pr).verdicts;
+  // The settle path-setter refuses __proto__, so the core never offers it: only a JSON
+  // Scenario can hold those keys.
   expect(
     ["ctor", "proto", "payload"].map((id) => byKey(unset, `pr.yml › ${id}`)),
   ).toMatchObject([
     { value: "uncertain", settle: ["vars.CONSTRUCTOR"] },
-    { value: "uncertain", settle: ["vars.__proto__"] },
-    { value: "uncertain", settle: ["github.event.__proto__.x"] },
+    { value: "uncertain", settle: [] },
+    { value: "uncertain", settle: [] },
   ]);
+  for (const v of unset)
+    for (const path of v.settle ?? [])
+      expect(() => settleValue(pr, path, "x")).not.toThrow();
 
   // As a link, draft or Test file would bring them in: JSON, where __proto__ is an own key.
   const scenario = JSON.parse(
@@ -2594,6 +2708,36 @@ test("PRT table: a public repo created after 2026-09-17 with no event policy is 
   );
 });
 
+test("the jobs of an Uncertain GitHub workflow keep its root and say what they'd be either way: no-run, or their own Verdict when it runs, with its settle hints", () => {
+  const files = target("      - uses: actions/checkout@v4\n");
+  const t = byKey(
+    simulate(files, forkTarget({}, { predates: false })).verdicts,
+    "t.yml › t",
+  )!;
+  expect(t).toMatchObject({
+    value: "uncertain",
+    possible: ["no-run", "runs"],
+    settle: ["repo.eventPolicy"],
+    hints: [{ path: "repo.eventPolicy", candidates: ["allows", "blocks"] }],
+  });
+  expect(t.causes[0]!.rule).toBe("PRT-4");
+
+  // A job whose if: is false is skipped whenever the run goes ahead.
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        "on:\n  push:\n    branches:\n      - refs/heads/main\njobs:\n" +
+          job("b", "    if: false\n"),
+      ),
+    ],
+    { ...push, event: { name: "push", ref: "refs/heads/main" } },
+  );
+  expect(byKey(verdicts, "ci.yml › b")).toMatchObject({
+    possible: ["no-run", "skipped"],
+  });
+});
+
 test("a dependabot[bot] pull_request_target in a public repo follows the PRT table like any actor, and gets the write token and secrets (FK-7)", () => {
   const files = target(checkout("v4", headSha));
   const bot = (repo = {}) =>
@@ -2706,6 +2850,15 @@ test("a checkout ref known only at run time is Uncertain [fails, runs] (CO-5), r
 
   const step = job("          ref: ${{ steps.pr.outputs.sha }}\n");
   expect(step).toMatchObject({ value: "uncertain", settle: [] });
+
+  // A function result such as hashFiles() exists only at run time too.
+  const hashed = job("          ref: ${{ hashFiles('x') }}\n");
+  expect(hashed).toMatchObject({
+    value: "uncertain",
+    possible: ["fails", "runs"],
+    settle: [],
+  });
+  expect(hashed.causes.map((c) => c.rule)).toEqual(["WN-4", "CO-5", "CO-1"]);
 });
 
 test("pull_request_target takes the default activity types (EV-1) and branch filters on the base branch (BR-2), isn't skipped by [skip ci] (SK-1), and reads github.ref as the default branch (DB-4)", () => {

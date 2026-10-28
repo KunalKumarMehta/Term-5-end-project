@@ -27,7 +27,7 @@ test("the README's show defaults match the core's export", () => {
   expect(section("show-defaults")).toEqual(SHOW_DEFAULTS);
 });
 
-test("the README uses the guidelines' §13 headings in their order", () => {
+test("the README uses the guidelines' §13 headings in their order, uninterrupted, then WhyNoRun's own sections", () => {
   const required = [
     "Problem Statement",
     "Target Users",
@@ -41,7 +41,7 @@ test("the README uses the guidelines' §13 headings in their order", () => {
   ];
   expect(readme.startsWith("# WhyNoRun\n")).toBe(true);
   const headings = [...readme.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
-  expect(headings.filter((h) => required.includes(h!))).toEqual(required);
+  expect(headings.slice(0, required.length)).toEqual(required);
 });
 
 test("every relative link and image in the README points at a file in the repo", () => {
