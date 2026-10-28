@@ -1,0 +1,114 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const results = (page: Page) => page.getByRole("region", { name: "Results" });
+const scenarioPane = (page: Page) =>
+  page.getByRole("region", { name: "Scenario" });
+const chips = (page: Page, where: ReturnType<typeof results>) =>
+  where.getByRole("list", { name: "Required checks" }).getByRole("listitem");
+const checkRow = (page: Page, key: string) =>
+  results(page)
+    .getByRole("table")
+    .getByRole("row")
+    .filter({ has: page.getByRole("rowheader", { name: key, exact: true }) });
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("./");
+  await results(page).getByRole("button", { name: "Load example" }).click();
+  await results(page).getByRole("tab", { name: "Merge readiness" }).click();
+});
+
+test("Load example shows the required checks build and test as chips, in Repo facts and at the top of the Merge readiness tab", async ({
+  page,
+}) => {
+  for (const where of [scenarioPane(page), results(page)])
+    await expect(chips(page, where)).toHaveText([/^build/, /^test/]);
+  await expect(checkRow(page, "check › build")).toContainText("passes");
+  await expect(checkRow(page, "check › test")).toContainText("passes");
+});
+
+test("in Member PR, a docs-only change makes both checks Pending and blocks merge, rooted in RQ-1, with ◆ against Fork PR", async ({
+  page,
+}) => {
+  // #15 §4 segment 1:10.
+  await page.getByRole("banner").getByLabel("Compare").check();
+  const label = page.getByLabel("Scenario label");
+  await label.fill("Member PR");
+  await label.press("Enter");
+  await page.getByLabel("Actor kind").selectOption("member");
+  await page.getByLabel("Changed files").fill("docs/README.md");
+
+  for (const key of ["check › build", "check › test"])
+    await expect(checkRow(page, key).getByRole("cell")).toHaveText([
+      "◆ differs",
+      "Fork PRpasses",
+      "Member PRpending and blocks merge",
+    ]);
+  await checkRow(page, "check › test")
+    .getByRole("button", { name: "pending and blocks merge" })
+    .click();
+  const causes = page
+    .getByRole("region", { name: "Explanation" })
+    .getByLabel("Causes");
+  await expect(causes).toContainText("root RQ-1");
+  await expect(causes).toContainText("ci.yml:5");
+  await expect(causes).toContainText("Avoid requiring workflows");
+
+  // The All Verdicts grid's Required checks group holds the same rows.
+  await results(page).getByRole("tab", { name: "All Verdicts" }).click();
+  await expect(checkRow(page, "check › build").getByRole("cell")).toHaveText([
+    "◆ differs",
+    "Fork PRpasses",
+    "Member PRpending and blocks merge",
+  ]);
+});
+
+test("adding test twice flashes its chip and announces it, and the input clears; a trimmed new name adds a chip and × removes it", async ({
+  page,
+}) => {
+  const input = results(page).getByLabel("Add a required check");
+  await input.fill("test");
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  const test = chips(page, results(page)).filter({ hasText: /^test/ });
+  await expect(test).toHaveClass(/flash/);
+  await expect(page.locator("#status")).toHaveText("test is already required");
+  await expect(chips(page, results(page))).toHaveCount(2);
+
+  // Trimmed at the ends; an empty name adds nothing.
+  await input.fill("  lint  ");
+  await input.press("Enter");
+  await input.fill("   ");
+  await input.press("Enter");
+  await expect(chips(page, results(page))).toHaveText([
+    /^build/,
+    /^test/,
+    /^lint/,
+  ]);
+  await expect(checkRow(page, "check › lint")).toContainText(
+    "pending and blocks merge",
+  );
+  await results(page).getByRole("button", { name: "Remove lint" }).click();
+  await expect(chips(page, results(page))).toHaveCount(2);
+});
+
+test("with no required checks the tab says so, and strict mode adds RQ-10 to the Explanation", async ({
+  page,
+}) => {
+  for (const name of ["build", "test"])
+    await results(page)
+      .getByRole("button", { name: `Remove ${name}` })
+      .click();
+  await expect(results(page)).toContainText(
+    "No required checks yet, so no check can block merge. Add names above.",
+  );
+
+  const input = results(page).getByLabel("Add a required check");
+  await input.fill("build");
+  await input.press("Enter");
+  await results(page).getByLabel("Mode").selectOption("strict");
+  await expect(scenarioPane(page).getByLabel("Mode")).toHaveValue("strict");
+  await checkRow(page, "check › build").getByRole("button").click();
+  await expect(
+    page.getByRole("region", { name: "Explanation" }).getByLabel("Causes"),
+  ).toContainText("RQ-10");
+});

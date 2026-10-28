@@ -2907,6 +2907,172 @@ test("a base branch that looks like a SHA is Uncertain [runs, skipped] (BR-9) on
   expect(run("main").value).toBe("runs");
 });
 
+// Required checks (#71)
+
+const required = { repo: { date, required: ["build", "test"] } };
+
+test("the example on a member's docs-only PR: check › build and check › test are Pending and blocks merge, root RQ-1 then PA-2 at the paths: line, quoting RQ-8", () => {
+  const { verdicts } = simulate(example, {
+    event: { ...actorPr("member").event, changed: ["docs/README.md"] },
+    ...required,
+  });
+  for (const key of ["check › build", "check › test"]) {
+    const check = byKey(verdicts, key)!;
+    expect(check.value).toBe("pending and blocks merge");
+    const rules = check.causes.map((c) => c.rule);
+    expect(rules.slice(0, 2)).toEqual(["RQ-1", "PA-2"]);
+    expect(rules).toContain("RQ-8");
+    expect(check.causes[1]).toMatchObject({
+      spans: [{ path: ".github/workflows/ci.yml", line: 5 }],
+      inputs: [{ path: "event.changed", value: ["docs/README.md"] }],
+    });
+  }
+});
+
+test("the example's Fork PR: check › build and check › test pass, root RQ-4, their jobs running (WN-2) on the assumed Approval (WN-5)", () => {
+  const { verdicts } = simulate(example, { ...actorPr("fork"), ...required });
+  for (const key of ["check › build", "check › test"]) {
+    const check = byKey(verdicts, key)!;
+    expect(check.value).toBe("passes");
+    expect(check.causes.map((c) => c.rule)).toEqual(["RQ-4", "WN-2", "WN-5"]);
+  }
+});
+
+// Each Passes and Pending and blocks merge row of #6's badge table, on the `chain` set:
+// lint is skipped by its own if:, docs through a needs chain rooted in it, test runs.
+const checksOf = (
+  files: { path: string; text: string }[],
+  scenario: Scenario,
+) =>
+  Object.fromEntries(
+    simulate(files, scenario)
+      .verdicts.filter((v) => v.key.startsWith("check › "))
+      .map((v) => [v.key.slice(8), [v.value, ...v.causes.map((c) => c.rule)]]),
+  );
+
+test("a required job that runs passes (RQ-4); one skipped by its own if: passes (RQ-2), as does one skipped through a needs chain rooted in an if: skip", () => {
+  expect(
+    checksOf([chain], {
+      ...push,
+      repo: { date, required: ["test", "lint", "docs"] },
+    }),
+  ).toEqual({
+    test: ["passes", "RQ-4", "WN-2"],
+    lint: ["passes", "RQ-2", "JG-3"],
+    docs: ["passes", "RQ-2", "JG-3", "JG-1"],
+  });
+});
+
+test("a required name no job produces is Pending and blocks merge, root RQ-0 with the typed name", () => {
+  const { verdicts } = simulate([chain], {
+    ...push,
+    repo: { date, required: ["Test"] },
+  });
+  expect(byKey(verdicts, "check › Test")).toEqual({
+    key: "check › Test",
+    value: "pending and blocks merge",
+    causes: [
+      {
+        rule: "RQ-0",
+        spans: [],
+        inputs: [{ path: "repo.required", value: "Test" }],
+      },
+      { rule: "RQ-8", spans: [], inputs: [] },
+    ],
+  });
+});
+
+test("a check is named after the job's name: when set and non-empty, else its id, never the workflow (RQ-0)", () => {
+  const named = wf(
+    "ci.yml",
+    "name: CI\non: push\njobs:\n" +
+      job("b", "    name: Build\n") +
+      job("t", "    name: ''\n"),
+  );
+  expect(
+    checksOf([named], {
+      ...push,
+      repo: { date, required: ["Build", "b", "t", "CI / t"] },
+    }),
+  ).toEqual({
+    Build: ["passes", "RQ-4", "WN-2"],
+    b: ["pending and blocks merge", "RQ-0", "RQ-8"],
+    t: ["passes", "RQ-4", "WN-2"],
+    "CI / t": ["pending and blocks merge", "RQ-0", "RQ-8"],
+  });
+});
+
+test("a branch-filtered or commit-message-skipped GitHub workflow leaves its required checks Pending and blocks merge (RQ-1)", () => {
+  const files = [
+    wf("ci.yml", `on:\n  push:\n    branches: [main]\njobs:\n${job("build")}`),
+  ];
+  const scenario = (event: Event) => ({
+    event,
+    repo: { date, required: ["build"] },
+  });
+  expect(
+    checksOf(files, scenario({ name: "push", ref: "feature" })).build!.slice(
+      0,
+      3,
+    ),
+  ).toEqual(["pending and blocks merge", "RQ-1", "BR-4"]);
+  expect(
+    checksOf(
+      files,
+      scenario({ name: "push", ref: "main", message: "fix [skip ci]" }),
+    ).build!.slice(0, 3),
+  ).toEqual(["pending and blocks merge", "RQ-1", "SK-1"]);
+});
+
+test("strict mode adds RQ-10 as an Explanation note on every check, never changing the badge", () => {
+  const checks = checksOf([chain], {
+    ...push,
+    repo: { date, required: ["test", "gone"], strict: true },
+  });
+  expect(checks).toEqual({
+    test: ["passes", "RQ-4", "WN-2", "RQ-10"],
+    gone: ["pending and blocks merge", "RQ-0", "RQ-8", "RQ-10"],
+  });
+});
+
+test("checks exist only for activity types that create a SHA: a labeled pull_request's checks are unsupported (WN-3)", () => {
+  const { verdicts } = simulate(example, {
+    ...actorPr("member", { type: "labeled" }),
+    ...required,
+  });
+  expect(byKey(verdicts, "check › build")).toEqual({
+    key: "check › build",
+    value: "unsupported",
+    causes: [
+      {
+        rule: "WN-3",
+        spans: [],
+        inputs: [{ path: "event.type", value: "labeled" }],
+      },
+    ],
+  });
+});
+
+test("a required name typed twice gets one key, and with no required checks there are none", () => {
+  const keys = (names: string[]) =>
+    simulate([chain], { ...push, repo: { date, required: names } })
+      .verdicts.map((v) => v.key)
+      .filter((k) => k.startsWith("check › "));
+  expect(keys(["test", "test"])).toEqual(["check › test"]);
+  expect(keys([])).toEqual([]);
+});
+
+test("a check › <name> key is never a candidate for an Assumption on a job", () => {
+  const { unmatchedAssumptions } = simulate([chain], {
+    ...push,
+    repo: { date, required: ["test"] },
+    assume: { "old.yml › test": "fails" },
+  });
+  expect(unmatchedAssumptions).toEqual([
+    { key: "old.yml › test", candidates: ["ci.yml › test"] },
+  ]);
+});
+
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {
     expect(rule.text).not.toBe("");

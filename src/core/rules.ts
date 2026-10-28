@@ -388,6 +388,42 @@ const rows: Rule[] = [
     confidence: "Low",
   },
   {
+    id: "RQ-0",
+    text: 'A workflow job\'s required-check name is its job name: `name:` if set and non-empty, otherwise the job id. "Required status checks do not take workflow, matrix, or event trigger types into account."',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
+    id: "RQ-1",
+    text: 'A GitHub workflow skipped by a path filter, a branch filter or a commit-message skip creates no check runs: its required checks stay Pending ("Waiting for status to be reported") and block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
+    id: "RQ-2",
+    text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
+    id: "RQ-4",
+    text: "A required check passes with a `success`, `skipped` or `neutral` conclusion on the latest head SHA.",
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging",
+    confidence: "High",
+  },
+  {
+    id: "RQ-8",
+    text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
+    id: "RQ-10",
+    text: 'Strict mode ("Require branches to be up to date before merging"): a pull request behind its base can\'t merge even with every check green, and bringing it up to date creates a new head SHA whose required checks must pass again.',
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging",
+    confidence: "High",
+  },
+  {
     id: "WN-1",
     text: "Assumption: this job fails.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",

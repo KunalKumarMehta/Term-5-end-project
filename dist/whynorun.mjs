@@ -8773,6 +8773,439 @@ function remote(key, job, spans, scenario, { block, level }) {
   return [...tokens, { key: `${key} \u203A secrets`, ...secrets }];
 }
 
+// src/core/workflowpattern.ts
+var quoteMeta = (s) => s.replace(/[\\.+*?()|[\]{}^$]/g, "\\$&");
+function compilePattern(raw, flags = "") {
+  const negative = raw.startsWith("!");
+  const pattern = negative ? raw.slice(1) : raw;
+  const source = patternToRegex(pattern);
+  let regex;
+  try {
+    regex = new RegExp(source, flags);
+  } catch {
+    throw new Error(`invalid Pattern '${pattern}'`);
+  }
+  return { pattern, negative, regex };
+}
+function patternToRegex(pattern) {
+  let r = "^";
+  let pos = 0;
+  const errors = /* @__PURE__ */ new Map();
+  const validChar = (a, b, test) => test !== void 0 && test >= a && test <= b;
+  while (pos < pattern.length) {
+    const c = pattern[pos];
+    switch (c) {
+      case "*":
+        if (pattern[pos + 1] === "*") {
+          if (pattern[pos + 2] === "/") {
+            r += "(.+/)?";
+            pos += 3;
+          } else {
+            r += ".*";
+            pos += 2;
+          }
+        } else {
+          r += "[^/]*";
+          pos++;
+        }
+        break;
+      case "+":
+      case "?":
+        r += pos > 0 ? c : quoteMeta(c);
+        pos++;
+        break;
+      case "[": {
+        r += c;
+        pos++;
+        if (pattern[pos] === "]") {
+          errors.set(pos, "Unexpected empty brackets '[]'");
+          pos++;
+          break;
+        }
+        const startPos = pos;
+        while (pos < pattern.length && pattern[pos] !== "]") {
+          const d = pattern[pos];
+          if (d === "-") {
+            if (pos <= startPos || pos + 1 >= pattern.length) {
+              errors.set(pos, "Invalid range");
+              pos++;
+              continue;
+            }
+            const before = pattern[pos - 1];
+            const after = pattern[pos + 1];
+            const validRange = (a, b) => validChar(a, b, before) && validChar(a, b, after) && before <= after;
+            if (!validRange("A", "z") && !validRange("0", "9")) {
+              errors.set(pos, "Ranges can only include a-z, A-Z, A-z, and 0-9");
+              pos++;
+              continue;
+            }
+            r += pattern.slice(pos, pos + 2);
+            pos += 2;
+          } else {
+            if (!validChar("A", "z", d) && !validChar("0", "9", d)) {
+              errors.set(pos, "Ranges can only include a-z, A-Z and 0-9");
+              pos++;
+              continue;
+            }
+            r += quoteMeta(d);
+            pos++;
+          }
+        }
+        if (pos >= pattern.length || pattern[pos] !== "]") {
+          errors.set(pos, "Missing closing bracket ']' after '['");
+          pos++;
+        }
+        r += "]";
+        pos++;
+        break;
+      }
+      case "\\":
+        if (pos + 1 >= pattern.length) {
+          errors.set(pos, "Missing symbol after \\");
+          pos++;
+          break;
+        }
+        r += quoteMeta(pattern[pos + 1]);
+        pos += 2;
+        break;
+      default:
+        r += quoteMeta(c);
+        pos++;
+    }
+  }
+  if (errors.size > 0) {
+    const list = [...errors].sort(([a], [b]) => a - b).map(([at, err]) => `Position: ${at} Error: ${err}`);
+    throw new Error(`invalid Pattern '${pattern}': ${list.join(", ")}`);
+  }
+  return r + "$";
+}
+function compilePatterns(patterns, flags = "") {
+  return patterns.map((p) => compilePattern(p, flags));
+}
+function skip(sequence, input) {
+  if (sequence.length === 0) return { skip: false, by: -1 };
+  let matched = false;
+  let by = -1;
+  sequence.forEach((item, i) => {
+    if (item.regex.test(input)) {
+      matched = !item.negative;
+      by = i;
+    }
+  });
+  return { skip: !matched, by };
+}
+function filter(sequence, input) {
+  const by = sequence.findIndex(
+    (item) => item.regex.test(input) === !item.negative
+  );
+  return { skip: by >= 0, by };
+}
+
+// src/core/triggers.ts
+var KINDS = ["branches", "tags"];
+var SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|\n\n\nskip-checks: ?true\s*$/;
+var DIFF_LIMIT = 3e3;
+var GLOBS = [
+  ["GL-1", /\*/],
+  ["GL-2", /.[?+]/],
+  ["GL-3", /\[/],
+  ["GL-4", /^!|\\/]
+];
+var globCauses = (pattern, spans) => GLOBS.filter(([, re]) => re.test(pattern)).map(([rule]) => ({
+  rule,
+  spans,
+  inputs: []
+}));
+var PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
+var settingsOf = (parsed, event) => {
+  const value = parsed.events[event];
+  return typeof value === "object" && value !== null ? value : {};
+};
+function filterDiagnostics(parsed) {
+  const found = [];
+  for (const event of Object.keys(parsed.events)) {
+    const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
+    const settings = settingsOf(parsed, event);
+    for (const kind of [...KINDS, "paths"]) {
+      const ignore = `${kind}-ignore`;
+      if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
+        found.push({
+          ...at(`${event}.${ignore}`),
+          rule: kind === "paths" ? "PA-1" : "BR-1",
+          message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
+        });
+      for (const key of [kind, ignore]) {
+        const list = settings[key];
+        if (!Array.isArray(list)) continue;
+        list.forEach((pattern, i) => {
+          try {
+            compilePattern(String(pattern));
+          } catch (err) {
+            found.push({
+              ...at(`${event}.${key}.${i}`),
+              message: err.message
+            });
+          }
+        });
+      }
+    }
+  }
+  return found;
+}
+function trigger(parsed, event, defaultBranch) {
+  const decided = byRef(parsed, event, defaultBranch);
+  if (decided.value === "skipped") return decided;
+  const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
+  const message = event.message;
+  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
+    return result;
+  const entry = parsed.onEntries.get(event.name);
+  return {
+    value: "skipped",
+    causes: [
+      {
+        rule: "SK-1",
+        spans: entry ? [entry] : [],
+        inputs: [{ path: "event.message", value: message }]
+      },
+      ...result.causes
+    ]
+  };
+}
+var SHA_LIKE = /^[0-9a-f]{7,40}$/i;
+function shaLike(result, event, defaultBranch) {
+  if (event.name !== "pull_request_target" || result.value !== "runs")
+    return result;
+  const branches = [
+    event.base === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: "event.base", value: event.base },
+    ...event.ref === void 0 ? [] : [{ path: "event.ref", value: event.ref }]
+  ];
+  const inputs = branches.filter(
+    (b) => SHA_LIKE.test(b.value.replace(/^refs\/heads\//, ""))
+  );
+  if (inputs.length === 0) return result;
+  return {
+    value: "uncertain",
+    causes: [{ rule: "BR-9", spans: [], inputs }, ...result.causes],
+    possible: ["runs", "skipped"],
+    settle: []
+  };
+}
+function byPaths(parsed, event, decided) {
+  const name2 = event.name;
+  const settings = settingsOf(parsed, name2);
+  const has = (key2) => Object.hasOwn(settings, key2);
+  const key = has("paths") ? "paths" : "paths-ignore";
+  const list = settings[key];
+  if (!Array.isArray(list) || list.length === 0) return decided;
+  const patterns = list.map(String);
+  const spans = (at2) => {
+    const span = parsed.onEntries.get(`${name2}.${at2}`);
+    return span ? [span] : [];
+  };
+  const keySpans = spans(key);
+  const include = key === "paths";
+  const ref = event.ref ?? "";
+  if (name2 === "push" && ref.startsWith("refs/tags/")) {
+    const tagged = {
+      rule: "PA-6",
+      spans: keySpans,
+      inputs: [{ path: "event.ref", value: ref }]
+    };
+    if (include && !has("tags") && !has("tags-ignore"))
+      return {
+        value: "uncertain",
+        causes: [tagged, ...decided.causes],
+        possible: ["runs", "skipped"],
+        settle: []
+      };
+    return { ...decided, causes: [...decided.causes, tagged] };
+  }
+  const changed = event.changed ?? [];
+  const input = { path: "event.changed", value: changed };
+  const filtered = KINDS.some((k) => has(k) || has(`${k}-ignore`));
+  const combine = (value, own2) => {
+    const both = filtered ? [own2[0], { rule: "BR-6", spans: [], inputs: [] }, ...own2.slice(1)] : own2;
+    if (value === "uncertain")
+      return {
+        value,
+        causes: [...both, ...decided.causes],
+        possible: ["runs", "skipped"],
+        settle: []
+      };
+    if (value === "runs" && decided.value === "uncertain")
+      return { ...decided, causes: [...decided.causes, ...both] };
+    return { value, causes: [...both, ...decided.causes] };
+  };
+  if (changed.length === 0)
+    return combine("skipped", [
+      { rule: "PA-3", spans: keySpans, inputs: [input] }
+    ]);
+  if (!include && changed.length > DIFF_LIMIT)
+    return combine("uncertain", [
+      { rule: "PA-5", spans: keySpans, inputs: [input] }
+    ]);
+  const compiled = compilePatterns(patterns);
+  const kept = (file) => !(include ? skip : filter)(compiled, file).skip;
+  const deciding = changed.slice(0, DIFF_LIMIT).find(kept);
+  const by = deciding === void 0 || !include ? -1 : skip(compiled, deciding).by;
+  const at = by >= 0 ? spans(`${key}.${by}`) : keySpans;
+  const own = [
+    { rule: "PA-2", spans: at, inputs: [input] },
+    { rule: "PA-7", spans: [], inputs: [] },
+    ...by >= 0 ? globCauses(patterns[by], at) : []
+  ];
+  if (deciding !== void 0) return combine("runs", own);
+  if (changed.slice(DIFF_LIMIT).some(kept))
+    own.unshift({ rule: "PA-5", spans: keySpans, inputs: [input] });
+  return combine("skipped", own);
+}
+function byRef(parsed, event, defaultBranch) {
+  const name2 = event.name;
+  const spans = (key2) => {
+    const span = parsed.onEntries.get(key2);
+    return span ? [span] : [];
+  };
+  const named = { path: "event.name", value: name2 };
+  if (!Object.hasOwn(parsed.events, name2))
+    return {
+      value: "skipped",
+      causes: [
+        {
+          rule: "EV-0",
+          spans: parsed.onSpan ? [parsed.onSpan] : [],
+          inputs: [named]
+        }
+      ]
+    };
+  const settings = settingsOf(parsed, name2);
+  const has = (key2) => Object.hasOwn(settings, key2);
+  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
+  const after = [];
+  if (name2 !== "push") {
+    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
+    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
+    const typed = {
+      rule: "EV-1",
+      spans: spans(has("types") ? `${name2}.types` : name2),
+      inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
+    };
+    if (!wanted.some((t) => types.includes(t)))
+      return { value: "skipped", causes: [typed] };
+    after.push(typed);
+    if (event.type === "stacked")
+      after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
+  }
+  const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
+  after.push({ rule: copy, spans: [], inputs: [named] });
+  const given = name2 === "push" ? event.ref : event.base;
+  const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
+  const ref = given ?? `refs/heads/${defaultBranch}`;
+  const kind = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
+  const short = ref.replace(/^refs\/(heads|tags)\//, "");
+  const other = kind === "branches" ? "tags" : "branches";
+  const include = has(kind);
+  if (!include && !has(`${kind}-ignore`)) {
+    const otherKey = has(other) ? other : `${other}-ignore`;
+    if (name2 === "push" && has(otherKey))
+      return {
+        value: "skipped",
+        causes: [
+          { rule: "BR-3", spans: spans(`push.${otherKey}`), inputs: [input] },
+          ...after
+        ]
+      };
+    return { value: "runs", causes: [listed, ...after] };
+  }
+  const key = include ? kind : `${kind}-ignore`;
+  const patterns = settings[key].map(String);
+  const decide = (list, flags = "") => (include ? skip : filter)(compilePatterns(list, flags), short);
+  const base = decide(patterns);
+  const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
+  const matched = {
+    rule: name2 === "push" ? "BR-3" : "BR-2",
+    spans: spans(`${name2}.${key}`),
+    inputs: [input]
+  };
+  const prefix = `refs/${kind === "tags" ? "tags" : "heads"}/`;
+  const fullRef = patterns.findIndex(
+    (p) => p.replace(/^!/, "").startsWith(prefix)
+  );
+  const uncertain = (rule, i) => ({
+    value: "uncertain",
+    causes: [{ rule, spans: at(i), inputs: [input] }, matched, ...after],
+    possible: ["runs", "skipped"],
+    settle: []
+  });
+  if (fullRef >= 0) {
+    const asFull = decide(
+      patterns.map((p) => p.replace(new RegExp(`^(!?)${prefix}`), "$1"))
+    );
+    if (asFull.skip !== base.skip) return uncertain("BR-8", fullRef);
+  }
+  const anyCase = decide(patterns, "i");
+  if (anyCase.skip !== base.skip)
+    return uncertain("GL-6", anyCase.by >= 0 ? anyCase.by : base.by);
+  return {
+    value: base.skip ? "skipped" : "runs",
+    causes: [
+      { rule: include ? "BR-4" : "BR-5", spans: at(base.by), inputs: [input] },
+      matched,
+      ...globCauses(patterns[base.by] ?? "", at(base.by)),
+      ...after
+    ]
+  };
+}
+
+// src/core/checks.ts
+var cause2 = (rule, inputs = []) => ({
+  rule,
+  spans: [],
+  inputs
+});
+function checkVerdicts(producers, { event, repo }) {
+  const names = [...new Set(repo.required)];
+  if (event.name !== "push" && event.type !== void 0 && !PR_DEFAULT_TYPES.includes(event.type))
+    return names.map((name2) => ({
+      key: `check \u203A ${name2}`,
+      value: "unsupported",
+      causes: [cause2("WN-3", [{ path: "event.type", value: event.type }])]
+    }));
+  const notes = repo.strict ? [cause2("RQ-10", [{ path: "repo.strict", value: true }])] : [];
+  return names.map((name2) => ({
+    key: `check \u203A ${name2}`,
+    ...badge(name2, producers, notes)
+  }));
+}
+function badge(name2, producers, notes) {
+  const pending = (...causes) => ({
+    value: "pending and blocks merge",
+    causes: [...causes, cause2("RQ-8"), ...notes]
+  });
+  const producer = producers.find((p) => p.name === name2);
+  if (!producer)
+    return pending(cause2("RQ-0", [{ path: "repo.required", value: name2 }]));
+  const { job, workflow } = producer;
+  if (job.value === "runs")
+    return {
+      value: "passes",
+      causes: [cause2("RQ-4"), ...job.causes, ...notes]
+    };
+  if (job.value === "skipped" && job.causes[0]?.rule === "JG-3")
+    return {
+      value: "passes",
+      causes: [cause2("RQ-2"), ...job.causes, ...notes]
+    };
+  if (job.value === "no-run" && workflow.value === "skipped")
+    return pending(cause2("RQ-1"), ...job.causes);
+  return {
+    value: "uncertain",
+    causes: [...job.causes, ...notes],
+    settle: job.settle ?? [],
+    ...job.hints && { hints: job.hints }
+  };
+}
+
 // node_modules/@actions/expressions/dist/ast.js
 var Expr = class {
 };
@@ -14270,6 +14703,7 @@ var defaultOptions = {
 
 // src/core/parser.ts
 var import_yaml2 = __toESM(require_dist(), 1);
+var checkName = (job) => job.name && isString(job.name) ? job.name.value : void 0;
 var ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
 var SCHEMA_LAG = { root: ["cache-mode"], step: ["background"] };
 function parseWorkflowFile(path, text) {
@@ -15537,393 +15971,9 @@ function settleable(path) {
   }
 }
 
-// src/core/workflowpattern.ts
-var quoteMeta = (s) => s.replace(/[\\.+*?()|[\]{}^$]/g, "\\$&");
-function compilePattern(raw, flags = "") {
-  const negative = raw.startsWith("!");
-  const pattern = negative ? raw.slice(1) : raw;
-  const source = patternToRegex(pattern);
-  let regex;
-  try {
-    regex = new RegExp(source, flags);
-  } catch {
-    throw new Error(`invalid Pattern '${pattern}'`);
-  }
-  return { pattern, negative, regex };
-}
-function patternToRegex(pattern) {
-  let r = "^";
-  let pos = 0;
-  const errors = /* @__PURE__ */ new Map();
-  const validChar = (a, b, test) => test !== void 0 && test >= a && test <= b;
-  while (pos < pattern.length) {
-    const c = pattern[pos];
-    switch (c) {
-      case "*":
-        if (pattern[pos + 1] === "*") {
-          if (pattern[pos + 2] === "/") {
-            r += "(.+/)?";
-            pos += 3;
-          } else {
-            r += ".*";
-            pos += 2;
-          }
-        } else {
-          r += "[^/]*";
-          pos++;
-        }
-        break;
-      case "+":
-      case "?":
-        r += pos > 0 ? c : quoteMeta(c);
-        pos++;
-        break;
-      case "[": {
-        r += c;
-        pos++;
-        if (pattern[pos] === "]") {
-          errors.set(pos, "Unexpected empty brackets '[]'");
-          pos++;
-          break;
-        }
-        const startPos = pos;
-        while (pos < pattern.length && pattern[pos] !== "]") {
-          const d = pattern[pos];
-          if (d === "-") {
-            if (pos <= startPos || pos + 1 >= pattern.length) {
-              errors.set(pos, "Invalid range");
-              pos++;
-              continue;
-            }
-            const before = pattern[pos - 1];
-            const after = pattern[pos + 1];
-            const validRange = (a, b) => validChar(a, b, before) && validChar(a, b, after) && before <= after;
-            if (!validRange("A", "z") && !validRange("0", "9")) {
-              errors.set(pos, "Ranges can only include a-z, A-Z, A-z, and 0-9");
-              pos++;
-              continue;
-            }
-            r += pattern.slice(pos, pos + 2);
-            pos += 2;
-          } else {
-            if (!validChar("A", "z", d) && !validChar("0", "9", d)) {
-              errors.set(pos, "Ranges can only include a-z, A-Z and 0-9");
-              pos++;
-              continue;
-            }
-            r += quoteMeta(d);
-            pos++;
-          }
-        }
-        if (pos >= pattern.length || pattern[pos] !== "]") {
-          errors.set(pos, "Missing closing bracket ']' after '['");
-          pos++;
-        }
-        r += "]";
-        pos++;
-        break;
-      }
-      case "\\":
-        if (pos + 1 >= pattern.length) {
-          errors.set(pos, "Missing symbol after \\");
-          pos++;
-          break;
-        }
-        r += quoteMeta(pattern[pos + 1]);
-        pos += 2;
-        break;
-      default:
-        r += quoteMeta(c);
-        pos++;
-    }
-  }
-  if (errors.size > 0) {
-    const list = [...errors].sort(([a], [b]) => a - b).map(([at, err]) => `Position: ${at} Error: ${err}`);
-    throw new Error(`invalid Pattern '${pattern}': ${list.join(", ")}`);
-  }
-  return r + "$";
-}
-function compilePatterns(patterns, flags = "") {
-  return patterns.map((p) => compilePattern(p, flags));
-}
-function skip(sequence, input) {
-  if (sequence.length === 0) return { skip: false, by: -1 };
-  let matched = false;
-  let by = -1;
-  sequence.forEach((item, i) => {
-    if (item.regex.test(input)) {
-      matched = !item.negative;
-      by = i;
-    }
-  });
-  return { skip: !matched, by };
-}
-function filter(sequence, input) {
-  const by = sequence.findIndex(
-    (item) => item.regex.test(input) === !item.negative
-  );
-  return { skip: by >= 0, by };
-}
-
-// src/core/triggers.ts
-var KINDS = ["branches", "tags"];
-var SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|\n\n\nskip-checks: ?true\s*$/;
-var DIFF_LIMIT = 3e3;
-var GLOBS = [
-  ["GL-1", /\*/],
-  ["GL-2", /.[?+]/],
-  ["GL-3", /\[/],
-  ["GL-4", /^!|\\/]
-];
-var globCauses = (pattern, spans) => GLOBS.filter(([, re]) => re.test(pattern)).map(([rule]) => ({
-  rule,
-  spans,
-  inputs: []
-}));
-var PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
-var settingsOf = (parsed, event) => {
-  const value = parsed.events[event];
-  return typeof value === "object" && value !== null ? value : {};
-};
-function filterDiagnostics(parsed) {
-  const found = [];
-  for (const event of Object.keys(parsed.events)) {
-    const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
-    const settings = settingsOf(parsed, event);
-    for (const kind of [...KINDS, "paths"]) {
-      const ignore = `${kind}-ignore`;
-      if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
-        found.push({
-          ...at(`${event}.${ignore}`),
-          rule: kind === "paths" ? "PA-1" : "BR-1",
-          message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
-        });
-      for (const key of [kind, ignore]) {
-        const list = settings[key];
-        if (!Array.isArray(list)) continue;
-        list.forEach((pattern, i) => {
-          try {
-            compilePattern(String(pattern));
-          } catch (err) {
-            found.push({
-              ...at(`${event}.${key}.${i}`),
-              message: err.message
-            });
-          }
-        });
-      }
-    }
-  }
-  return found;
-}
-function trigger(parsed, event, defaultBranch) {
-  const decided = byRef(parsed, event, defaultBranch);
-  if (decided.value === "skipped") return decided;
-  const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
-  const message = event.message;
-  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
-    return result;
-  const entry = parsed.onEntries.get(event.name);
-  return {
-    value: "skipped",
-    causes: [
-      {
-        rule: "SK-1",
-        spans: entry ? [entry] : [],
-        inputs: [{ path: "event.message", value: message }]
-      },
-      ...result.causes
-    ]
-  };
-}
-var SHA_LIKE = /^[0-9a-f]{7,40}$/i;
-function shaLike(result, event, defaultBranch) {
-  if (event.name !== "pull_request_target" || result.value !== "runs")
-    return result;
-  const branches = [
-    event.base === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: "event.base", value: event.base },
-    ...event.ref === void 0 ? [] : [{ path: "event.ref", value: event.ref }]
-  ];
-  const inputs = branches.filter(
-    (b) => SHA_LIKE.test(b.value.replace(/^refs\/heads\//, ""))
-  );
-  if (inputs.length === 0) return result;
-  return {
-    value: "uncertain",
-    causes: [{ rule: "BR-9", spans: [], inputs }, ...result.causes],
-    possible: ["runs", "skipped"],
-    settle: []
-  };
-}
-function byPaths(parsed, event, decided) {
-  const name2 = event.name;
-  const settings = settingsOf(parsed, name2);
-  const has = (key2) => Object.hasOwn(settings, key2);
-  const key = has("paths") ? "paths" : "paths-ignore";
-  const list = settings[key];
-  if (!Array.isArray(list) || list.length === 0) return decided;
-  const patterns = list.map(String);
-  const spans = (at2) => {
-    const span = parsed.onEntries.get(`${name2}.${at2}`);
-    return span ? [span] : [];
-  };
-  const keySpans = spans(key);
-  const include = key === "paths";
-  const ref = event.ref ?? "";
-  if (name2 === "push" && ref.startsWith("refs/tags/")) {
-    const tagged = {
-      rule: "PA-6",
-      spans: keySpans,
-      inputs: [{ path: "event.ref", value: ref }]
-    };
-    if (include && !has("tags") && !has("tags-ignore"))
-      return {
-        value: "uncertain",
-        causes: [tagged, ...decided.causes],
-        possible: ["runs", "skipped"],
-        settle: []
-      };
-    return { ...decided, causes: [...decided.causes, tagged] };
-  }
-  const changed = event.changed ?? [];
-  const input = { path: "event.changed", value: changed };
-  const filtered = KINDS.some((k) => has(k) || has(`${k}-ignore`));
-  const combine = (value, own2) => {
-    const both = filtered ? [own2[0], { rule: "BR-6", spans: [], inputs: [] }, ...own2.slice(1)] : own2;
-    if (value === "uncertain")
-      return {
-        value,
-        causes: [...both, ...decided.causes],
-        possible: ["runs", "skipped"],
-        settle: []
-      };
-    if (value === "runs" && decided.value === "uncertain")
-      return { ...decided, causes: [...decided.causes, ...both] };
-    return { value, causes: [...both, ...decided.causes] };
-  };
-  if (changed.length === 0)
-    return combine("skipped", [
-      { rule: "PA-3", spans: keySpans, inputs: [input] }
-    ]);
-  if (!include && changed.length > DIFF_LIMIT)
-    return combine("uncertain", [
-      { rule: "PA-5", spans: keySpans, inputs: [input] }
-    ]);
-  const compiled = compilePatterns(patterns);
-  const kept = (file) => !(include ? skip : filter)(compiled, file).skip;
-  const deciding = changed.slice(0, DIFF_LIMIT).find(kept);
-  const by = deciding === void 0 || !include ? -1 : skip(compiled, deciding).by;
-  const at = by >= 0 ? spans(`${key}.${by}`) : keySpans;
-  const own = [
-    { rule: "PA-2", spans: at, inputs: [input] },
-    { rule: "PA-7", spans: [], inputs: [] },
-    ...by >= 0 ? globCauses(patterns[by], at) : []
-  ];
-  if (deciding !== void 0) return combine("runs", own);
-  if (changed.slice(DIFF_LIMIT).some(kept))
-    own.unshift({ rule: "PA-5", spans: keySpans, inputs: [input] });
-  return combine("skipped", own);
-}
-function byRef(parsed, event, defaultBranch) {
-  const name2 = event.name;
-  const spans = (key2) => {
-    const span = parsed.onEntries.get(key2);
-    return span ? [span] : [];
-  };
-  const named = { path: "event.name", value: name2 };
-  if (!Object.hasOwn(parsed.events, name2))
-    return {
-      value: "skipped",
-      causes: [
-        {
-          rule: "EV-0",
-          spans: parsed.onSpan ? [parsed.onSpan] : [],
-          inputs: [named]
-        }
-      ]
-    };
-  const settings = settingsOf(parsed, name2);
-  const has = (key2) => Object.hasOwn(settings, key2);
-  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
-  const after = [];
-  if (name2 !== "push") {
-    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
-    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
-    const typed = {
-      rule: "EV-1",
-      spans: spans(has("types") ? `${name2}.types` : name2),
-      inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
-    };
-    if (!wanted.some((t) => types.includes(t)))
-      return { value: "skipped", causes: [typed] };
-    after.push(typed);
-    if (event.type === "stacked")
-      after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
-  }
-  const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
-  after.push({ rule: copy, spans: [], inputs: [named] });
-  const given = name2 === "push" ? event.ref : event.base;
-  const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
-  const ref = given ?? `refs/heads/${defaultBranch}`;
-  const kind = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
-  const short = ref.replace(/^refs\/(heads|tags)\//, "");
-  const other = kind === "branches" ? "tags" : "branches";
-  const include = has(kind);
-  if (!include && !has(`${kind}-ignore`)) {
-    const otherKey = has(other) ? other : `${other}-ignore`;
-    if (name2 === "push" && has(otherKey))
-      return {
-        value: "skipped",
-        causes: [
-          { rule: "BR-3", spans: spans(`push.${otherKey}`), inputs: [input] },
-          ...after
-        ]
-      };
-    return { value: "runs", causes: [listed, ...after] };
-  }
-  const key = include ? kind : `${kind}-ignore`;
-  const patterns = settings[key].map(String);
-  const decide = (list, flags = "") => (include ? skip : filter)(compilePatterns(list, flags), short);
-  const base = decide(patterns);
-  const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
-  const matched = {
-    rule: name2 === "push" ? "BR-3" : "BR-2",
-    spans: spans(`${name2}.${key}`),
-    inputs: [input]
-  };
-  const prefix = `refs/${kind === "tags" ? "tags" : "heads"}/`;
-  const fullRef = patterns.findIndex(
-    (p) => p.replace(/^!/, "").startsWith(prefix)
-  );
-  const uncertain = (rule, i) => ({
-    value: "uncertain",
-    causes: [{ rule, spans: at(i), inputs: [input] }, matched, ...after],
-    possible: ["runs", "skipped"],
-    settle: []
-  });
-  if (fullRef >= 0) {
-    const asFull = decide(
-      patterns.map((p) => p.replace(new RegExp(`^(!?)${prefix}`), "$1"))
-    );
-    if (asFull.skip !== base.skip) return uncertain("BR-8", fullRef);
-  }
-  const anyCase = decide(patterns, "i");
-  if (anyCase.skip !== base.skip)
-    return uncertain("GL-6", anyCase.by >= 0 ? anyCase.by : base.by);
-  return {
-    value: base.skip ? "skipped" : "runs",
-    causes: [
-      { rule: include ? "BR-4" : "BR-5", spans: at(base.by), inputs: [input] },
-      matched,
-      ...globCauses(patterns[base.by] ?? "", at(base.by)),
-      ...after
-    ]
-  };
-}
-
 // src/core/jobs.ts
 var OTHER = "\0other";
-var cause2 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
+var cause3 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
 var ABSENT = {
   push: ["pull_request", "action"],
   pull_request: ["head_commit"],
@@ -16150,13 +16200,13 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
             settle: false,
             compared: [],
             candidates: [false, true],
-            after: [cause2("CO-1", step.uses)]
+            after: [cause3("CO-1", step.uses)]
           },
           assigned
         );
         reads.push(name2);
         if (!yes) continue;
-        pinned.push(cause2("CO-3", step.uses));
+        pinned.push(cause3("CO-3", step.uses));
       }
       const co1 = {
         rule: "CO-1",
@@ -16165,7 +16215,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
       };
       if (!step.continueOnError)
         return { fails: true, parts: [co1, ...pinned, ...found] };
-      found.push(cause2("CO-6", step.continueOnError), co1, ...pinned);
+      found.push(cause3("CO-6", step.continueOnError), co1, ...pinned);
     }
     return found.length > 0 ? { fails: false, parts: found } : void 0;
   };
@@ -16200,7 +16250,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
             compared: [],
             candidates: [false, true],
             path: e.needed,
-            after: [cause2("CO-5", input.span), cause2("CO-1", step.uses)]
+            after: [cause3("CO-5", input.span), cause3("CO-1", step.uses)]
           },
           assigned
         );
@@ -16274,7 +16324,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
         }
         result = {
           value: "fails",
-          parts: [cause2("WN-1", at.id, [{ path: key(id), value: "fails" }])],
+          parts: [cause3("WN-1", at.id, [{ path: key(id), value: "fails" }])],
           conclusion: succeeds ? "success" : "failure",
           failed: failed || !succeeds
         };
@@ -16289,9 +16339,9 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
           value: "runs",
           parts: [
             // A dependent that runs past a failed or skipped need does so by its status function.
-            ...blocker ? [cause2("JG-1", at.if ?? at.id), { from: blocker }] : [],
+            ...blocker ? [cause3("JG-1", at.if ?? at.id), { from: blocker }] : [],
             ...refusal?.parts ?? [],
-            cause2("WN-2", at.id)
+            cause3("WN-2", at.id)
           ],
           conclusion: "success",
           failed
@@ -16315,9 +16365,9 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
           value: "skipped",
           parts: byNeeds ? [
             { from: blocker },
-            cause2("JG-1", at.needs ?? at.id),
-            ...implicit ? [cause2("JG-2", at.if)] : []
-          ] : [cause2("JG-3", at.if ?? at.id)],
+            cause3("JG-1", at.needs ?? at.id),
+            ...implicit ? [cause3("JG-2", at.if)] : []
+          ] : [cause3("JG-3", at.if ?? at.id)],
           conclusion: "skipped",
           failed
         };
@@ -16366,11 +16416,11 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
         (name2) => [name2, unsettled.get(name2)]
       );
       const causes = reads.flatMap(([, u]) => [
-        cause2(u.rule, u.span),
+        cause3(u.rule, u.span),
         ...u.after ?? []
       ]);
       if (reads[0][1].job !== id && spans(id).needs)
-        causes.push(cause2("JG-1", spans(id).needs));
+        causes.push(cause3("JG-1", spans(id).needs));
       const settle = reads.filter(([, u]) => u.settle);
       verdict = {
         key: key(id),
@@ -16862,6 +16912,42 @@ var rows = [
     confidence: "Low"
   },
   {
+    id: "RQ-0",
+    text: 'A workflow job\'s required-check name is its job name: `name:` if set and non-empty, otherwise the job id. "Required status checks do not take workflow, matrix, or event trigger types into account."',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-1",
+    text: 'A GitHub workflow skipped by a path filter, a branch filter or a commit-message skip creates no check runs: its required checks stay Pending ("Waiting for status to be reported") and block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-2",
+    text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-4",
+    text: "A required check passes with a `success`, `skipped` or `neutral` conclusion on the latest head SHA.",
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging",
+    confidence: "High"
+  },
+  {
+    id: "RQ-8",
+    text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-10",
+    text: `Strict mode ("Require branches to be up to date before merging"): a pull request behind its base can't merge even with every check green, and bringing it up to date creates a new head SHA whose required checks must pass again.`,
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging",
+    confidence: "High"
+  },
+  {
     id: "WN-1",
     text: "Assumption: this job fails.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
@@ -16996,7 +17082,7 @@ function simulate(files, input) {
   };
 }
 function unmatched(scenario, verdicts) {
-  const jobs = verdicts.map((v) => v.key.split(" \u203A ")).filter((parts) => parts.length === 2);
+  const jobs = verdicts.map((v) => v.key.split(" \u203A ")).filter((parts) => parts.length === 2 && parts[0] !== "check");
   return Object.keys(scenario.assume ?? {}).flatMap((key) => {
     const [file, id] = key.split(" \u203A ");
     if (jobs.some(([f, j]) => f === file && j === id)) return [];
@@ -17008,6 +17094,7 @@ function evaluate2(parsed, scenario) {
   const { event, repo } = scenario;
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts = [];
+  const producers = [];
   for (const { key, bytes, ...file } of parsed) {
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
     const workflow = bytes > MAX_BYTES ? {
@@ -17026,6 +17113,12 @@ function evaluate2(parsed, scenario) {
       )
     };
     const jobs = jobVerdicts(`${key} \u203A `, file, workflow, scenario);
+    for (const job of file.jobs)
+      producers.push({
+        name: checkName(job),
+        job: jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`),
+        workflow
+      });
     verdicts.push(
       workflow,
       ...jobs,
@@ -17042,6 +17135,7 @@ function evaluate2(parsed, scenario) {
       );
     }
   }
+  verdicts.push(...checkVerdicts(producers, scenario));
   return verdicts;
 }
 function called(verdict, file, files) {
@@ -17093,10 +17187,10 @@ function policy(verdict, { event, repo }) {
   const input = (path, value) => ({ path, value });
   const visibility = input("repo.visibility", repo.visibility);
   const date = input("repo.date", repo.date);
-  const ran = event.actor === "fork" ? [cause3("FK-6")] : [];
+  const ran = event.actor === "fork" ? [cause4("FK-6")] : [];
   const runs = (rule, ...inputs) => ({
     ...verdict,
-    causes: [...verdict.causes, ...ran, cause3(rule, inputs)]
+    causes: [...verdict.causes, ...ran, cause4(rule, inputs)]
   });
   if (repo.visibility !== "public") return runs("PRT-2", visibility);
   if (repo.date < ENFORCED) return runs("PRT-3", date);
@@ -17105,8 +17199,8 @@ function policy(verdict, { event, repo }) {
   const failed = (...root) => {
     const causes = [
       ...root,
-      cause3("PRT-5"),
-      cause3("PL-10"),
+      cause4("PRT-5"),
+      cause4("PL-10"),
       ...verdict.causes,
       ...ran
     ];
@@ -17117,16 +17211,16 @@ function policy(verdict, { event, repo }) {
     };
   };
   if (repo.eventPolicy === "blocks")
-    return failed(cause3("PRT-1", [policyInput]));
+    return failed(cause4("PRT-1", [policyInput]));
   if (repo.predates)
     return failed(
-      cause3("PRT-2", [visibility, policyInput]),
-      cause3("PRT-3", [date])
+      cause4("PRT-2", [visibility, policyInput]),
+      cause4("PRT-3", [date])
     );
   return {
     value: "uncertain",
     causes: [
-      cause3("PRT-4", [input("repo.predates", false), policyInput, date]),
+      cause4("PRT-4", [input("repo.predates", false), policyInput, date]),
       ...verdict.causes,
       ...ran
     ],
@@ -17141,7 +17235,7 @@ function policy(verdict, { event, repo }) {
     ]
   };
 }
-var cause3 = (rule, inputs = []) => ({
+var cause4 = (rule, inputs = []) => ({
   rule,
   spans: [],
   inputs

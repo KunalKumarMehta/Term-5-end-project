@@ -538,3 +538,50 @@ select.assumed {
 .assumed-cause {
   color: var(--muted);
 }
+
+.required-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.required-checks .label {
+  width: 100%;
+}
+
+.chips {
+  display: contents;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.25rem 0 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+/* #12 addendum E: a required check added twice flashes its chip. */
+@keyframes flash {
+  from {
+    background: #fff8c5;
+    border-color: var(--wait);
+  }
+}
+
+.chip.flash {
+  animation: flash 1s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A brief static highlight in place of the flash. */
+  .chip.flash {
+    animation: none;
+    background: #fff8c5;
+    border-color: var(--wait);
+  }
+}
