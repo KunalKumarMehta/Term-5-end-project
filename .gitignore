@@ -12,3 +12,6 @@ playground/dist/
 test-results/
 playwright-report/
 *.tsbuildinfo
+
+# Generated from schemas/ by scripts/gen-types.mjs
+src/core/generated/

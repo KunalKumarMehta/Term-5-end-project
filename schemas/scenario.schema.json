@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn.jsdelivr.net/npm/whynorun@1/schemas/scenario.schema.json",
+  "title": "Scenario",
+  "description": "Everything WhyNoRun is told about one situation: an Event, an optional Follow-up event, the Repo facts and any Assumptions. A saved Scenario writes every default out.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "repo"],
+  "properties": {
+    "event": { "$ref": "#/definitions/event" },
+    "followUp": { "$ref": "#/definitions/followUp" },
+    "repo": { "$ref": "#/definitions/repo" },
+    "assume": {
+      "title": "Assumptions",
+      "description": "Keyed by subject: a job key with \"fails\" (`\"ci.yml › test\": \"fails\"`), or a job output keyed by the producing job (`\"ci.yml › changes › outputs.src\": \"true\"`). Values are strings, as GitHub's job outputs are.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "name": {
+      "description": "The event name, such as push or pull_request.",
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "description": "The activity type; GitHub's defaults when omitted.",
+      "type": "string",
+      "minLength": 1
+    },
+    "actor": {
+      "title": "ActorKind",
+      "description": "Who caused the Event: a member, a fork contributor or dependabot[bot].",
+      "enum": ["member", "fork", "dependabot"]
+    },
+    "approval": {
+      "description": "Whether a fork contributor's run is approved.",
+      "enum": ["approved", "awaiting"]
+    },
+    "ref": { "description": "The ref the Event is for.", "type": "string" },
+    "base": {
+      "description": "The base branch of a pull request.",
+      "type": "string"
+    },
+    "changed": {
+      "description": "The changed files, taken as the complete diff.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "message": {
+      "description": "The head commit message.",
+      "type": "string"
+    },
+    "payload": {
+      "title": "Payload",
+      "description": "github.event.* values the Event can't work out, as a nested object; a path read through .*.<field> holds a list of objects with that field.",
+      "type": "object"
+    },
+    "login": {
+      "description": "The actor's login, for expressions comparing github.actor.",
+      "type": "string"
+    },
+    "event": {
+      "title": "Event",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/definitions/name" },
+        "type": { "$ref": "#/definitions/type" },
+        "actor": { "$ref": "#/definitions/actor" },
+        "approval": { "$ref": "#/definitions/approval" },
+        "ref": { "$ref": "#/definitions/ref" },
+        "base": { "$ref": "#/definitions/base" },
+        "changed": { "$ref": "#/definitions/changed" },
+        "message": { "$ref": "#/definitions/message" },
+        "payload": { "$ref": "#/definitions/payload" },
+        "login": { "$ref": "#/definitions/login" }
+      }
+    },
+    "followUp": {
+      "title": "FollowUpEvent",
+      "description": "A second Event that arrives while the first Event's run (A) is still in progress or pending.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/definitions/name" },
+        "type": { "$ref": "#/definitions/type" },
+        "actor": { "$ref": "#/definitions/actor" },
+        "approval": { "$ref": "#/definitions/approval" },
+        "ref": { "$ref": "#/definitions/ref" },
+        "base": { "$ref": "#/definitions/base" },
+        "changed": { "$ref": "#/definitions/changed" },
+        "message": { "$ref": "#/definitions/message" },
+        "payload": { "$ref": "#/definitions/payload" },
+        "login": { "$ref": "#/definitions/login" },
+        "runA": {
+          "description": "Run A's state when this Event arrives.",
+          "enum": ["in-progress", "pending"]
+        },
+        "pendingRuns": {
+          "description": "How many runs already wait in a queue: max group.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "repo": {
+      "title": "RepoFacts",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date"],
+      "properties": {
+        "date": {
+          "description": "The simulation date (YYYY-MM-DD). Required: it never defaults to today.",
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+        },
+        "visibility": { "enum": ["public", "private", "internal"] },
+        "predates": {
+          "description": "Whether the repo was created before 2026-09-17.",
+          "type": "boolean"
+        },
+        "tokenDefault": {
+          "description": "The GITHUB_TOKEN default permissions.",
+          "enum": ["restricted", "permissive"]
+        },
+        "eventPolicy": {
+          "description": "The pull_request_target event policy.",
+          "enum": ["none", "allows", "blocks"]
+        },
+        "defaultBranch": { "type": "string", "minLength": 1 },
+        "required": {
+          "description": "Required check names, as typed in branch protection.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "strict": {
+          "description": "Whether branches must be up to date before merging.",
+          "type": "boolean"
+        },
+        "mergeQueue": { "type": "boolean" },
+        "vars": {
+          "description": "Repository variables. Values are strings, as GitHub's are.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "repository": {
+          "description": "owner/repo, with GitHub's owner and repo name characters.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/(?!\\.\\.?$)[A-Za-z0-9._-]{1,100}$"
+        }
+      }
+    }
+  }
+}
