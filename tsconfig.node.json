@@ -5,6 +5,7 @@
     "*.config.ts",
     "playground/vite.config.ts",
     "playground/e2e",
+    "scripts",
     "src"
   ]
 }
