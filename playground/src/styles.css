@@ -378,3 +378,78 @@ dialog form {
 .source > .ignored {
   flex-basis: 100%;
 }
+
+/* The All Verdicts grid scrolls sideways inside its own box, never the page (#12 §10). */
+.grid-box {
+  overflow-x: auto;
+}
+
+.grid {
+  border-collapse: collapse;
+}
+
+.grid th,
+.grid td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grid .key {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.grid .group th {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.grid .differs {
+  background: #fff8c5;
+}
+
+.grid .gutter {
+  width: 1.5rem;
+}
+
+.grid .verdict {
+  width: auto;
+}
+
+/* A cell names its Scenario only once the Scenarios stack. */
+.grid .tag {
+  display: none;
+}
+
+@media (max-width: 899px) {
+  /* With Compare on, the two Scenarios stack within each row (#12 §10). */
+  .grid,
+  .grid thead,
+  .grid tbody {
+    display: block;
+  }
+
+  .grid tr {
+    display: grid;
+    grid-template-columns: 1.5rem max-content;
+    min-width: 100%;
+    width: max-content;
+  }
+
+  .grid tr > :nth-child(n + 3) {
+    grid-column: 2;
+  }
+
+  .grid .group th,
+  .grid .diagnosed td {
+    grid-column: 1 / -1;
+  }
+
+  .grid .tag {
+    display: inline;
+    margin-right: 0.5rem;
+    color: var(--muted);
+  }
+}
