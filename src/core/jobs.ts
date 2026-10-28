@@ -556,7 +556,13 @@ export function jobVerdicts(
               job.if.expression,
               { ...contexts, needs: results("success") },
               { success: true, failure: false },
-              resolver(id, needs, assigned, []),
+              // Each need's outputs as a success would set them, not the empty ones it left.
+              resolver(
+                id,
+                needs.map(([n, o]) => [n, { ...o, conclusion: "success" }]),
+                assigned,
+                [],
+              ),
             );
           } catch (e) {
             if (!(e instanceof RuntimeValueNeeded)) throw e;
@@ -718,7 +724,7 @@ function merge(base: unknown, over: Obj): Obj {
  * The `github` context worked out from the Event (#8 §6). Fields the event doesn't define
  * are left out, so they resolve to empty as on GitHub.
  */
-function githubContext({ event, repo }: Scenario): { event: Obj } & Obj {
+export function githubContext({ event, repo }: Scenario): { event: Obj } & Obj {
   const pr =
     event.name === "pull_request" || event.name === "pull_request_target";
   // A bare name is a branch, as the Scenario form takes it.

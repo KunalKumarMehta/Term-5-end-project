@@ -130,6 +130,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "PA-4",
+    text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High",
+  },
+  {
     id: "PA-5",
     text: "A diff of more than 3,000 files runs a `paths` GitHub workflow only if a match is among the first 3,000 files; GitHub's docs don't say how `paths-ignore` treats such a diff.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
@@ -389,7 +395,7 @@ const rows: Rule[] = [
   },
   {
     id: "RQ-0",
-    text: 'A workflow job\'s required-check name is its job name: `name:` if set and non-empty, otherwise the job id. "Required status checks do not take workflow, matrix, or event trigger types into account."',
+    text: 'A workflow job\'s required-check name is its job name: `name:` if set and non-empty, otherwise the job id, with any expression in it evaluated. "Required status checks do not take workflow, matrix, or event trigger types into account." Two jobs with one name give "ambiguous status check results", and GitHub\'s docs don\'t say whether matching a name ignores case.',
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
     confidence: "High",
   },
@@ -402,6 +408,12 @@ const rows: Rule[] = [
   {
     id: "RQ-2",
     text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
+    id: "RQ-3",
+    text: 'A job skipped because a `needs` dependency failed "may not block merging". The fix is `if: always()` (or `!cancelled()`) on a required aggregator job.',
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
     confidence: "High",
   },

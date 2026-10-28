@@ -100,6 +100,8 @@ export interface Permissions {
 /** A job's positions; a job reached through an alias points every field at the alias. */
 export interface JobSpans {
   id: Span;
+  /** The `name:` value. */
+  name?: Span;
   if?: Span;
   needs?: Span;
   /** Only when job-level `continue-on-error` is literally `true`. */
@@ -327,6 +329,7 @@ function indexOn(
     const steps = resolve(doc, field("steps")?.pair.value);
     jobSpans.set(id, {
       id: span(item.key as Node),
+      name: field("name")?.span,
       if: field("if")?.span,
       needs: field("needs")?.span,
       continueOnError:

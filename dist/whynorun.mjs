@@ -8773,438 +8773,411 @@ function remote(key, job, spans, scenario, { block, level }) {
   return [...tokens, { key: `${key} \u203A secrets`, ...secrets }];
 }
 
-// src/core/workflowpattern.ts
-var quoteMeta = (s) => s.replace(/[\\.+*?()|[\]{}^$]/g, "\\$&");
-function compilePattern(raw, flags = "") {
-  const negative = raw.startsWith("!");
-  const pattern = negative ? raw.slice(1) : raw;
-  const source = patternToRegex(pattern);
-  let regex;
-  try {
-    regex = new RegExp(source, flags);
-  } catch {
-    throw new Error(`invalid Pattern '${pattern}'`);
+// node_modules/@actions/workflow-parser/dist/templates/tokens/types.js
+var TokenType;
+(function(TokenType3) {
+  TokenType3[TokenType3["String"] = 0] = "String";
+  TokenType3[TokenType3["Sequence"] = 1] = "Sequence";
+  TokenType3[TokenType3["Mapping"] = 2] = "Mapping";
+  TokenType3[TokenType3["BasicExpression"] = 3] = "BasicExpression";
+  TokenType3[TokenType3["InsertExpression"] = 4] = "InsertExpression";
+  TokenType3[TokenType3["Boolean"] = 5] = "Boolean";
+  TokenType3[TokenType3["Number"] = 6] = "Number";
+  TokenType3[TokenType3["Null"] = 7] = "Null";
+})(TokenType || (TokenType = {}));
+function tokenTypeName(type) {
+  switch (type) {
+    case TokenType.String:
+      return "StringToken";
+    case TokenType.Sequence:
+      return "SequenceToken";
+    case TokenType.Mapping:
+      return "MappingToken";
+    case TokenType.BasicExpression:
+      return "BasicExpressionToken";
+    case TokenType.InsertExpression:
+      return "InsertExpressionToken";
+    case TokenType.Boolean:
+      return "BooleanToken";
+    case TokenType.Number:
+      return "NumberToken";
+    case TokenType.Null:
+      return "NullToken";
+    default: {
+      const exhaustiveCheck = type;
+      throw new Error(`Unhandled token type: ${type} ${exhaustiveCheck}}`);
+    }
   }
-  return { pattern, negative, regex };
 }
-function patternToRegex(pattern) {
-  let r = "^";
-  let pos = 0;
-  const errors = /* @__PURE__ */ new Map();
-  const validChar = (a, b, test) => test !== void 0 && test >= a && test <= b;
-  while (pos < pattern.length) {
-    const c = pattern[pos];
-    switch (c) {
-      case "*":
-        if (pattern[pos + 1] === "*") {
-          if (pattern[pos + 2] === "/") {
-            r += "(.+/)?";
-            pos += 3;
-          } else {
-            r += ".*";
-            pos += 2;
-          }
-        } else {
-          r += "[^/]*";
-          pos++;
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/traversal-state.js
+var TraversalState = class {
+  constructor(parent, token) {
+    this.index = -1;
+    this.isKey = false;
+    this.parent = parent;
+    this._token = token;
+    this.current = token;
+  }
+  moveNext(omitKeys) {
+    switch (this._token.templateTokenType) {
+      case TokenType.Sequence: {
+        const sequence = this._token;
+        if (++this.index < sequence.count) {
+          this.current = sequence.get(this.index);
+          return true;
         }
-        break;
-      case "+":
-      case "?":
-        r += pos > 0 ? c : quoteMeta(c);
-        pos++;
-        break;
-      case "[": {
-        r += c;
-        pos++;
-        if (pattern[pos] === "]") {
-          errors.set(pos, "Unexpected empty brackets '[]'");
-          pos++;
-          break;
-        }
-        const startPos = pos;
-        while (pos < pattern.length && pattern[pos] !== "]") {
-          const d = pattern[pos];
-          if (d === "-") {
-            if (pos <= startPos || pos + 1 >= pattern.length) {
-              errors.set(pos, "Invalid range");
-              pos++;
-              continue;
-            }
-            const before = pattern[pos - 1];
-            const after = pattern[pos + 1];
-            const validRange = (a, b) => validChar(a, b, before) && validChar(a, b, after) && before <= after;
-            if (!validRange("A", "z") && !validRange("0", "9")) {
-              errors.set(pos, "Ranges can only include a-z, A-Z, A-z, and 0-9");
-              pos++;
-              continue;
-            }
-            r += pattern.slice(pos, pos + 2);
-            pos += 2;
-          } else {
-            if (!validChar("A", "z", d) && !validChar("0", "9", d)) {
-              errors.set(pos, "Ranges can only include a-z, A-Z and 0-9");
-              pos++;
-              continue;
-            }
-            r += quoteMeta(d);
-            pos++;
-          }
-        }
-        if (pos >= pattern.length || pattern[pos] !== "]") {
-          errors.set(pos, "Missing closing bracket ']' after '['");
-          pos++;
-        }
-        r += "]";
-        pos++;
-        break;
+        this.current = void 0;
+        return false;
       }
-      case "\\":
-        if (pos + 1 >= pattern.length) {
-          errors.set(pos, "Missing symbol after \\");
-          pos++;
-          break;
+      case TokenType.Mapping: {
+        const mapping = this._token;
+        if (this.isKey) {
+          this.isKey = false;
+          this.currentKey = this.current;
+          this.current = mapping.get(this.index).value;
+          return true;
         }
-        r += quoteMeta(pattern[pos + 1]);
-        pos += 2;
-        break;
+        if (++this.index < mapping.count) {
+          if (omitKeys) {
+            this.isKey = false;
+            this.currentKey = mapping.get(this.index).key;
+            this.current = mapping.get(this.index).value;
+            return true;
+          }
+          this.isKey = true;
+          this.currentKey = void 0;
+          this.current = mapping.get(this.index).key;
+          return true;
+        }
+        this.currentKey = void 0;
+        this.current = void 0;
+        return false;
+      }
       default:
-        r += quoteMeta(c);
-        pos++;
+        throw new Error(`Unexpected token type '${this._token.templateTokenType}' when traversing state`);
     }
   }
-  if (errors.size > 0) {
-    const list = [...errors].sort(([a], [b]) => a - b).map(([at, err]) => `Position: ${at} Error: ${err}`);
-    throw new Error(`invalid Pattern '${pattern}': ${list.join(", ")}`);
-  }
-  return r + "$";
-}
-function compilePatterns(patterns, flags = "") {
-  return patterns.map((p) => compilePattern(p, flags));
-}
-function skip(sequence, input) {
-  if (sequence.length === 0) return { skip: false, by: -1 };
-  let matched = false;
-  let by = -1;
-  sequence.forEach((item, i) => {
-    if (item.regex.test(input)) {
-      matched = !item.negative;
-      by = i;
+  /**
+   * Returns the ancestor tokens from root to the current token's parent container.
+   */
+  getAncestors() {
+    const ancestors = [];
+    let state = this.parent;
+    while (state) {
+      if (state.current) {
+        ancestors.unshift(state.current);
+      }
+      state = state.parent;
     }
-  });
-  return { skip: !matched, by };
-}
-function filter(sequence, input) {
-  const by = sequence.findIndex(
-    (item) => item.regex.test(input) === !item.negative
-  );
-  return { skip: by >= 0, by };
-}
-
-// src/core/triggers.ts
-var KINDS = ["branches", "tags"];
-var SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|\n\n\nskip-checks: ?true\s*$/;
-var DIFF_LIMIT = 3e3;
-var GLOBS = [
-  ["GL-1", /\*/],
-  ["GL-2", /.[?+]/],
-  ["GL-3", /\[/],
-  ["GL-4", /^!|\\/]
-];
-var globCauses = (pattern, spans) => GLOBS.filter(([, re]) => re.test(pattern)).map(([rule]) => ({
-  rule,
-  spans,
-  inputs: []
-}));
-var PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
-var settingsOf = (parsed, event) => {
-  const value = parsed.events[event];
-  return typeof value === "object" && value !== null ? value : {};
+    return ancestors;
+  }
 };
-function filterDiagnostics(parsed) {
-  const found = [];
-  for (const event of Object.keys(parsed.events)) {
-    const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
-    const settings = settingsOf(parsed, event);
-    for (const kind of [...KINDS, "paths"]) {
-      const ignore = `${kind}-ignore`;
-      if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
-        found.push({
-          ...at(`${event}.${ignore}`),
-          rule: kind === "paths" ? "PA-1" : "BR-1",
-          message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
-        });
-      for (const key of [kind, ignore]) {
-        const list = settings[key];
-        if (!Array.isArray(list)) continue;
-        list.forEach((pattern, i) => {
-          try {
-            compilePattern(String(pattern));
-          } catch (err) {
-            found.push({
-              ...at(`${event}.${key}.${i}`),
-              message: err.message
-            });
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/template-token.js
+var TemplateTokenError = class extends Error {
+  constructor(message, token) {
+    super(message);
+    this.token = token;
+  }
+};
+var TemplateToken = class {
+  /**
+   * Base class for all template tokens
+   */
+  constructor(type, file, range, definitionInfo) {
+    this.type = type;
+    this.file = file;
+    this.range = range;
+    this.definitionInfo = definitionInfo;
+  }
+  get templateTokenType() {
+    return this.type;
+  }
+  get line() {
+    return this.range?.start.line;
+  }
+  get col() {
+    return this.range?.start.column;
+  }
+  get definition() {
+    return this.definitionInfo?.definition;
+  }
+  get description() {
+    return this._description || this.propertyDefinition?.description || this.definition?.description;
+  }
+  set description(description) {
+    this._description = description;
+  }
+  typeName() {
+    return tokenTypeName(this.type);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertNull(objectDescription) {
+    if (this.type === TokenType.Null) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Null)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertBoolean(objectDescription) {
+    if (this.type === TokenType.Boolean) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Boolean)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertNumber(objectDescription) {
+    if (this.type === TokenType.Number) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Number)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertString(objectDescription) {
+    if (this.type === TokenType.String) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.String)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertScalar(objectDescription) {
+    if (this?.isScalar === true) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type 'ScalarToken' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertSequence(objectDescription) {
+    if (this.type === TokenType.Sequence) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Sequence)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertMapping(objectDescription) {
+    if (this.type === TokenType.Mapping) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Mapping)}' was expected.`, this);
+  }
+  /**
+   * Returns all tokens (depth first)
+   * @param value The object to traverse
+   * @param omitKeys Whether to omit mapping keys
+   * @yields A tuple of [parent, token, keyToken, ancestors] for each token in the tree
+   */
+  static *traverse(value, omitKeys) {
+    yield [void 0, value, void 0, []];
+    switch (value.templateTokenType) {
+      case TokenType.Sequence:
+      case TokenType.Mapping: {
+        let state = new TraversalState(void 0, value);
+        state = new TraversalState(state, value);
+        while (state.parent) {
+          if (state.moveNext(omitKeys ?? false)) {
+            value = state.current;
+            yield [state.parent?.current, value, state.currentKey, state.getAncestors()];
+            switch (value.type) {
+              case TokenType.Sequence:
+              case TokenType.Mapping:
+                state = new TraversalState(state, value);
+                break;
+            }
+          } else {
+            state = state.parent;
           }
-        });
+        }
+        break;
       }
     }
   }
-  return found;
-}
-function trigger(parsed, event, defaultBranch) {
-  const decided = byRef(parsed, event, defaultBranch);
-  if (decided.value === "skipped") return decided;
-  const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
-  const message = event.message;
-  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
-    return result;
-  const entry = parsed.onEntries.get(event.name);
-  return {
-    value: "skipped",
-    causes: [
-      {
-        rule: "SK-1",
-        spans: entry ? [entry] : [],
-        inputs: [{ path: "event.message", value: message }]
-      },
-      ...result.causes
-    ]
-  };
-}
-var SHA_LIKE = /^[0-9a-f]{7,40}$/i;
-function shaLike(result, event, defaultBranch) {
-  if (event.name !== "pull_request_target" || result.value !== "runs")
-    return result;
-  const branches = [
-    event.base === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: "event.base", value: event.base },
-    ...event.ref === void 0 ? [] : [{ path: "event.ref", value: event.ref }]
-  ];
-  const inputs = branches.filter(
-    (b) => SHA_LIKE.test(b.value.replace(/^refs\/heads\//, ""))
-  );
-  if (inputs.length === 0) return result;
-  return {
-    value: "uncertain",
-    causes: [{ rule: "BR-9", spans: [], inputs }, ...result.causes],
-    possible: ["runs", "skipped"],
-    settle: []
-  };
-}
-function byPaths(parsed, event, decided) {
-  const name2 = event.name;
-  const settings = settingsOf(parsed, name2);
-  const has = (key2) => Object.hasOwn(settings, key2);
-  const key = has("paths") ? "paths" : "paths-ignore";
-  const list = settings[key];
-  if (!Array.isArray(list) || list.length === 0) return decided;
-  const patterns = list.map(String);
-  const spans = (at2) => {
-    const span = parsed.onEntries.get(`${name2}.${at2}`);
-    return span ? [span] : [];
-  };
-  const keySpans = spans(key);
-  const include = key === "paths";
-  const ref = event.ref ?? "";
-  if (name2 === "push" && ref.startsWith("refs/tags/")) {
-    const tagged = {
-      rule: "PA-6",
-      spans: keySpans,
-      inputs: [{ path: "event.ref", value: ref }]
-    };
-    if (include && !has("tags") && !has("tags-ignore"))
-      return {
-        value: "uncertain",
-        causes: [tagged, ...decided.causes],
-        possible: ["runs", "skipped"],
-        settle: []
-      };
-    return { ...decided, causes: [...decided.causes, tagged] };
+  toJSON() {
+    return void 0;
   }
-  const changed = event.changed ?? [];
-  const input = { path: "event.changed", value: changed };
-  const filtered = KINDS.some((k) => has(k) || has(`${k}-ignore`));
-  const combine = (value, own2) => {
-    const both = filtered ? [own2[0], { rule: "BR-6", spans: [], inputs: [] }, ...own2.slice(1)] : own2;
-    if (value === "uncertain")
-      return {
-        value,
-        causes: [...both, ...decided.causes],
-        possible: ["runs", "skipped"],
-        settle: []
-      };
-    if (value === "runs" && decided.value === "uncertain")
-      return { ...decided, causes: [...decided.causes, ...both] };
-    return { value, causes: [...both, ...decided.causes] };
-  };
-  if (changed.length === 0)
-    return combine("skipped", [
-      { rule: "PA-3", spans: keySpans, inputs: [input] }
-    ]);
-  if (!include && changed.length > DIFF_LIMIT)
-    return combine("uncertain", [
-      { rule: "PA-5", spans: keySpans, inputs: [input] }
-    ]);
-  const compiled = compilePatterns(patterns);
-  const kept = (file) => !(include ? skip : filter)(compiled, file).skip;
-  const deciding = changed.slice(0, DIFF_LIMIT).find(kept);
-  const by = deciding === void 0 || !include ? -1 : skip(compiled, deciding).by;
-  const at = by >= 0 ? spans(`${key}.${by}`) : keySpans;
-  const own = [
-    { rule: "PA-2", spans: at, inputs: [input] },
-    { rule: "PA-7", spans: [], inputs: [] },
-    ...by >= 0 ? globCauses(patterns[by], at) : []
-  ];
-  if (deciding !== void 0) return combine("runs", own);
-  if (changed.slice(DIFF_LIMIT).some(kept))
-    own.unshift({ rule: "PA-5", spans: keySpans, inputs: [input] });
-  return combine("skipped", own);
-}
-function byRef(parsed, event, defaultBranch) {
-  const name2 = event.name;
-  const spans = (key2) => {
-    const span = parsed.onEntries.get(key2);
-    return span ? [span] : [];
-  };
-  const named = { path: "event.name", value: name2 };
-  if (!Object.hasOwn(parsed.events, name2))
-    return {
-      value: "skipped",
-      causes: [
-        {
-          rule: "EV-0",
-          spans: parsed.onSpan ? [parsed.onSpan] : [],
-          inputs: [named]
-        }
-      ]
-    };
-  const settings = settingsOf(parsed, name2);
-  const has = (key2) => Object.hasOwn(settings, key2);
-  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
-  const after = [];
-  if (name2 !== "push") {
-    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
-    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
-    const typed = {
-      rule: "EV-1",
-      spans: spans(has("types") ? `${name2}.types` : name2),
-      inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
-    };
-    if (!wanted.some((t) => types.includes(t)))
-      return { value: "skipped", causes: [typed] };
-    after.push(typed);
-    if (event.type === "stacked")
-      after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
-  }
-  const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
-  after.push({ rule: copy, spans: [], inputs: [named] });
-  const given = name2 === "push" ? event.ref : event.base;
-  const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
-  const ref = given ?? `refs/heads/${defaultBranch}`;
-  const kind = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
-  const short = ref.replace(/^refs\/(heads|tags)\//, "");
-  const other = kind === "branches" ? "tags" : "branches";
-  const include = has(kind);
-  if (!include && !has(`${kind}-ignore`)) {
-    const otherKey = has(other) ? other : `${other}-ignore`;
-    if (name2 === "push" && has(otherKey))
-      return {
-        value: "skipped",
-        causes: [
-          { rule: "BR-3", spans: spans(`push.${otherKey}`), inputs: [input] },
-          ...after
-        ]
-      };
-    return { value: "runs", causes: [listed, ...after] };
-  }
-  const key = include ? kind : `${kind}-ignore`;
-  const patterns = settings[key].map(String);
-  const decide = (list, flags = "") => (include ? skip : filter)(compilePatterns(list, flags), short);
-  const base = decide(patterns);
-  const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
-  const matched = {
-    rule: name2 === "push" ? "BR-3" : "BR-2",
-    spans: spans(`${name2}.${key}`),
-    inputs: [input]
-  };
-  const prefix = `refs/${kind === "tags" ? "tags" : "heads"}/`;
-  const fullRef = patterns.findIndex(
-    (p) => p.replace(/^!/, "").startsWith(prefix)
-  );
-  const uncertain = (rule, i) => ({
-    value: "uncertain",
-    causes: [{ rule, spans: at(i), inputs: [input] }, matched, ...after],
-    possible: ["runs", "skipped"],
-    settle: []
-  });
-  if (fullRef >= 0) {
-    const asFull = decide(
-      patterns.map((p) => p.replace(new RegExp(`^(!?)${prefix}`), "$1"))
-    );
-    if (asFull.skip !== base.skip) return uncertain("BR-8", fullRef);
-  }
-  const anyCase = decide(patterns, "i");
-  if (anyCase.skip !== base.skip)
-    return uncertain("GL-6", anyCase.by >= 0 ? anyCase.by : base.by);
-  return {
-    value: base.skip ? "skipped" : "runs",
-    causes: [
-      { rule: include ? "BR-4" : "BR-5", spans: at(base.by), inputs: [input] },
-      matched,
-      ...globCauses(patterns[base.by] ?? "", at(base.by)),
-      ...after
-    ]
-  };
-}
+};
 
-// src/core/checks.ts
-var cause2 = (rule, inputs = []) => ({
-  rule,
-  spans: [],
-  inputs
-});
-function checkVerdicts(producers, { event, repo }) {
-  const names = [...new Set(repo.required)];
-  if (event.name !== "push" && event.type !== void 0 && !PR_DEFAULT_TYPES.includes(event.type))
-    return names.map((name2) => ({
-      key: `check \u203A ${name2}`,
-      value: "unsupported",
-      causes: [cause2("WN-3", [{ path: "event.type", value: event.type }])]
-    }));
-  const notes = repo.strict ? [cause2("RQ-10", [{ path: "repo.strict", value: true }])] : [];
-  return names.map((name2) => ({
-    key: `check \u203A ${name2}`,
-    ...badge(name2, producers, notes)
-  }));
-}
-function badge(name2, producers, notes) {
-  const pending = (...causes) => ({
-    value: "pending and blocks merge",
-    causes: [...causes, cause2("RQ-8"), ...notes]
-  });
-  const producer = producers.find((p) => p.name === name2);
-  if (!producer)
-    return pending(cause2("RQ-0", [{ path: "repo.required", value: name2 }]));
-  const { job, workflow } = producer;
-  if (job.value === "runs")
+// node_modules/@actions/workflow-parser/dist/templates/tokens/scalar-token.js
+var ScalarToken = class extends TemplateToken {
+  constructor(type, file, range, definitionInfo) {
+    super(type, file, range, definitionInfo);
+  }
+  get isScalar() {
+    return true;
+  }
+  static trimDisplayString(displayString) {
+    let firstLine = displayString.trimStart();
+    const firstNewLine = firstLine.indexOf("\n");
+    const firstCarriageReturn = firstLine.indexOf("\r");
+    if (firstNewLine >= 0 || firstCarriageReturn >= 0) {
+      firstLine = firstLine.substr(0, Math.min(firstNewLine >= 0 ? firstNewLine : Number.MAX_VALUE, firstCarriageReturn >= 0 ? firstCarriageReturn : Number.MAX_VALUE));
+    }
+    return firstLine;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/literal-token.js
+var LiteralToken = class extends ScalarToken {
+  constructor(type, file, range, definitionInfo) {
+    super(type, file, range, definitionInfo);
+  }
+  get isLiteral() {
+    return true;
+  }
+  get isExpression() {
+    return false;
+  }
+  toDisplayString() {
+    return ScalarToken.trimDisplayString(this.toString());
+  }
+  /**
+   * Throws a good debug message when an unexpected literal value is encountered
+   */
+  assertUnexpectedValue(objectDescription) {
+    throw new Error(`Error while reading '${objectDescription}'. Unexpected value '${this.toString()}'`);
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/string-token.js
+var StringToken = class _StringToken extends LiteralToken {
+  constructor(file, range, value, definitionInfo, source, blockScalarHeader) {
+    super(TokenType.String, file, range, definitionInfo);
+    this.value = value;
+    this.source = source;
+    this.blockScalarHeader = blockScalarHeader;
+  }
+  clone(omitSource) {
+    return omitSource ? new _StringToken(void 0, void 0, this.value, this.definitionInfo, this.source, this.blockScalarHeader) : new _StringToken(this.file, this.range, this.value, this.definitionInfo, this.source, this.blockScalarHeader);
+  }
+  toString() {
+    return this.value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/number-token.js
+var NumberToken = class _NumberToken extends LiteralToken {
+  constructor(file, range, value, definitionInfo) {
+    super(TokenType.Number, file, range, definitionInfo);
+    this.num = value;
+  }
+  get value() {
+    return this.num;
+  }
+  clone(omitSource) {
+    return omitSource ? new _NumberToken(void 0, void 0, this.num, this.definitionInfo) : new _NumberToken(this.file, this.range, this.num, this.definitionInfo);
+  }
+  toString() {
+    return `${this.num}`;
+  }
+  toJSON() {
+    return this.num;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/boolean-token.js
+var BooleanToken = class _BooleanToken extends LiteralToken {
+  constructor(file, range, value, definitionInfo) {
+    super(TokenType.Boolean, file, range, definitionInfo);
+    this.bool = value;
+  }
+  get value() {
+    return this.bool;
+  }
+  clone(omitSource) {
+    return omitSource ? new _BooleanToken(void 0, void 0, this.bool, this.definitionInfo) : new _BooleanToken(this.file, this.range, this.bool, this.definitionInfo);
+  }
+  toString() {
+    return this.bool ? "true" : "false";
+  }
+  toJSON() {
+    return this.bool;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/null-token.js
+var NullToken = class _NullToken extends LiteralToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.Null, file, range, definitionInfo);
+  }
+  clone(omitSource) {
+    return omitSource ? new _NullToken(void 0, void 0, this.definitionInfo) : new _NullToken(this.file, this.range, this.definitionInfo);
+  }
+  toString() {
+    return "";
+  }
+  toJSON() {
+    return null;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/key-value-pair.js
+var KeyValuePair = class {
+  constructor(key, value) {
+    this.key = key;
+    this.value = value;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/sequence-token.js
+var SequenceToken = class _SequenceToken extends TemplateToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.Sequence, file, range, definitionInfo);
+    this.seq = [];
+  }
+  get count() {
+    return this.seq.length;
+  }
+  get isScalar() {
+    return false;
+  }
+  get isLiteral() {
+    return false;
+  }
+  get isExpression() {
+    return false;
+  }
+  add(value) {
+    this.seq.push(value);
+  }
+  get(index) {
+    return this.seq[index];
+  }
+  clone(omitSource) {
+    const result = omitSource ? new _SequenceToken(void 0, void 0, this.definitionInfo) : new _SequenceToken(this.file, this.range, this.definitionInfo);
+    for (const item of this.seq) {
+      result.add(item.clone(omitSource));
+    }
+    return result;
+  }
+  toJSON() {
     return {
-      value: "passes",
-      causes: [cause2("RQ-4"), ...job.causes, ...notes]
+      type: TokenType.Sequence,
+      seq: this.seq
     };
-  if (job.value === "skipped" && job.causes[0]?.rule === "JG-3")
-    return {
-      value: "passes",
-      causes: [cause2("RQ-2"), ...job.causes, ...notes]
-    };
-  if (job.value === "no-run" && workflow.value === "skipped")
-    return pending(cause2("RQ-1"), ...job.causes);
-  return {
-    value: "uncertain",
-    causes: [...job.causes, ...notes],
-    settle: job.settle ?? [],
-    ...job.hints && { hints: job.hints }
-  };
-}
+  }
+  *[Symbol.iterator]() {
+    for (const item of this.seq) {
+      yield item;
+    }
+  }
+};
 
 // node_modules/@actions/expressions/dist/ast.js
 var Expr = class {
@@ -9536,7 +9509,7 @@ var FilteredArray = class extends Array2 {
 };
 
 // node_modules/@actions/expressions/dist/lexer.js
-var TokenType;
+var TokenType2;
 (function(TokenType3) {
   TokenType3[TokenType3["UNKNOWN"] = 0] = "UNKNOWN";
   TokenType3[TokenType3["LEFT_PAREN"] = 1] = "LEFT_PAREN";
@@ -9562,14 +9535,14 @@ var TokenType;
   TokenType3[TokenType3["FALSE"] = 21] = "FALSE";
   TokenType3[TokenType3["NULL"] = 22] = "NULL";
   TokenType3[TokenType3["EOF"] = 23] = "EOF";
-})(TokenType || (TokenType = {}));
+})(TokenType2 || (TokenType2 = {}));
 function tokenString(tok) {
   switch (tok.type) {
-    case TokenType.EOF:
+    case TokenType2.EOF:
       return "EOF";
-    case TokenType.NUMBER:
+    case TokenType2.NUMBER:
       return tok.lexeme;
-    case TokenType.STRING:
+    case TokenType2.STRING:
       return tok.value.toString();
     default:
       return tok.lexeme;
@@ -9593,25 +9566,25 @@ var Lexer = class {
       const c = this.next();
       switch (c) {
         case "(":
-          this.addToken(TokenType.LEFT_PAREN);
+          this.addToken(TokenType2.LEFT_PAREN);
           break;
         case ")":
-          this.addToken(TokenType.RIGHT_PAREN);
+          this.addToken(TokenType2.RIGHT_PAREN);
           break;
         case "[":
-          this.addToken(TokenType.LEFT_BRACKET);
+          this.addToken(TokenType2.LEFT_BRACKET);
           break;
         case "]":
-          this.addToken(TokenType.RIGHT_BRACKET);
+          this.addToken(TokenType2.RIGHT_BRACKET);
           break;
         case ",":
-          this.addToken(TokenType.COMMA);
+          this.addToken(TokenType2.COMMA);
           break;
         case ".":
-          if (this.previous() != TokenType.IDENTIFIER && this.previous() != TokenType.RIGHT_BRACKET && this.previous() != TokenType.RIGHT_PAREN && this.previous() != TokenType.STAR) {
+          if (this.previous() != TokenType2.IDENTIFIER && this.previous() != TokenType2.RIGHT_BRACKET && this.previous() != TokenType2.RIGHT_PAREN && this.previous() != TokenType2.STAR) {
             this.consumeNumber();
           } else {
-            this.addToken(TokenType.DOT);
+            this.addToken(TokenType2.DOT);
           }
           break;
         case "-":
@@ -9619,37 +9592,37 @@ var Lexer = class {
           this.consumeNumber();
           break;
         case "!":
-          this.addToken(this.match("=") ? TokenType.BANG_EQUAL : TokenType.BANG);
+          this.addToken(this.match("=") ? TokenType2.BANG_EQUAL : TokenType2.BANG);
           break;
         case "=":
           if (!this.match("=")) {
             this.consumeIdentifier();
             break;
           }
-          this.addToken(TokenType.EQUAL_EQUAL);
+          this.addToken(TokenType2.EQUAL_EQUAL);
           break;
         case "<":
-          this.addToken(this.match("=") ? TokenType.LESS_EQUAL : TokenType.LESS);
+          this.addToken(this.match("=") ? TokenType2.LESS_EQUAL : TokenType2.LESS);
           break;
         case ">":
-          this.addToken(this.match("=") ? TokenType.GREATER_EQUAL : TokenType.GREATER);
+          this.addToken(this.match("=") ? TokenType2.GREATER_EQUAL : TokenType2.GREATER);
           break;
         case "&":
           if (!this.match("&")) {
             this.consumeIdentifier();
             break;
           }
-          this.addToken(TokenType.AND);
+          this.addToken(TokenType2.AND);
           break;
         case "|":
           if (!this.match("|")) {
             this.consumeIdentifier();
             break;
           }
-          this.addToken(TokenType.OR);
+          this.addToken(TokenType2.OR);
           break;
         case "*":
-          this.addToken(TokenType.STAR);
+          this.addToken(TokenType2.STAR);
           break;
         // Ignore whitespace.
         case " ":
@@ -9675,7 +9648,7 @@ var Lexer = class {
       }
     }
     this.tokens.push({
-      type: TokenType.EOF,
+      type: TokenType2.EOF,
       lexeme: "",
       range: this.range()
     });
@@ -9719,7 +9692,7 @@ var Lexer = class {
   previous() {
     const l = this.tokens.length;
     if (l == 0) {
-      return TokenType.EOF;
+      return TokenType2.EOF;
     }
     return this.tokens[l - 1].type;
   }
@@ -9753,7 +9726,7 @@ var Lexer = class {
     if (isNaN(value)) {
       throw new Error(`Unexpected symbol: '${lexeme}'. Located at position ${this.start + 1} within expression: ${this.input}`);
     }
-    this.addToken(TokenType.NUMBER, value);
+    this.addToken(TokenType2.NUMBER, value);
   }
   consumeString() {
     while ((this.peek() !== "'" || this.peekNext() === "'") && !this.atEnd()) {
@@ -9770,32 +9743,32 @@ var Lexer = class {
     this.next();
     let value = this.input.substring(this.start + 1, this.offset - 1);
     value = value.replace("''", "'");
-    this.addToken(TokenType.STRING, value);
+    this.addToken(TokenType2.STRING, value);
   }
   consumeIdentifier() {
     while (!this.atEnd() && !isBoundary(this.peek())) {
       this.next();
     }
-    let tokenType = TokenType.IDENTIFIER;
+    let tokenType = TokenType2.IDENTIFIER;
     let tokenValue = void 0;
     const lexeme = this.input.substring(this.start, this.offset);
-    if (this.previous() != TokenType.DOT) {
+    if (this.previous() != TokenType2.DOT) {
       switch (lexeme) {
         case "true":
-          tokenType = TokenType.TRUE;
+          tokenType = TokenType2.TRUE;
           break;
         case "false":
-          tokenType = TokenType.FALSE;
+          tokenType = TokenType2.FALSE;
           break;
         case "null":
-          tokenType = TokenType.NULL;
+          tokenType = TokenType2.NULL;
           break;
         case "NaN":
-          tokenType = TokenType.NUMBER;
+          tokenType = TokenType2.NUMBER;
           tokenValue = NaN;
           break;
         case "Infinity":
-          tokenType = TokenType.NUMBER;
+          tokenType = TokenType2.NUMBER;
           tokenValue = Infinity;
           break;
       }
@@ -10375,7 +10348,7 @@ var Evaluator = class {
   }
   visitUnary(unary) {
     const r = this.eval(unary.expr);
-    if (unary.operator.type === TokenType.BANG) {
+    if (unary.operator.type === TokenType2.BANG) {
       return new BooleanData(falsy(r));
     }
     throw new Error(`unknown unary operator: ${unary.operator.lexeme}`);
@@ -10384,17 +10357,17 @@ var Evaluator = class {
     const left = this.eval(binary.left);
     const right = this.eval(binary.right);
     switch (binary.operator.type) {
-      case TokenType.EQUAL_EQUAL:
+      case TokenType2.EQUAL_EQUAL:
         return new BooleanData(equals(left, right));
-      case TokenType.BANG_EQUAL:
+      case TokenType2.BANG_EQUAL:
         return new BooleanData(!equals(left, right));
-      case TokenType.GREATER:
+      case TokenType2.GREATER:
         return new BooleanData(greaterThan(left, right));
-      case TokenType.GREATER_EQUAL:
+      case TokenType2.GREATER_EQUAL:
         return new BooleanData(equals(left, right) || greaterThan(left, right));
-      case TokenType.LESS:
+      case TokenType2.LESS:
         return new BooleanData(lessThan(left, right));
-      case TokenType.LESS_EQUAL:
+      case TokenType2.LESS_EQUAL:
         return new BooleanData(equals(left, right) || lessThan(left, right));
     }
     throw new Error(`unknown binary operator: ${binary.operator.lexeme}`);
@@ -10403,7 +10376,7 @@ var Evaluator = class {
     let result;
     for (const arg of logical.args) {
       result = this.eval(arg);
-      if (logical.operator.type === TokenType.AND && falsy(result) || logical.operator.type === TokenType.OR && truthy(result)) {
+      if (logical.operator.type === TokenType2.AND && falsy(result) || logical.operator.type === TokenType2.OR && truthy(result)) {
         break;
       }
     }
@@ -10609,12 +10582,12 @@ var Parser = class {
   }
   logicalOr() {
     let expr = this.logicalAnd();
-    if (this.check(TokenType.OR)) {
+    if (this.check(TokenType2.OR)) {
       this.incrDepth();
       try {
         const logical = new Logical(this.peek(), [expr]);
         expr = logical;
-        while (this.match(TokenType.OR)) {
+        while (this.match(TokenType2.OR)) {
           const right = this.logicalAnd();
           logical.args.push(right);
         }
@@ -10626,12 +10599,12 @@ var Parser = class {
   }
   logicalAnd() {
     let expr = this.equality();
-    if (this.check(TokenType.AND)) {
+    if (this.check(TokenType2.AND)) {
       this.incrDepth();
       try {
         const logical = new Logical(this.peek(), [expr]);
         expr = logical;
-        while (this.match(TokenType.AND)) {
+        while (this.match(TokenType2.AND)) {
           const right = this.equality();
           logical.args.push(right);
         }
@@ -10643,7 +10616,7 @@ var Parser = class {
   }
   equality() {
     let expr = this.comparison();
-    while (this.match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL)) {
+    while (this.match(TokenType2.BANG_EQUAL, TokenType2.EQUAL_EQUAL)) {
       const operator = this.previous();
       const right = this.comparison();
       expr = new Binary(expr, operator, right);
@@ -10652,7 +10625,7 @@ var Parser = class {
   }
   comparison() {
     let expr = this.unary();
-    while (this.match(TokenType.GREATER, TokenType.GREATER_EQUAL, TokenType.LESS, TokenType.LESS_EQUAL)) {
+    while (this.match(TokenType2.GREATER, TokenType2.GREATER_EQUAL, TokenType2.LESS, TokenType2.LESS_EQUAL)) {
       const operator = this.previous();
       const right = this.unary();
       expr = new Binary(expr, operator, right);
@@ -10660,7 +10633,7 @@ var Parser = class {
     return expr;
   }
   unary() {
-    if (this.match(TokenType.BANG)) {
+    if (this.match(TokenType2.BANG)) {
       this.incrDepth();
       const operator = this.previous();
       const unary = this.unary();
@@ -10679,26 +10652,26 @@ var Parser = class {
       let cont = true;
       while (cont) {
         switch (true) {
-          case this.match(TokenType.LEFT_BRACKET): {
+          case this.match(TokenType2.LEFT_BRACKET): {
             let indexExpr;
-            if (this.match(TokenType.STAR)) {
+            if (this.match(TokenType2.STAR)) {
               indexExpr = new Star();
             } else {
               indexExpr = this.expression();
             }
-            this.consume(TokenType.RIGHT_BRACKET, ErrorType.ErrorUnexpectedSymbol);
+            this.consume(TokenType2.RIGHT_BRACKET, ErrorType.ErrorUnexpectedSymbol);
             this.incrDepth();
             depthIncreased++;
             expr = new IndexAccess(expr, indexExpr);
             break;
           }
-          case this.match(TokenType.DOT):
+          case this.match(TokenType2.DOT):
             this.incrDepth();
             depthIncreased++;
-            if (this.match(TokenType.IDENTIFIER)) {
+            if (this.match(TokenType2.IDENTIFIER)) {
               const property = this.previous();
               expr = new IndexAccess(expr, new Literal(new StringData(property.lexeme), property));
-            } else if (this.match(TokenType.STAR)) {
+            } else if (this.match(TokenType2.STAR)) {
               expr = new IndexAccess(expr, new Star());
             } else {
               throw this.buildError(ErrorType.ErrorUnexpectedSymbol, this.peek());
@@ -10715,22 +10688,22 @@ var Parser = class {
     return expr;
   }
   call() {
-    if (!this.check(TokenType.IDENTIFIER)) {
+    if (!this.check(TokenType2.IDENTIFIER)) {
       return this.primary();
     }
     const identifier = this.next();
-    if (!this.match(TokenType.LEFT_PAREN)) {
+    if (!this.match(TokenType2.LEFT_PAREN)) {
       if (!this.extContexts.has(identifier.lexeme.toLowerCase())) {
         throw this.buildError(ErrorType.ErrorUnrecognizedContext, identifier);
       }
       return new ContextAccess(identifier);
     }
     const args = [];
-    while (!this.match(TokenType.RIGHT_PAREN)) {
+    while (!this.match(TokenType2.RIGHT_PAREN)) {
       const aexp = this.expression();
       args.push(aexp);
-      if (!this.check(TokenType.RIGHT_PAREN)) {
-        this.consume(TokenType.COMMA, ErrorType.ErrorUnexpectedSymbol);
+      if (!this.check(TokenType2.RIGHT_PAREN)) {
+        this.consume(TokenType2.COMMA, ErrorType.ErrorUnexpectedSymbol);
       }
     }
     validateFunction(this.context, identifier, args.length);
@@ -10738,22 +10711,22 @@ var Parser = class {
   }
   primary() {
     switch (true) {
-      case this.match(TokenType.FALSE):
+      case this.match(TokenType2.FALSE):
         return new Literal(new BooleanData(false), this.previous());
-      case this.match(TokenType.TRUE):
+      case this.match(TokenType2.TRUE):
         return new Literal(new BooleanData(true), this.previous());
-      case this.match(TokenType.NULL):
+      case this.match(TokenType2.NULL):
         return new Literal(new Null(), this.previous());
-      case this.match(TokenType.NUMBER):
+      case this.match(TokenType2.NUMBER):
         return new Literal(new NumberData(this.previous().value), this.previous());
-      case this.match(TokenType.STRING):
+      case this.match(TokenType2.STRING):
         return new Literal(new StringData(this.previous().value), this.previous());
-      case this.match(TokenType.LEFT_PAREN): {
+      case this.match(TokenType2.LEFT_PAREN): {
         const expr = this.expression();
         if (this.atEnd()) {
           throw this.buildError(ErrorType.ErrorUnexpectedEndOfExpression, this.previous());
         }
-        this.consume(TokenType.RIGHT_PAREN, ErrorType.ErrorUnexpectedSymbol);
+        this.consume(TokenType2.RIGHT_PAREN, ErrorType.ErrorUnexpectedSymbol);
         return new Grouping(expr);
       }
       case this.atEnd():
@@ -10780,7 +10753,7 @@ var Parser = class {
   }
   // atEnd peeks whether the next token is EOF
   atEnd() {
-    return this.peek().type == TokenType.EOF;
+    return this.peek().type == TokenType2.EOF;
   }
   next() {
     if (!this.atEnd()) {
@@ -10818,243 +10791,241 @@ var Parser = class {
   }
 };
 
-// node_modules/@actions/workflow-parser/dist/templates/tokens/types.js
-var TokenType2;
-(function(TokenType3) {
-  TokenType3[TokenType3["String"] = 0] = "String";
-  TokenType3[TokenType3["Sequence"] = 1] = "Sequence";
-  TokenType3[TokenType3["Mapping"] = 2] = "Mapping";
-  TokenType3[TokenType3["BasicExpression"] = 3] = "BasicExpression";
-  TokenType3[TokenType3["InsertExpression"] = 4] = "InsertExpression";
-  TokenType3[TokenType3["Boolean"] = 5] = "Boolean";
-  TokenType3[TokenType3["Number"] = 6] = "Number";
-  TokenType3[TokenType3["Null"] = 7] = "Null";
-})(TokenType2 || (TokenType2 = {}));
-function tokenTypeName(type) {
-  switch (type) {
-    case TokenType2.String:
-      return "StringToken";
-    case TokenType2.Sequence:
-      return "SequenceToken";
-    case TokenType2.Mapping:
-      return "MappingToken";
-    case TokenType2.BasicExpression:
-      return "BasicExpressionToken";
-    case TokenType2.InsertExpression:
-      return "InsertExpressionToken";
-    case TokenType2.Boolean:
-      return "BooleanToken";
-    case TokenType2.Number:
-      return "NumberToken";
-    case TokenType2.Null:
-      return "NullToken";
-    default: {
-      const exhaustiveCheck = type;
-      throw new Error(`Unhandled token type: ${type} ${exhaustiveCheck}}`);
+// node_modules/@actions/workflow-parser/dist/templates/template-constants.js
+var ALLOWED_VALUES = "allowed-values";
+var ANY = "any";
+var BOOLEAN = "boolean";
+var BOOLEAN_DEFINITION = "boolean-definition";
+var BOOLEAN_DEFINITION_PROPERTIES = "boolean-definition-properties";
+var CLOSE_EXPRESSION = "}}";
+var CONSTANT = "constant";
+var CONTEXT = "context";
+var DEFINITION = "definition";
+var DEFINITIONS = "definitions";
+var DESCRIPTION = "description";
+var IGNORE_CASE = "ignore-case";
+var INSERT_DIRECTIVE = "insert";
+var IS_EXPRESSION = "is-expression";
+var ITEM_TYPE = "item-type";
+var LOOSE_KEY_TYPE = "loose-key-type";
+var LOOSE_VALUE_TYPE = "loose-value-type";
+var MAX_CONSTANT = "MAX";
+var MAPPING = "mapping";
+var MAPPING_DEFINITION = "mapping-definition";
+var MAPPING_DEFINITION_PROPERTIES = "mapping-definition-properties";
+var MAPPING_PROPERTY_VALUE = "mapping-property-value";
+var NON_EMPTY_STRING = "non-empty-string";
+var NULL = "null";
+var NULL_DEFINITION = "null-definition";
+var NULL_DEFINITION_PROPERTIES = "null-definition-properties";
+var NUMBER = "number";
+var NUMBER_DEFINITION = "number-definition";
+var NUMBER_DEFINITION_PROPERTIES = "number-definition-properties";
+var ONE_OF = "one-of";
+var ONE_OF_DEFINITION = "one-of-definition";
+var OPEN_EXPRESSION = "${{";
+var PROPERTY_VALUE = "property-value";
+var PROPERTIES = "properties";
+var REQUIRED = "required";
+var REQUIRE_NON_EMPTY = "require-non-empty";
+var SCALAR = "scalar";
+var SEQUENCE = "sequence";
+var SEQUENCE_DEFINITION = "sequence-definition";
+var SEQUENCE_DEFINITION_PROPERTIES = "sequence-definition-properties";
+var TYPE = "type";
+var SEQUENCE_OF_NON_EMPTY_STRING = "sequence-of-non-empty-string";
+var STRING = "string";
+var STRING_DEFINITION = "string-definition";
+var STRING_DEFINITION_PROPERTIES = "string-definition-properties";
+var TEMPLATE_SCHEMA = "template-schema";
+var VERSION = "version";
+
+// node_modules/@actions/workflow-parser/dist/templates/allowed-context.js
+function splitAllowedContext(allowedContext) {
+  const FUNCTION_REGEXP = /^([a-zA-Z0-9_]+)\(([0-9]+),([0-9]+|MAX)\)$/;
+  const namedContexts = [];
+  const functions = [];
+  if (allowedContext.length > 0) {
+    for (const contextItem of allowedContext) {
+      const match = contextItem.match(FUNCTION_REGEXP);
+      if (match) {
+        const functionName = match[1];
+        const minParameters = Number.parseInt(match[2]);
+        const maxParametersRaw = match[3];
+        const maxParameters = maxParametersRaw === MAX_CONSTANT ? Number.MAX_SAFE_INTEGER : Number.parseInt(maxParametersRaw);
+        functions.push({
+          name: functionName,
+          minArgs: minParameters,
+          maxArgs: maxParameters
+        });
+      } else {
+        namedContexts.push(contextItem);
+      }
     }
   }
+  return {
+    namedContexts,
+    functions
+  };
 }
 
-// node_modules/@actions/workflow-parser/dist/templates/tokens/traversal-state.js
-var TraversalState = class {
-  constructor(parent, token) {
-    this.index = -1;
-    this.isKey = false;
-    this.parent = parent;
-    this._token = token;
-    this.current = token;
+// node_modules/@actions/workflow-parser/dist/templates/tokens/expression-token.js
+var ExpressionToken = class extends ScalarToken {
+  constructor(type, file, range, directive, definitionInfo) {
+    super(type, file, range, definitionInfo);
+    this.directive = directive;
   }
-  moveNext(omitKeys) {
-    switch (this._token.templateTokenType) {
-      case TokenType2.Sequence: {
-        const sequence = this._token;
-        if (++this.index < sequence.count) {
-          this.current = sequence.get(this.index);
-          return true;
-        }
-        this.current = void 0;
-        return false;
-      }
-      case TokenType2.Mapping: {
-        const mapping = this._token;
-        if (this.isKey) {
-          this.isKey = false;
-          this.currentKey = this.current;
-          this.current = mapping.get(this.index).value;
-          return true;
-        }
-        if (++this.index < mapping.count) {
-          if (omitKeys) {
-            this.isKey = false;
-            this.currentKey = mapping.get(this.index).key;
-            this.current = mapping.get(this.index).value;
-            return true;
-          }
-          this.isKey = true;
-          this.currentKey = void 0;
-          this.current = mapping.get(this.index).key;
-          return true;
-        }
-        this.currentKey = void 0;
-        this.current = void 0;
-        return false;
-      }
-      default:
-        throw new Error(`Unexpected token type '${this._token.templateTokenType}' when traversing state`);
-    }
+  get isLiteral() {
+    return false;
   }
-  /**
-   * Returns the ancestor tokens from root to the current token's parent container.
-   */
-  getAncestors() {
-    const ancestors = [];
-    let state = this.parent;
-    while (state) {
-      if (state.current) {
-        ancestors.unshift(state.current);
-      }
-      state = state.parent;
-    }
-    return ancestors;
+  get isExpression() {
+    return true;
+  }
+  static validateExpression(expression, allowedContext) {
+    const { namedContexts, functions } = splitAllowedContext(allowedContext);
+    const lexer = new Lexer(expression);
+    const result = lexer.lex();
+    const p = new Parser(result.tokens, namedContexts, functions);
+    p.parse();
   }
 };
 
-// node_modules/@actions/workflow-parser/dist/templates/tokens/template-token.js
-var TemplateTokenError = class extends Error {
-  constructor(message, token) {
-    super(message);
-    this.token = token;
-  }
-};
-var TemplateToken = class {
+// node_modules/@actions/workflow-parser/dist/templates/tokens/basic-expression-token.js
+var BasicExpressionToken = class _BasicExpressionToken extends ExpressionToken {
   /**
-   * Base class for all template tokens
+   * @param file The file ID where this token originated
+   * @param range The range of the entire expression including `${{` and `}}`
+   * @param expression The expression string without `${{` and `}}` markers
+   * @param definitionInfo Schema definition info for this token
+   * @param originalExpressions If transformed from individual expressions (e.g., format()), these are the originals
+   * @param source The original source string from the YAML
+   * @param expressionRange The range of just the expression, excluding `${{` and `}}`
+   * @param blockScalarHeader The block scalar header (e.g., "|", "|-") if parsed from a YAML block scalar
    */
-  constructor(type, file, range, definitionInfo) {
-    this.type = type;
-    this.file = file;
-    this.range = range;
-    this.definitionInfo = definitionInfo;
+  constructor(file, range, expression, definitionInfo, originalExpressions, source, expressionRange, blockScalarHeader) {
+    super(TokenType.BasicExpression, file, range, void 0, definitionInfo);
+    this.expr = expression;
+    this.source = source;
+    this.originalExpressions = originalExpressions;
+    this.expressionRange = expressionRange;
+    this.blockScalarHeader = blockScalarHeader;
   }
-  get templateTokenType() {
-    return this.type;
+  get expression() {
+    return this.expr;
   }
-  get line() {
-    return this.range?.start.line;
+  clone(omitSource) {
+    return omitSource ? new _BasicExpressionToken(void 0, void 0, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader) : new _BasicExpressionToken(this.file, this.range, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader);
   }
-  get col() {
-    return this.range?.start.column;
+  toString() {
+    return `${OPEN_EXPRESSION} ${this.expr} ${CLOSE_EXPRESSION}`;
   }
-  get definition() {
-    return this.definitionInfo?.definition;
-  }
-  get description() {
-    return this._description || this.propertyDefinition?.description || this.definition?.description;
-  }
-  set description(description) {
-    this._description = description;
-  }
-  typeName() {
-    return tokenTypeName(this.type);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertNull(objectDescription) {
-    if (this.type === TokenType2.Null) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Null)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertBoolean(objectDescription) {
-    if (this.type === TokenType2.Boolean) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Boolean)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertNumber(objectDescription) {
-    if (this.type === TokenType2.Number) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Number)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertString(objectDescription) {
-    if (this.type === TokenType2.String) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.String)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertScalar(objectDescription) {
-    if (this?.isScalar === true) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type 'ScalarToken' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertSequence(objectDescription) {
-    if (this.type === TokenType2.Sequence) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Sequence)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertMapping(objectDescription) {
-    if (this.type === TokenType2.Mapping) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Mapping)}' was expected.`, this);
-  }
-  /**
-   * Returns all tokens (depth first)
-   * @param value The object to traverse
-   * @param omitKeys Whether to omit mapping keys
-   * @yields A tuple of [parent, token, keyToken, ancestors] for each token in the tree
-   */
-  static *traverse(value, omitKeys) {
-    yield [void 0, value, void 0, []];
-    switch (value.templateTokenType) {
-      case TokenType2.Sequence:
-      case TokenType2.Mapping: {
-        let state = new TraversalState(void 0, value);
-        state = new TraversalState(state, value);
-        while (state.parent) {
-          if (state.moveNext(omitKeys ?? false)) {
-            value = state.current;
-            yield [state.parent?.current, value, state.currentKey, state.getAncestors()];
-            switch (value.type) {
-              case TokenType2.Sequence:
-              case TokenType2.Mapping:
-                state = new TraversalState(state, value);
-                break;
-            }
-          } else {
-            state = state.parent;
-          }
-        }
-        break;
-      }
-    }
+  toDisplayString() {
+    return ScalarToken.trimDisplayString(this.toString());
   }
   toJSON() {
-    return void 0;
+    return {
+      type: TokenType.BasicExpression,
+      expr: this.expr
+    };
   }
 };
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/insert-expression-token.js
+var InsertExpressionToken = class _InsertExpressionToken extends ExpressionToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.InsertExpression, file, range, INSERT_DIRECTIVE, definitionInfo);
+  }
+  clone(omitSource) {
+    return omitSource ? new _InsertExpressionToken(void 0, void 0, this.definitionInfo) : new _InsertExpressionToken(this.file, this.range, this.definitionInfo);
+  }
+  toString() {
+    return `${OPEN_EXPRESSION} ${INSERT_DIRECTIVE} ${CLOSE_EXPRESSION}`;
+  }
+  toDisplayString() {
+    return ScalarToken.trimDisplayString(this.toString());
+  }
+  toJSON() {
+    return {
+      type: TokenType.InsertExpression,
+      expr: "insert"
+    };
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/mapping-token.js
+var MappingToken = class _MappingToken extends TemplateToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.Mapping, file, range, definitionInfo);
+    this.map = [];
+  }
+  get count() {
+    return this.map.length;
+  }
+  get isScalar() {
+    return false;
+  }
+  get isLiteral() {
+    return false;
+  }
+  get isExpression() {
+    return false;
+  }
+  add(key, value) {
+    this.map.push(new KeyValuePair(key, value));
+  }
+  get(index) {
+    return this.map[index];
+  }
+  find(key) {
+    const pair = this.map.find((pair2) => pair2.key.toString() === key);
+    return pair?.value;
+  }
+  remove(index) {
+    this.map.splice(index, 1);
+  }
+  clone(omitSource) {
+    const result = omitSource ? new _MappingToken(void 0, void 0, this.definitionInfo) : new _MappingToken(this.file, this.range, this.definitionInfo);
+    for (const item of this.map) {
+      result.add(item.key.clone(omitSource), item.value.clone(omitSource));
+    }
+    return result;
+  }
+  toJSON() {
+    const items = [];
+    for (const item of this.map) {
+      items.push({ Key: item.key, Value: item.value });
+    }
+    return {
+      type: TokenType.Mapping,
+      map: items
+    };
+  }
+  *[Symbol.iterator]() {
+    for (const item of this.map) {
+      yield item;
+    }
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/type-guards.js
+function isLiteral(t) {
+  return t.isLiteral;
+}
+function isScalar(t) {
+  return t.isScalar;
+}
+function isString(t) {
+  return isLiteral(t) && t.templateTokenType === TokenType.String;
+}
+function isBasicExpression(t) {
+  return isScalar(t) && t.templateTokenType === TokenType.BasicExpression;
+}
+function isSequence(t) {
+  return t instanceof SequenceToken;
+}
+function isMapping(t) {
+  return t instanceof MappingToken;
+}
 
 // node_modules/@actions/workflow-parser/dist/templates/template-validation-error.js
 var TemplateValidationError = class {
@@ -11222,407 +11193,6 @@ var DefinitionType;
   DefinitionType2[DefinitionType2["AllowedValues"] = 7] = "AllowedValues";
 })(DefinitionType || (DefinitionType = {}));
 
-// node_modules/@actions/workflow-parser/dist/templates/template-constants.js
-var ALLOWED_VALUES = "allowed-values";
-var ANY = "any";
-var BOOLEAN = "boolean";
-var BOOLEAN_DEFINITION = "boolean-definition";
-var BOOLEAN_DEFINITION_PROPERTIES = "boolean-definition-properties";
-var CLOSE_EXPRESSION = "}}";
-var CONSTANT = "constant";
-var CONTEXT = "context";
-var DEFINITION = "definition";
-var DEFINITIONS = "definitions";
-var DESCRIPTION = "description";
-var IGNORE_CASE = "ignore-case";
-var INSERT_DIRECTIVE = "insert";
-var IS_EXPRESSION = "is-expression";
-var ITEM_TYPE = "item-type";
-var LOOSE_KEY_TYPE = "loose-key-type";
-var LOOSE_VALUE_TYPE = "loose-value-type";
-var MAX_CONSTANT = "MAX";
-var MAPPING = "mapping";
-var MAPPING_DEFINITION = "mapping-definition";
-var MAPPING_DEFINITION_PROPERTIES = "mapping-definition-properties";
-var MAPPING_PROPERTY_VALUE = "mapping-property-value";
-var NON_EMPTY_STRING = "non-empty-string";
-var NULL = "null";
-var NULL_DEFINITION = "null-definition";
-var NULL_DEFINITION_PROPERTIES = "null-definition-properties";
-var NUMBER = "number";
-var NUMBER_DEFINITION = "number-definition";
-var NUMBER_DEFINITION_PROPERTIES = "number-definition-properties";
-var ONE_OF = "one-of";
-var ONE_OF_DEFINITION = "one-of-definition";
-var OPEN_EXPRESSION = "${{";
-var PROPERTY_VALUE = "property-value";
-var PROPERTIES = "properties";
-var REQUIRED = "required";
-var REQUIRE_NON_EMPTY = "require-non-empty";
-var SCALAR = "scalar";
-var SEQUENCE = "sequence";
-var SEQUENCE_DEFINITION = "sequence-definition";
-var SEQUENCE_DEFINITION_PROPERTIES = "sequence-definition-properties";
-var TYPE = "type";
-var SEQUENCE_OF_NON_EMPTY_STRING = "sequence-of-non-empty-string";
-var STRING = "string";
-var STRING_DEFINITION = "string-definition";
-var STRING_DEFINITION_PROPERTIES = "string-definition-properties";
-var TEMPLATE_SCHEMA = "template-schema";
-var VERSION = "version";
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/scalar-token.js
-var ScalarToken = class extends TemplateToken {
-  constructor(type, file, range, definitionInfo) {
-    super(type, file, range, definitionInfo);
-  }
-  get isScalar() {
-    return true;
-  }
-  static trimDisplayString(displayString) {
-    let firstLine = displayString.trimStart();
-    const firstNewLine = firstLine.indexOf("\n");
-    const firstCarriageReturn = firstLine.indexOf("\r");
-    if (firstNewLine >= 0 || firstCarriageReturn >= 0) {
-      firstLine = firstLine.substr(0, Math.min(firstNewLine >= 0 ? firstNewLine : Number.MAX_VALUE, firstCarriageReturn >= 0 ? firstCarriageReturn : Number.MAX_VALUE));
-    }
-    return firstLine;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/literal-token.js
-var LiteralToken = class extends ScalarToken {
-  constructor(type, file, range, definitionInfo) {
-    super(type, file, range, definitionInfo);
-  }
-  get isLiteral() {
-    return true;
-  }
-  get isExpression() {
-    return false;
-  }
-  toDisplayString() {
-    return ScalarToken.trimDisplayString(this.toString());
-  }
-  /**
-   * Throws a good debug message when an unexpected literal value is encountered
-   */
-  assertUnexpectedValue(objectDescription) {
-    throw new Error(`Error while reading '${objectDescription}'. Unexpected value '${this.toString()}'`);
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/string-token.js
-var StringToken = class _StringToken extends LiteralToken {
-  constructor(file, range, value, definitionInfo, source, blockScalarHeader) {
-    super(TokenType2.String, file, range, definitionInfo);
-    this.value = value;
-    this.source = source;
-    this.blockScalarHeader = blockScalarHeader;
-  }
-  clone(omitSource) {
-    return omitSource ? new _StringToken(void 0, void 0, this.value, this.definitionInfo, this.source, this.blockScalarHeader) : new _StringToken(this.file, this.range, this.value, this.definitionInfo, this.source, this.blockScalarHeader);
-  }
-  toString() {
-    return this.value;
-  }
-  toJSON() {
-    return this.value;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/number-token.js
-var NumberToken = class _NumberToken extends LiteralToken {
-  constructor(file, range, value, definitionInfo) {
-    super(TokenType2.Number, file, range, definitionInfo);
-    this.num = value;
-  }
-  get value() {
-    return this.num;
-  }
-  clone(omitSource) {
-    return omitSource ? new _NumberToken(void 0, void 0, this.num, this.definitionInfo) : new _NumberToken(this.file, this.range, this.num, this.definitionInfo);
-  }
-  toString() {
-    return `${this.num}`;
-  }
-  toJSON() {
-    return this.num;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/boolean-token.js
-var BooleanToken = class _BooleanToken extends LiteralToken {
-  constructor(file, range, value, definitionInfo) {
-    super(TokenType2.Boolean, file, range, definitionInfo);
-    this.bool = value;
-  }
-  get value() {
-    return this.bool;
-  }
-  clone(omitSource) {
-    return omitSource ? new _BooleanToken(void 0, void 0, this.bool, this.definitionInfo) : new _BooleanToken(this.file, this.range, this.bool, this.definitionInfo);
-  }
-  toString() {
-    return this.bool ? "true" : "false";
-  }
-  toJSON() {
-    return this.bool;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/null-token.js
-var NullToken = class _NullToken extends LiteralToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.Null, file, range, definitionInfo);
-  }
-  clone(omitSource) {
-    return omitSource ? new _NullToken(void 0, void 0, this.definitionInfo) : new _NullToken(this.file, this.range, this.definitionInfo);
-  }
-  toString() {
-    return "";
-  }
-  toJSON() {
-    return null;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/key-value-pair.js
-var KeyValuePair = class {
-  constructor(key, value) {
-    this.key = key;
-    this.value = value;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/sequence-token.js
-var SequenceToken = class _SequenceToken extends TemplateToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.Sequence, file, range, definitionInfo);
-    this.seq = [];
-  }
-  get count() {
-    return this.seq.length;
-  }
-  get isScalar() {
-    return false;
-  }
-  get isLiteral() {
-    return false;
-  }
-  get isExpression() {
-    return false;
-  }
-  add(value) {
-    this.seq.push(value);
-  }
-  get(index) {
-    return this.seq[index];
-  }
-  clone(omitSource) {
-    const result = omitSource ? new _SequenceToken(void 0, void 0, this.definitionInfo) : new _SequenceToken(this.file, this.range, this.definitionInfo);
-    for (const item of this.seq) {
-      result.add(item.clone(omitSource));
-    }
-    return result;
-  }
-  toJSON() {
-    return {
-      type: TokenType2.Sequence,
-      seq: this.seq
-    };
-  }
-  *[Symbol.iterator]() {
-    for (const item of this.seq) {
-      yield item;
-    }
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/mapping-token.js
-var MappingToken = class _MappingToken extends TemplateToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.Mapping, file, range, definitionInfo);
-    this.map = [];
-  }
-  get count() {
-    return this.map.length;
-  }
-  get isScalar() {
-    return false;
-  }
-  get isLiteral() {
-    return false;
-  }
-  get isExpression() {
-    return false;
-  }
-  add(key, value) {
-    this.map.push(new KeyValuePair(key, value));
-  }
-  get(index) {
-    return this.map[index];
-  }
-  find(key) {
-    const pair = this.map.find((pair2) => pair2.key.toString() === key);
-    return pair?.value;
-  }
-  remove(index) {
-    this.map.splice(index, 1);
-  }
-  clone(omitSource) {
-    const result = omitSource ? new _MappingToken(void 0, void 0, this.definitionInfo) : new _MappingToken(this.file, this.range, this.definitionInfo);
-    for (const item of this.map) {
-      result.add(item.key.clone(omitSource), item.value.clone(omitSource));
-    }
-    return result;
-  }
-  toJSON() {
-    const items = [];
-    for (const item of this.map) {
-      items.push({ Key: item.key, Value: item.value });
-    }
-    return {
-      type: TokenType2.Mapping,
-      map: items
-    };
-  }
-  *[Symbol.iterator]() {
-    for (const item of this.map) {
-      yield item;
-    }
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/allowed-context.js
-function splitAllowedContext(allowedContext) {
-  const FUNCTION_REGEXP = /^([a-zA-Z0-9_]+)\(([0-9]+),([0-9]+|MAX)\)$/;
-  const namedContexts = [];
-  const functions = [];
-  if (allowedContext.length > 0) {
-    for (const contextItem of allowedContext) {
-      const match = contextItem.match(FUNCTION_REGEXP);
-      if (match) {
-        const functionName = match[1];
-        const minParameters = Number.parseInt(match[2]);
-        const maxParametersRaw = match[3];
-        const maxParameters = maxParametersRaw === MAX_CONSTANT ? Number.MAX_SAFE_INTEGER : Number.parseInt(maxParametersRaw);
-        functions.push({
-          name: functionName,
-          minArgs: minParameters,
-          maxArgs: maxParameters
-        });
-      } else {
-        namedContexts.push(contextItem);
-      }
-    }
-  }
-  return {
-    namedContexts,
-    functions
-  };
-}
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/expression-token.js
-var ExpressionToken = class extends ScalarToken {
-  constructor(type, file, range, directive, definitionInfo) {
-    super(type, file, range, definitionInfo);
-    this.directive = directive;
-  }
-  get isLiteral() {
-    return false;
-  }
-  get isExpression() {
-    return true;
-  }
-  static validateExpression(expression, allowedContext) {
-    const { namedContexts, functions } = splitAllowedContext(allowedContext);
-    const lexer = new Lexer(expression);
-    const result = lexer.lex();
-    const p = new Parser(result.tokens, namedContexts, functions);
-    p.parse();
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/basic-expression-token.js
-var BasicExpressionToken = class _BasicExpressionToken extends ExpressionToken {
-  /**
-   * @param file The file ID where this token originated
-   * @param range The range of the entire expression including `${{` and `}}`
-   * @param expression The expression string without `${{` and `}}` markers
-   * @param definitionInfo Schema definition info for this token
-   * @param originalExpressions If transformed from individual expressions (e.g., format()), these are the originals
-   * @param source The original source string from the YAML
-   * @param expressionRange The range of just the expression, excluding `${{` and `}}`
-   * @param blockScalarHeader The block scalar header (e.g., "|", "|-") if parsed from a YAML block scalar
-   */
-  constructor(file, range, expression, definitionInfo, originalExpressions, source, expressionRange, blockScalarHeader) {
-    super(TokenType2.BasicExpression, file, range, void 0, definitionInfo);
-    this.expr = expression;
-    this.source = source;
-    this.originalExpressions = originalExpressions;
-    this.expressionRange = expressionRange;
-    this.blockScalarHeader = blockScalarHeader;
-  }
-  get expression() {
-    return this.expr;
-  }
-  clone(omitSource) {
-    return omitSource ? new _BasicExpressionToken(void 0, void 0, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader) : new _BasicExpressionToken(this.file, this.range, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader);
-  }
-  toString() {
-    return `${OPEN_EXPRESSION} ${this.expr} ${CLOSE_EXPRESSION}`;
-  }
-  toDisplayString() {
-    return ScalarToken.trimDisplayString(this.toString());
-  }
-  toJSON() {
-    return {
-      type: TokenType2.BasicExpression,
-      expr: this.expr
-    };
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/insert-expression-token.js
-var InsertExpressionToken = class _InsertExpressionToken extends ExpressionToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.InsertExpression, file, range, INSERT_DIRECTIVE, definitionInfo);
-  }
-  clone(omitSource) {
-    return omitSource ? new _InsertExpressionToken(void 0, void 0, this.definitionInfo) : new _InsertExpressionToken(this.file, this.range, this.definitionInfo);
-  }
-  toString() {
-    return `${OPEN_EXPRESSION} ${INSERT_DIRECTIVE} ${CLOSE_EXPRESSION}`;
-  }
-  toDisplayString() {
-    return ScalarToken.trimDisplayString(this.toString());
-  }
-  toJSON() {
-    return {
-      type: TokenType2.InsertExpression,
-      expr: "insert"
-    };
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/type-guards.js
-function isLiteral(t) {
-  return t.isLiteral;
-}
-function isScalar(t) {
-  return t.isScalar;
-}
-function isString(t) {
-  return isLiteral(t) && t.templateTokenType === TokenType2.String;
-}
-function isSequence(t) {
-  return t instanceof SequenceToken;
-}
-function isMapping(t) {
-  return t instanceof MappingToken;
-}
-
 // node_modules/@actions/workflow-parser/dist/templates/template-reader.js
 var WHITESPACE_PATTERN = /\s/;
 var backgroundStepProperties = /* @__PURE__ */ new Set(["background", "wait", "wait-all", "cancel"]);
@@ -11722,7 +11292,7 @@ var TemplateReader = class {
         }
         continue;
       }
-      const nextKey = nextKeyScalar.templateTokenType === TokenType2.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
+      const nextKey = nextKeyScalar.templateTokenType === TokenType.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
       if (nextKey.value) {
         const upperKey = nextKey.value.toUpperCase();
         if (upperKeys[upperKey]) {
@@ -11808,7 +11378,7 @@ var TemplateReader = class {
         }
         continue;
       }
-      const nextKey = nextKeyScalar.templateTokenType === TokenType2.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
+      const nextKey = nextKeyScalar.templateTokenType === TokenType.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
       if (nextKey.value) {
         const upperKey = nextKey.value.toUpperCase();
         if (upperKeys[upperKey]) {
@@ -11848,10 +11418,10 @@ var TemplateReader = class {
   }
   validate(scalar, definition) {
     switch (scalar.templateTokenType) {
-      case TokenType2.Null:
-      case TokenType2.Boolean:
-      case TokenType2.Number:
-      case TokenType2.String: {
+      case TokenType.Null:
+      case TokenType.Boolean:
+      case TokenType.Number:
+      case TokenType.String: {
         const literal = scalar;
         const scalarDefinitions = definition.getScalarDefinitions();
         let relevantDefinition;
@@ -11859,7 +11429,7 @@ var TemplateReader = class {
           scalar.definitionInfo = new DefinitionInfo(definition, relevantDefinition);
           return scalar;
         }
-        if (literal.templateTokenType !== TokenType2.String) {
+        if (literal.templateTokenType !== TokenType.String) {
           const stringLiteral = new StringToken(literal.file, literal.range, literal.toString(), literal.definitionInfo);
           if (relevantDefinition = scalarDefinitions.find((x) => x.isMatch(stringLiteral))) {
             stringLiteral.definitionInfo = new DefinitionInfo(definition, relevantDefinition);
@@ -11869,7 +11439,7 @@ var TemplateReader = class {
         this._context.error(literal, `Unexpected value '${literal.toString()}'`);
         return scalar;
       }
-      case TokenType2.BasicExpression:
+      case TokenType.BasicExpression:
         if (definition.allowedContext.length === 0) {
           this._context.error(scalar, "A template expression is not allowed in this context");
         }
@@ -11952,7 +11522,7 @@ var TemplateReader = class {
     if (encounteredError) {
       return token;
     }
-    if (segments.length === 1 && segments[0].templateTokenType === TokenType2.BasicExpression) {
+    if (segments.length === 1 && segments[0].templateTokenType === TokenType.BasicExpression) {
       const basicExpression = segments[0];
       const str = this.getExpressionString(basicExpression.expression);
       if (str !== void 0) {
@@ -12031,7 +11601,7 @@ var TemplateReader = class {
     };
   }
   addString(segments, range, value, definition) {
-    if (segments.length > 0 && segments[segments.length - 1].templateTokenType === TokenType2.String) {
+    if (segments.length > 0 && segments[segments.length - 1].templateTokenType === TokenType.String) {
       const lastSegment = segments[segments.length - 1];
       segments[segments.length - 1] = new StringToken(this._fileId, range, `${lastSegment.value}${value}`, definition);
     } else {
@@ -12349,7 +11919,7 @@ var BooleanDefinition = class extends ScalarDefinition {
     return DefinitionType.Boolean;
   }
   isMatch(literal) {
-    return literal.templateTokenType === TokenType2.Boolean;
+    return literal.templateTokenType === TokenType.Boolean;
   }
   validate() {
   }
@@ -12360,7 +11930,7 @@ var PropertyDefinition = class {
   constructor(token) {
     this.type = "";
     this.required = false;
-    if (token.templateTokenType === TokenType2.String) {
+    if (token.templateTokenType === TokenType.String) {
       this.type = token.value;
     } else {
       const mapping = token.assertMapping(MAPPING_PROPERTY_VALUE);
@@ -12485,7 +12055,7 @@ var NullDefinition = class extends ScalarDefinition {
     return DefinitionType.Null;
   }
   isMatch(literal) {
-    return literal.templateTokenType === TokenType2.Null;
+    return literal.templateTokenType === TokenType.Null;
   }
   validate() {
   }
@@ -12521,7 +12091,7 @@ var NumberDefinition = class extends ScalarDefinition {
     return DefinitionType.Number;
   }
   isMatch(literal) {
-    return literal.templateTokenType === TokenType2.Number;
+    return literal.templateTokenType === TokenType.Number;
   }
   validate() {
   }
@@ -12761,7 +12331,7 @@ var StringDefinition = class extends ScalarDefinition {
     return DefinitionType.String;
   }
   isMatch(literal) {
-    if (literal.templateTokenType === TokenType2.String) {
+    if (literal.templateTokenType === TokenType.String) {
       const value = literal.value;
       if (this.constant) {
         return this.ignoreCase ? this.constant.toUpperCase() === value.toUpperCase() : this.constant === value;
@@ -12845,10 +12415,10 @@ var TemplateSchema = class _TemplateSchema {
                     break;
                   case ALLOWED_VALUES:
                     for (const item of mappingToken) {
-                      if (item.value.templateTokenType === TokenType2.Sequence) {
+                      if (item.value.templateTokenType === TokenType.Sequence) {
                         const sequenceToken = item.value;
                         for (const activity of sequenceToken) {
-                          if (activity.templateTokenType === TokenType2.String) {
+                          if (activity.templateTokenType === TokenType.String) {
                             const stringToken = activity;
                             const allowedValuesKey = definitionsKey.value + "-" + stringToken.value;
                             const allowedValuesDef = new StringDefinition(allowedValuesKey);
@@ -13673,7 +13243,7 @@ function convertOn(context, token) {
     for (const item of token) {
       const eventKey = item.key.assertString("event name");
       const eventName = eventKey.value;
-      if (item.value.templateTokenType === TokenType2.Null) {
+      if (item.value.templateTokenType === TokenType.Null) {
         result[eventName] = {};
         continue;
       }
@@ -14857,6 +14427,7 @@ function indexOn(doc, span) {
     const steps = resolve2(doc, field("steps")?.pair.value);
     jobSpans.set(id, {
       id: span(item.key),
+      name: field("name")?.span,
       if: field("if")?.span,
       needs: field("needs")?.span,
       continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0,
@@ -15971,9 +15542,393 @@ function settleable(path) {
   }
 }
 
+// src/core/workflowpattern.ts
+var quoteMeta = (s) => s.replace(/[\\.+*?()|[\]{}^$]/g, "\\$&");
+function compilePattern(raw, flags = "") {
+  const negative = raw.startsWith("!");
+  const pattern = negative ? raw.slice(1) : raw;
+  const source = patternToRegex(pattern);
+  let regex;
+  try {
+    regex = new RegExp(source, flags);
+  } catch {
+    throw new Error(`invalid Pattern '${pattern}'`);
+  }
+  return { pattern, negative, regex };
+}
+function patternToRegex(pattern) {
+  let r = "^";
+  let pos = 0;
+  const errors = /* @__PURE__ */ new Map();
+  const validChar = (a, b, test) => test !== void 0 && test >= a && test <= b;
+  while (pos < pattern.length) {
+    const c = pattern[pos];
+    switch (c) {
+      case "*":
+        if (pattern[pos + 1] === "*") {
+          if (pattern[pos + 2] === "/") {
+            r += "(.+/)?";
+            pos += 3;
+          } else {
+            r += ".*";
+            pos += 2;
+          }
+        } else {
+          r += "[^/]*";
+          pos++;
+        }
+        break;
+      case "+":
+      case "?":
+        r += pos > 0 ? c : quoteMeta(c);
+        pos++;
+        break;
+      case "[": {
+        r += c;
+        pos++;
+        if (pattern[pos] === "]") {
+          errors.set(pos, "Unexpected empty brackets '[]'");
+          pos++;
+          break;
+        }
+        const startPos = pos;
+        while (pos < pattern.length && pattern[pos] !== "]") {
+          const d = pattern[pos];
+          if (d === "-") {
+            if (pos <= startPos || pos + 1 >= pattern.length) {
+              errors.set(pos, "Invalid range");
+              pos++;
+              continue;
+            }
+            const before = pattern[pos - 1];
+            const after = pattern[pos + 1];
+            const validRange = (a, b) => validChar(a, b, before) && validChar(a, b, after) && before <= after;
+            if (!validRange("A", "z") && !validRange("0", "9")) {
+              errors.set(pos, "Ranges can only include a-z, A-Z, A-z, and 0-9");
+              pos++;
+              continue;
+            }
+            r += pattern.slice(pos, pos + 2);
+            pos += 2;
+          } else {
+            if (!validChar("A", "z", d) && !validChar("0", "9", d)) {
+              errors.set(pos, "Ranges can only include a-z, A-Z and 0-9");
+              pos++;
+              continue;
+            }
+            r += quoteMeta(d);
+            pos++;
+          }
+        }
+        if (pos >= pattern.length || pattern[pos] !== "]") {
+          errors.set(pos, "Missing closing bracket ']' after '['");
+          pos++;
+        }
+        r += "]";
+        pos++;
+        break;
+      }
+      case "\\":
+        if (pos + 1 >= pattern.length) {
+          errors.set(pos, "Missing symbol after \\");
+          pos++;
+          break;
+        }
+        r += quoteMeta(pattern[pos + 1]);
+        pos += 2;
+        break;
+      default:
+        r += quoteMeta(c);
+        pos++;
+    }
+  }
+  if (errors.size > 0) {
+    const list = [...errors].sort(([a], [b]) => a - b).map(([at, err]) => `Position: ${at} Error: ${err}`);
+    throw new Error(`invalid Pattern '${pattern}': ${list.join(", ")}`);
+  }
+  return r + "$";
+}
+function compilePatterns(patterns, flags = "") {
+  return patterns.map((p) => compilePattern(p, flags));
+}
+function skip(sequence, input) {
+  if (sequence.length === 0) return { skip: false, by: -1 };
+  let matched = false;
+  let by = -1;
+  sequence.forEach((item, i) => {
+    if (item.regex.test(input)) {
+      matched = !item.negative;
+      by = i;
+    }
+  });
+  return { skip: !matched, by };
+}
+function filter(sequence, input) {
+  const by = sequence.findIndex(
+    (item) => item.regex.test(input) === !item.negative
+  );
+  return { skip: by >= 0, by };
+}
+
+// src/core/triggers.ts
+var KINDS = ["branches", "tags"];
+var SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|\n\n\nskip-checks: ?true\s*$/;
+var DIFF_LIMIT = 3e3;
+var GLOBS = [
+  ["GL-1", /\*/],
+  ["GL-2", /.[?+]/],
+  ["GL-3", /\[/],
+  ["GL-4", /^!|\\/]
+];
+var globCauses = (pattern, spans) => GLOBS.filter(([, re]) => re.test(pattern)).map(([rule]) => ({
+  rule,
+  spans,
+  inputs: []
+}));
+var PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
+var settingsOf = (parsed, event) => {
+  const value = parsed.events[event];
+  return typeof value === "object" && value !== null ? value : {};
+};
+function filterDiagnostics(parsed) {
+  const found = [];
+  for (const event of Object.keys(parsed.events)) {
+    const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
+    const settings = settingsOf(parsed, event);
+    for (const kind of [...KINDS, "paths"]) {
+      const ignore = `${kind}-ignore`;
+      if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
+        found.push({
+          ...at(`${event}.${ignore}`),
+          rule: kind === "paths" ? "PA-1" : "BR-1",
+          message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
+        });
+      for (const key of [kind, ignore]) {
+        const list = settings[key];
+        if (!Array.isArray(list)) continue;
+        list.forEach((pattern, i) => {
+          try {
+            compilePattern(String(pattern));
+          } catch (err) {
+            found.push({
+              ...at(`${event}.${key}.${i}`),
+              message: err.message
+            });
+          }
+        });
+      }
+    }
+  }
+  return found;
+}
+function trigger(parsed, event, defaultBranch) {
+  const decided = byRef(parsed, event, defaultBranch);
+  if (decided.value === "skipped") return decided;
+  const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
+  const message = event.message;
+  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
+    return result;
+  const entry = parsed.onEntries.get(event.name);
+  return {
+    value: "skipped",
+    causes: [
+      {
+        rule: "SK-1",
+        spans: entry ? [entry] : [],
+        inputs: [{ path: "event.message", value: message }]
+      },
+      ...result.causes
+    ]
+  };
+}
+var SHA_LIKE = /^[0-9a-f]{7,40}$/i;
+function shaLike(result, event, defaultBranch) {
+  if (event.name !== "pull_request_target" || result.value !== "runs")
+    return result;
+  const branches = [
+    event.base === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: "event.base", value: event.base },
+    ...event.ref === void 0 ? [] : [{ path: "event.ref", value: event.ref }]
+  ];
+  const inputs = branches.filter(
+    (b) => SHA_LIKE.test(b.value.replace(/^refs\/heads\//, ""))
+  );
+  if (inputs.length === 0) return result;
+  return {
+    value: "uncertain",
+    causes: [{ rule: "BR-9", spans: [], inputs }, ...result.causes],
+    possible: ["runs", "skipped"],
+    settle: []
+  };
+}
+function byPaths(parsed, event, decided) {
+  const name2 = event.name;
+  const settings = settingsOf(parsed, name2);
+  const has = (key2) => Object.hasOwn(settings, key2);
+  const key = has("paths") ? "paths" : "paths-ignore";
+  const list = settings[key];
+  if (!Array.isArray(list) || list.length === 0) return decided;
+  const patterns = list.map(String);
+  const spans = (at2) => {
+    const span = parsed.onEntries.get(`${name2}.${at2}`);
+    return span ? [span] : [];
+  };
+  const keySpans = spans(key);
+  const include = key === "paths";
+  const ref = event.ref ?? "";
+  if (name2 === "push" && ref.startsWith("refs/tags/")) {
+    const tagged = {
+      rule: "PA-6",
+      spans: keySpans,
+      inputs: [{ path: "event.ref", value: ref }]
+    };
+    if (include && !has("tags") && !has("tags-ignore"))
+      return {
+        value: "uncertain",
+        causes: [tagged, ...decided.causes],
+        possible: ["runs", "skipped"],
+        settle: []
+      };
+    return { ...decided, causes: [...decided.causes, tagged] };
+  }
+  const changed = event.changed ?? [];
+  const input = { path: "event.changed", value: changed };
+  const filtered = KINDS.some((k) => has(k) || has(`${k}-ignore`));
+  const combine = (value, own2) => {
+    const both = filtered ? [own2[0], { rule: "BR-6", spans: [], inputs: [] }, ...own2.slice(1)] : own2;
+    if (value === "uncertain")
+      return {
+        value,
+        causes: [...both, ...decided.causes],
+        possible: ["runs", "skipped"],
+        settle: []
+      };
+    if (value === "runs" && decided.value === "uncertain")
+      return { ...decided, causes: [...decided.causes, ...both] };
+    return { value, causes: [...both, ...decided.causes] };
+  };
+  if (changed.length === 0)
+    return combine("skipped", [
+      { rule: "PA-3", spans: keySpans, inputs: [input] }
+    ]);
+  if (!include && changed.length > DIFF_LIMIT)
+    return combine("uncertain", [
+      { rule: "PA-5", spans: keySpans, inputs: [input] }
+    ]);
+  const compiled = compilePatterns(patterns);
+  const kept = (file) => !(include ? skip : filter)(compiled, file).skip;
+  const deciding = changed.slice(0, DIFF_LIMIT).find(kept);
+  const by = deciding === void 0 || !include ? -1 : skip(compiled, deciding).by;
+  const at = by >= 0 ? spans(`${key}.${by}`) : keySpans;
+  const own = [
+    { rule: "PA-2", spans: at, inputs: [input] },
+    { rule: "PA-7", spans: [], inputs: [] },
+    ...by >= 0 ? globCauses(patterns[by], at) : []
+  ];
+  if (deciding !== void 0) return combine("runs", own);
+  if (changed.slice(DIFF_LIMIT).some(kept))
+    own.unshift({ rule: "PA-5", spans: keySpans, inputs: [input] });
+  return combine("skipped", own);
+}
+function byRef(parsed, event, defaultBranch) {
+  const name2 = event.name;
+  const spans = (key2) => {
+    const span = parsed.onEntries.get(key2);
+    return span ? [span] : [];
+  };
+  const named = { path: "event.name", value: name2 };
+  if (!Object.hasOwn(parsed.events, name2))
+    return {
+      value: "skipped",
+      causes: [
+        {
+          rule: "EV-0",
+          spans: parsed.onSpan ? [parsed.onSpan] : [],
+          inputs: [named]
+        }
+      ]
+    };
+  const settings = settingsOf(parsed, name2);
+  const has = (key2) => Object.hasOwn(settings, key2);
+  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
+  const after = [];
+  if (name2 !== "push") {
+    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
+    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
+    const typed = {
+      rule: "EV-1",
+      spans: spans(has("types") ? `${name2}.types` : name2),
+      inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
+    };
+    if (!wanted.some((t) => types.includes(t)))
+      return { value: "skipped", causes: [typed] };
+    after.push(typed);
+    if (event.type === "stacked")
+      after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
+  }
+  const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
+  after.push({ rule: copy, spans: [], inputs: [named] });
+  const given = name2 === "push" ? event.ref : event.base;
+  const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
+  const ref = given ?? `refs/heads/${defaultBranch}`;
+  const kind = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
+  const short = ref.replace(/^refs\/(heads|tags)\//, "");
+  const other = kind === "branches" ? "tags" : "branches";
+  const include = has(kind);
+  if (!include && !has(`${kind}-ignore`)) {
+    const otherKey = has(other) ? other : `${other}-ignore`;
+    if (name2 === "push" && has(otherKey))
+      return {
+        value: "skipped",
+        causes: [
+          { rule: "BR-3", spans: spans(`push.${otherKey}`), inputs: [input] },
+          ...after
+        ]
+      };
+    return { value: "runs", causes: [listed, ...after] };
+  }
+  const key = include ? kind : `${kind}-ignore`;
+  const patterns = settings[key].map(String);
+  const decide = (list, flags = "") => (include ? skip : filter)(compilePatterns(list, flags), short);
+  const base = decide(patterns);
+  const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
+  const matched = {
+    rule: name2 === "push" ? "BR-3" : "BR-2",
+    spans: spans(`${name2}.${key}`),
+    inputs: [input]
+  };
+  const prefix = `refs/${kind === "tags" ? "tags" : "heads"}/`;
+  const fullRef = patterns.findIndex(
+    (p) => p.replace(/^!/, "").startsWith(prefix)
+  );
+  const uncertain = (rule, i) => ({
+    value: "uncertain",
+    causes: [{ rule, spans: at(i), inputs: [input] }, matched, ...after],
+    possible: ["runs", "skipped"],
+    settle: []
+  });
+  if (fullRef >= 0) {
+    const asFull = decide(
+      patterns.map((p) => p.replace(new RegExp(`^(!?)${prefix}`), "$1"))
+    );
+    if (asFull.skip !== base.skip) return uncertain("BR-8", fullRef);
+  }
+  const anyCase = decide(patterns, "i");
+  if (anyCase.skip !== base.skip)
+    return uncertain("GL-6", anyCase.by >= 0 ? anyCase.by : base.by);
+  return {
+    value: base.skip ? "skipped" : "runs",
+    causes: [
+      { rule: include ? "BR-4" : "BR-5", spans: at(base.by), inputs: [input] },
+      matched,
+      ...globCauses(patterns[base.by] ?? "", at(base.by)),
+      ...after
+    ]
+  };
+}
+
 // src/core/jobs.ts
 var OTHER = "\0other";
-var cause3 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
+var cause2 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
 var ABSENT = {
   push: ["pull_request", "action"],
   pull_request: ["head_commit"],
@@ -16200,13 +16155,13 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
             settle: false,
             compared: [],
             candidates: [false, true],
-            after: [cause3("CO-1", step.uses)]
+            after: [cause2("CO-1", step.uses)]
           },
           assigned
         );
         reads.push(name2);
         if (!yes) continue;
-        pinned.push(cause3("CO-3", step.uses));
+        pinned.push(cause2("CO-3", step.uses));
       }
       const co1 = {
         rule: "CO-1",
@@ -16215,7 +16170,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
       };
       if (!step.continueOnError)
         return { fails: true, parts: [co1, ...pinned, ...found] };
-      found.push(cause3("CO-6", step.continueOnError), co1, ...pinned);
+      found.push(cause2("CO-6", step.continueOnError), co1, ...pinned);
     }
     return found.length > 0 ? { fails: false, parts: found } : void 0;
   };
@@ -16250,7 +16205,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
             compared: [],
             candidates: [false, true],
             path: e.needed,
-            after: [cause3("CO-5", input.span), cause3("CO-1", step.uses)]
+            after: [cause2("CO-5", input.span), cause2("CO-1", step.uses)]
           },
           assigned
         );
@@ -16324,7 +16279,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
         }
         result = {
           value: "fails",
-          parts: [cause3("WN-1", at.id, [{ path: key(id), value: "fails" }])],
+          parts: [cause2("WN-1", at.id, [{ path: key(id), value: "fails" }])],
           conclusion: succeeds ? "success" : "failure",
           failed: failed || !succeeds
         };
@@ -16339,9 +16294,9 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
           value: "runs",
           parts: [
             // A dependent that runs past a failed or skipped need does so by its status function.
-            ...blocker ? [cause3("JG-1", at.if ?? at.id), { from: blocker }] : [],
+            ...blocker ? [cause2("JG-1", at.if ?? at.id), { from: blocker }] : [],
             ...refusal?.parts ?? [],
-            cause3("WN-2", at.id)
+            cause2("WN-2", at.id)
           ],
           conclusion: "success",
           failed
@@ -16354,7 +16309,13 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
               job.if.expression,
               { ...contexts, needs: results("success") },
               { success: true, failure: false },
-              resolver(id, needs, assigned, [])
+              // Each need's outputs as a success would set them, not the empty ones it left.
+              resolver(
+                id,
+                needs.map(([n, o]) => [n, { ...o, conclusion: "success" }]),
+                assigned,
+                []
+              )
             );
           } catch (e) {
             if (!(e instanceof RuntimeValueNeeded)) throw e;
@@ -16365,9 +16326,9 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
           value: "skipped",
           parts: byNeeds ? [
             { from: blocker },
-            cause3("JG-1", at.needs ?? at.id),
-            ...implicit ? [cause3("JG-2", at.if)] : []
-          ] : [cause3("JG-3", at.if ?? at.id)],
+            cause2("JG-1", at.needs ?? at.id),
+            ...implicit ? [cause2("JG-2", at.if)] : []
+          ] : [cause2("JG-3", at.if ?? at.id)],
           conclusion: "skipped",
           failed
         };
@@ -16416,11 +16377,11 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
         (name2) => [name2, unsettled.get(name2)]
       );
       const causes = reads.flatMap(([, u]) => [
-        cause3(u.rule, u.span),
+        cause2(u.rule, u.span),
         ...u.after ?? []
       ]);
       if (reads[0][1].job !== id && spans(id).needs)
-        causes.push(cause3("JG-1", spans(id).needs));
+        causes.push(cause2("JG-1", spans(id).needs));
       const settle = reads.filter(([, u]) => u.settle);
       verdict = {
         key: key(id),
@@ -16515,6 +16476,190 @@ function githubContext({ event, repo }) {
     },
     sha: merged ? "<merge_commit_sha>" : "<sha>",
     run_id: "<run_id>"
+  };
+}
+
+// src/core/checks.ts
+var RANK = [
+  "fails and blocks merge",
+  "pending and blocks merge",
+  "uncertain",
+  "may not block",
+  "passes"
+];
+var cause3 = (rule, inputs = []) => ({
+  rule,
+  spans: [],
+  inputs
+});
+function nameOf(job, scenario) {
+  if (!job.name || !isBasicExpression(job.name))
+    return { name: checkName(job) };
+  const vars = scenario.repo.vars ?? {};
+  try {
+    const name2 = evaluateTemplate(
+      `\${{ ${job.name.expression} }}`,
+      {
+        github: githubContext(scenario),
+        vars: {},
+        needs: {},
+        strategy: {},
+        matrix: {},
+        inputs: {}
+      },
+      ([context, field]) => {
+        if (context.toLowerCase() === "github") return void 0;
+        if (context.toLowerCase() === "vars" && field !== void 0) {
+          const found = Object.keys(vars).find(
+            (k) => k.toLowerCase() === field.toLowerCase()
+          );
+          return found === void 0 ? { needed: `vars.${field}` } : { value: vars[found] };
+        }
+        return { needed: [context, field].filter(Boolean).join(".") };
+      }
+    );
+    return { name: name2 };
+  } catch (e) {
+    if (!(e instanceof RuntimeValueNeeded)) throw e;
+    return { name: void 0, needed: e.needed };
+  }
+}
+function unreadable(key, file, scenario) {
+  const { path, line, col, endLine, endCol } = file.diagnostics[0];
+  return file.jobs.map((job) => {
+    const spans = file.jobSpans.get(job.id.value);
+    const unread = {
+      key: `${key} \u203A ${job.id.value}`,
+      value: "uncertain",
+      causes: [
+        {
+          rule: "RQ-0",
+          spans: [
+            ...spans ? [spans.id] : [],
+            { path, line, col, endLine, endCol }
+          ],
+          inputs: []
+        }
+      ],
+      settle: []
+    };
+    return { ...nameOf(job, scenario), job: unread, workflow: unread, spans };
+  });
+}
+function checkVerdicts(producers, { event, repo }) {
+  const names = [...new Set(repo.required)];
+  if (event.name !== "push" && event.type !== void 0 && !PR_DEFAULT_TYPES.includes(event.type))
+    return names.map((name2) => ({
+      key: `check \u203A ${name2}`,
+      value: "unsupported",
+      causes: [cause3("WN-3", [{ path: "event.type", value: event.type }])]
+    }));
+  const notes = repo.strict ? [cause3("RQ-10", [{ path: "repo.strict", value: true }])] : [];
+  return names.map((name2) => {
+    const { causes, ...rest } = badge(name2, producers);
+    return { key: `check \u203A ${name2}`, ...rest, causes: [...causes, ...notes] };
+  });
+}
+function badge(name2, producers) {
+  const pending = (...causes) => ({
+    value: "pending and blocks merge",
+    causes: [...causes, cause3("RQ-8")]
+  });
+  const typed = { path: "repo.required", value: name2 };
+  const exact = producers.filter((p) => p.name === name2);
+  const matched = exact.length > 0 ? exact : producers.filter((p) => p.name?.toLowerCase() === name2.toLowerCase());
+  const jobs = /* @__PURE__ */ new Map();
+  for (const p of matched)
+    jobs.set(p.job.key, [...jobs.get(p.job.key) ?? [], p]);
+  if (jobs.size === 0) {
+    const unknown = producers.find((p) => p.needed !== void 0);
+    if (!unknown) return pending(cause3("RQ-0", [typed]));
+    return {
+      value: "uncertain",
+      causes: [
+        {
+          rule: "WN-4",
+          spans: unknown.spans?.name ? [unknown.spans.name] : [],
+          inputs: []
+        },
+        cause3("RQ-0", [typed])
+      ],
+      settle: settleable(unknown.needed) ? [unknown.needed] : []
+    };
+  }
+  const badges = [...jobs.values()].map((stages) => {
+    const all = stages.map((p) => stage(p, pending));
+    const reported = all.filter((b) => b.causes[0]?.rule !== "RQ-1");
+    return (reported.length > 0 ? reported : all).reduce(
+      (a, b) => RANK.indexOf(b.value) < RANK.indexOf(a.value) ? b : a
+    );
+  });
+  const ids = (ps) => ps.flatMap((p) => p.spans ? [p.spans.id] : []);
+  const values = [...new Set(badges.map((b) => b.value))].sort();
+  if (badges.length > 1)
+    return {
+      value: "uncertain",
+      causes: [
+        {
+          rule: "RQ-0",
+          spans: [...jobs.values()].flatMap((ps) => ids(ps.slice(0, 1))),
+          inputs: [typed]
+        }
+      ],
+      ...values.length <= 3 && { possible: values },
+      settle: []
+    };
+  const result = badges[0];
+  if (exact.length > 0) return result;
+  return {
+    value: "uncertain",
+    causes: [
+      { rule: "RQ-0", spans: ids(matched.slice(0, 1)), inputs: [typed] },
+      ...result.causes
+    ],
+    possible: [
+      .../* @__PURE__ */ new Set([
+        ...result.possible ?? [result.value],
+        "pending and blocks merge"
+      ])
+    ].sort(),
+    settle: []
+  };
+}
+function stage({ job, workflow, spans }, pending) {
+  if (job.value === "runs")
+    return { value: "passes", causes: [cause3("RQ-4"), ...job.causes] };
+  if (job.value === "fails") {
+    const causes = [cause3("RQ-4"), ...job.causes];
+    if (spans?.continueOnError)
+      return {
+        value: "uncertain",
+        causes: [
+          { rule: "JG-11", spans: [spans.continueOnError], inputs: [] },
+          ...causes
+        ],
+        possible: ["fails and blocks merge", "passes"],
+        settle: []
+      };
+    return { value: "fails and blocks merge", causes };
+  }
+  if (job.value === "skipped")
+    return job.causes[0]?.rule === "JG-3" ? { value: "passes", causes: [cause3("RQ-2"), ...job.causes] } : { value: "may not block", causes: [cause3("RQ-3"), ...job.causes] };
+  if (job.value === "no-run") {
+    if (workflow.value === "skipped")
+      return pending(cause3("RQ-1"), ...job.causes);
+    if (workflow.value === "pending") return pending(...job.causes);
+    if (workflow.value === "fails")
+      return {
+        value: "fails and blocks merge",
+        causes: [cause3("RQ-4"), ...job.causes]
+      };
+  }
+  return {
+    value: "uncertain",
+    causes: job.causes,
+    settle: job.settle ?? [],
+    ...job.hints && { hints: job.hints }
   };
 }
 
@@ -16650,6 +16795,12 @@ var rows = [
   {
     id: "PA-3",
     text: "With a path filter, if no files changed the GitHub workflow doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High"
+  },
+  {
+    id: "PA-4",
+    text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
     confidence: "High"
   },
@@ -16913,7 +17064,7 @@ var rows = [
   },
   {
     id: "RQ-0",
-    text: 'A workflow job\'s required-check name is its job name: `name:` if set and non-empty, otherwise the job id. "Required status checks do not take workflow, matrix, or event trigger types into account."',
+    text: `A workflow job's required-check name is its job name: \`name:\` if set and non-empty, otherwise the job id, with any expression in it evaluated. "Required status checks do not take workflow, matrix, or event trigger types into account." Two jobs with one name give "ambiguous status check results", and GitHub's docs don't say whether matching a name ignores case.`,
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
     confidence: "High"
   },
@@ -16926,6 +17077,12 @@ var rows = [
   {
     id: "RQ-2",
     text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-3",
+    text: 'A job skipped because a `needs` dependency failed "may not block merging". The fix is `if: always()` (or `!cancelled()`) on a required aggregator job.',
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
     confidence: "High"
   },
@@ -17095,9 +17252,17 @@ function evaluate2(parsed, scenario) {
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts = [];
   const producers = [];
+  const pushed = event.name !== "push" && event.actor !== "fork" ? { ...scenario, event: { ...event, name: "push" } } : void 0;
+  const pa4 = {
+    rule: "PA-4",
+    spans: [],
+    inputs: [{ path: "event.changed", value: event.changed }]
+  };
   for (const { key, bytes, ...file } of parsed) {
+    if (file.diagnostics.length > 0 && !calleeOnly(file))
+      producers.push(...unreadable(key, file, scenario));
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
-    const workflow = bytes > MAX_BYTES ? {
+    const run = (s) => bytes > MAX_BYTES ? {
       key,
       value: "skipped",
       causes: [{ rule: "PL-9", spans: [], inputs: [] }]
@@ -17105,20 +17270,31 @@ function evaluate2(parsed, scenario) {
       key,
       ...called(
         policy(
-          awaiting(trigger(file, event, repo.defaultBranch), event),
-          scenario
+          awaiting(trigger(file, s.event, repo.defaultBranch), s.event),
+          s
         ),
         file,
         files
       )
     };
+    const workflow = run(scenario);
     const jobs = jobVerdicts(`${key} \u203A `, file, workflow, scenario);
-    for (const job of file.jobs)
-      producers.push({
-        name: checkName(job),
-        job: jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`),
-        workflow
-      });
+    const produce = (s, w, vs, note) => {
+      for (const job of file.jobs) {
+        const v = vs.find((v2) => v2.key === `${key} \u203A ${job.id.value}`);
+        producers.push({
+          ...nameOf(job, s),
+          job: { ...v, causes: [...note, ...v.causes] },
+          workflow: w,
+          spans: file.jobSpans.get(job.id.value)
+        });
+      }
+    };
+    produce(scenario, workflow, jobs, []);
+    if (pushed) {
+      const w = run(pushed);
+      produce(pushed, w, jobVerdicts(`${key} \u203A `, file, w, pushed), [pa4]);
+    }
     verdicts.push(
       workflow,
       ...jobs,

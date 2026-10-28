@@ -112,3 +112,26 @@ test("with no required checks the tab says so, and strict mode adds RQ-10 to the
     page.getByRole("region", { name: "Explanation" }).getByLabel("Causes"),
   ).toContainText("RQ-10");
 });
+
+test('adding "job X fails" in Assumptions turns its dependent\'s check May not block, rooted in RQ-3', async ({
+  page,
+}) => {
+  const input = results(page).getByLabel("Add a required check");
+  await input.fill("e2e");
+  await input.press("Enter");
+  // e2e reads changes' output, which the example leaves unset.
+  await expect(checkRow(page, "check › e2e")).toContainText("uncertain");
+
+  const scenario = scenarioPane(page);
+  await scenario
+    .getByLabel("Assume this job fails")
+    .selectOption("ci.yml › changes");
+  await scenario.getByRole("button", { name: "Add" }).click();
+  await expect(checkRow(page, "check › e2e")).toContainText("may not block");
+  await checkRow(page, "check › e2e").getByRole("button").click();
+  const causes = page
+    .getByRole("region", { name: "Explanation" })
+    .getByLabel("Causes");
+  await expect(causes).toContainText("root RQ-3");
+  await expect(causes).toContainText("WN-1");
+});
