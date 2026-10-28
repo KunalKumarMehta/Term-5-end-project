@@ -1,0 +1,8 @@
+name: CI
+on: push
+jobs:
+  deploy:
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/lib.yml

@@ -100,21 +100,63 @@ test("with Compare on, each card shows both Scenarios side by side", async ({
   await expect(contents).not.toHaveClass("differs");
 });
 
+/** Pastes each file into a fresh page, in place of the example, on a dated push. */
+async function paste(page: Page, files: Record<string, string>) {
+  await page.goto("./");
+  for (const [path, yaml] of Object.entries(files)) {
+    await page
+      .getByRole("banner")
+      .getByRole("button", { name: "Paste" })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Paste a GitHub workflow",
+    });
+    await dialog.getByLabel("Path").fill(path);
+    await dialog.getByLabel("YAML").fill(yaml);
+    await dialog.getByRole("button", { name: "Add file" }).click();
+  }
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  await results(page).getByRole("tab", { name: "Access" }).click();
+}
+
 test("with no job that runs steps, the Access tab says why it's empty and what would fill it", async ({
   page,
 }) => {
-  // A fresh page, in place of the example.
-  await page.goto("./");
-  await page.getByRole("banner").getByRole("button", { name: "Paste" }).click();
-  const dialog = page.getByRole("dialog", { name: "Paste a GitHub workflow" });
-  await dialog.getByLabel("Path").fill(".github/workflows/ci.yml");
-  await dialog
-    .getByLabel("YAML")
-    .fill("on: push\njobs:\n  call:\n    uses: ./.github/workflows/lib.yml\n");
-  await dialog.getByRole("button", { name: "Add file" }).click();
-  await page.getByLabel("Simulation date").fill("2026-12-03");
-  await results(page).getByRole("tab", { name: "Access" }).click();
+  // The callee's only job calls a remote workflow, which a callee's caller doesn't expand.
+  await paste(page, {
+    ".github/workflows/ci.yml":
+      "on: push\njobs:\n  call:\n    uses: ./.github/workflows/lib.yml\n",
+    ".github/workflows/lib.yml":
+      "on: workflow_call\njobs:\n  inner:\n    uses: octo/lib/.github/workflows/x.yml@v1\n",
+  });
   await expect(results(page)).toContainText(
     "No job here runs steps, so none gets a token or secrets. A job with steps: would get a card here.",
+  );
+});
+
+test("a local caller has no card of its own, its callee's jobs get theirs under it, and a remote caller gets a card", async ({
+  page,
+}) => {
+  await paste(page, {
+    ".github/workflows/ci.yml":
+      "on: push\njobs:\n  deploy:\n    permissions:\n      contents: read\n    uses: ./.github/workflows/lib.yml\n  remote:\n    uses: octo/lib/.github/workflows/x.yml@v1\n",
+    ".github/workflows/lib.yml":
+      "on: workflow_call\npermissions:\n  contents: write\njobs:\n  publish:\n    runs-on: x\n    steps:\n      - run: echo\n",
+  });
+  await expect(results(page).getByRole("region")).toHaveText([
+    /^ci\.yml › deploy\/publish runs/,
+    /^ci\.yml › remote runs/,
+  ]);
+  // The caller's permissions: cap the callee's write (PERM-7).
+  await expect(row(page, "ci.yml › deploy/publish", "contents")).toContainText(
+    "read",
+  );
+  await expect(row(page, "ci.yml › deploy/publish", "secrets")).toContainText(
+    "empty",
+  );
+  // The remote callee is never fetched: its scopes are Uncertain at or below the caller's cap.
+  await expect(row(page, "ci.yml › remote", "secrets")).toContainText("empty");
+  await expect(row(page, "ci.yml › remote", "contents")).toContainText(
+    "uncertain",
   );
 });

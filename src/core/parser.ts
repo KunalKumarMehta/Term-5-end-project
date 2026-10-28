@@ -103,6 +103,10 @@ export interface JobSpans {
   environment?: Span;
   /** The job's `actions/checkout` steps, in order (CO-1). */
   checkouts: Checkout[];
+  /** A caller's `uses:` value. */
+  uses?: Span;
+  /** A caller's `secrets:` value. */
+  secrets?: Span;
 }
 
 /** An `actions/checkout` step as written: the parser drops `with:`. */
@@ -299,6 +303,8 @@ function indexOn(
       permissions: permissions(field("permissions")?.pair, own),
       environment: env && (own ?? span(env.pair.key as Node)),
       checkouts: isSeq(steps) ? checkouts(doc, steps.items, own, span) : [],
+      uses: field("uses")?.span,
+      secrets: field("secrets")?.span,
     });
   }
 

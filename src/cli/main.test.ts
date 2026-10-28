@@ -430,6 +430,34 @@ test("show --flow access prints one line per access key with its root and YAML l
   );
 });
 
+test("show prints a local callee's jobs under their caller, capped by its permissions: (PERM-7), and no lines for the workflow_call-only file", () => {
+  const { code, stdout } = run(
+    "show",
+    "--repo",
+    fileURLToPath(new URL("fixtures/reusable", import.meta.url)),
+    "--event",
+    "push",
+    "--date",
+    "2026-12-03",
+  );
+  expect(code).toBe(0);
+  expect(verdictLines(stdout)).toBe(
+    [
+      "ci.yml: runs (root EV-0, line 2)",
+      "ci.yml › deploy: runs (root WN-2, line 4)",
+      "ci.yml › deploy/publish: runs (root WN-2, line 6)",
+      "",
+    ].join("\n"),
+  );
+  expect(stdout).toContain(
+    "ci.yml › deploy/publish › token.contents: read (root PERM-7, line 5)\n",
+  );
+  expect(stdout).toContain(
+    "ci.yml › deploy/publish › secrets: available (root RU-1, line 7)\n",
+  );
+  expect(stdout).not.toContain("lib.yml");
+});
+
 test("show without --changed takes an empty diff, so a paths: filter skips (PA-3)", () => {
   const { code, stdout } = run(...prArgs, ...prDate);
   expect(code).toBe(0);

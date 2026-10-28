@@ -274,6 +274,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "PERM-7",
+    text: "A called workflow's `GITHUB_TOKEN` can only keep or lower its caller's permissions: with no `permissions:` of its own it gets the caller's, and if the caller job sets none, the caller's workflow-level block or the token default.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+    confidence: "High",
+  },
+  {
     id: "PERM-8",
     text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
@@ -313,6 +319,36 @@ const rows: Rule[] = [
     id: "FK-8",
     text: "A run `dependabot[bot]` triggers on `push` or `pull_request` gets a read-only `GITHUB_TOKEN` by default and only Dependabot secrets, not Actions secrets; unlike a fork's, its `permissions:` can raise the token's access.",
     url: "https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions",
+    confidence: "High",
+  },
+  {
+    id: "RU-1",
+    text: "A called workflow gets only the secrets its caller job passes: with no `secrets:`, nothing but `GITHUB_TOKEN`; with a mapping, only the mapped names; with `secrets: inherit`, all of the caller's. Secrets go only to the directly called workflow.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
+    confidence: "High",
+  },
+  {
+    id: "RU-1a",
+    text: "A called workflow can only get what its caller's run has: a fork contributor's caller passes nothing but `GITHUB_TOKEN`, and a Dependabot caller only Dependabot secrets. GitHub's docs don't say this directly; it follows from RU-1, FK-2 and FK-8.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
+    confidence: "Med",
+  },
+  {
+    id: "RU-2",
+    text: "Passing a secret the called workflow doesn't declare in `on.workflow_call.secrets`, or leaving out one it declares `required: true`, fails the run. GitHub's docs don't say whether this shows as a startup failure with no jobs or as an error on the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_callsecrets",
+    confidence: "High",
+  },
+  {
+    id: "RU-4",
+    text: "A local `uses:` whose called workflow is missing at the caller's commit, or can't be parsed, makes GitHub reject the caller file each time a run is created (\"Invalid workflow file \u2026 error parsing called workflow\"): the run fails with 0 jobs, even jobs that don't call it. GitHub's docs don't say this; it was observed.",
+    url: "https://github.com/aspect-build/rules_buildx/actions/runs/23382324747",
+    confidence: "High",
+  },
+  {
+    id: "PL-0",
+    text: "GitHub reads workflow files only directly in `.github/workflows/`: a called workflow can't be in a subfolder, so a local `uses:` into one fails.",
+    url: "https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows",
     confidence: "High",
   },
   {
@@ -359,7 +395,7 @@ const rows: Rule[] = [
   },
   {
     id: "WN-2",
-    text: "Assumed to succeed: the job runs and WhyNoRun doesn't simulate its steps.",
+    text: "Assumed to succeed, or assumed GitHub accepts the call: the job runs and WhyNoRun doesn't simulate its steps, nor check a remote reusable workflow's secrets contract (RU-2).",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
     confidence: "High",
   },
@@ -378,6 +414,12 @@ const rows: Rule[] = [
   {
     id: "WN-5",
     text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High",
+  },
+  {
+    id: "WN-6",
+    text: "Called workflow not loaded: WhyNoRun never fetches a reusable workflow from another repository, so it can't see the callee's jobs, `permissions:` or declared secrets.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
     confidence: "High",
   },

@@ -99,14 +99,17 @@ function covered(version: string): boolean | undefined {
   return m[2] === undefined || major >= 7 ? true : undefined;
 }
 
-/** One Verdict per job of a loaded GitHub workflow, keyed `<file> › <jobId>`. */
+/**
+ * One Verdict per job of a loaded GitHub workflow, keyed `<prefix><jobId>`: the prefix is
+ * `<file> › `, or `<callerFile> › <callerJob>/` for a local callee (#6).
+ */
 export function jobVerdicts(
-  file: string,
+  prefix: string,
   parsed: ParsedWorkflow,
   workflow: Verdict,
   scenario: Scenario,
 ): Verdict[] {
-  const key = (id: string) => `${file} › ${id}`;
+  const key = (id: string) => prefix + id;
   const ids = parsed.jobs.map((j) => j.id.value);
   // An uncertain GitHub workflow leaves its jobs uncertain, settled by the same inputs.
   if (workflow.value === "uncertain")
@@ -601,7 +604,9 @@ export function jobVerdicts(
 
   /** Where a settle path's value comes from, naming the action a job output comes from. */
   const hint = (path: string): string => {
-    const output = /^.+ › (.+) › outputs\.(.+)$/.exec(path);
+    const output = path.startsWith(prefix)
+      ? /^(.+) › outputs\.(.+)$/.exec(path.slice(prefix.length))
+      : null;
     if (output) {
       const [, id, name] = output;
       const step = /\bsteps\.([\w-]+)\.outputs\b/i.exec(

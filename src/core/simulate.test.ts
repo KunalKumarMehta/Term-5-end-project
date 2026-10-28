@@ -1500,17 +1500,86 @@ test("a pinned root survives writing the defaults out: every Verdict keeps its v
   );
 });
 
-test("a uses: caller job gets no access keys until reusable workflows land", () => {
-  const { verdicts } = simulate(
+// Reusable workflows (#66): local callees one level deep, remote callers never fetched.
+const lib = (extra = "") =>
+  `on:\n  workflow_call:${extra}\njobs:\n  publish:\n${steps}`;
+const caller = (uses: string, extra = "") =>
+  `on: push\njobs:\n  build:\n${steps}  deploy:\n${extra}    uses: ${uses}\n`;
+
+test("a local uses: into a subfolder of .github/workflows is a Diagnostic (PL-0) on the uses: line, and the caller gets no Verdicts", () => {
+  const { verdicts, diagnostics } = simulate(
+    [wf("ci.yml", caller("./.github/workflows/lib/x.yml"))],
+    push,
+  );
+  expect(verdicts).toEqual([]);
+  expect(diagnostics).toEqual([
+    expect.objectContaining({
+      path: ".github/workflows/ci.yml",
+      line: 8,
+      rule: "PL-0",
+      message:
+        "`.github/workflows/lib/x.yml` isn't directly in `.github/workflows/`, the only place GitHub reads a called workflow from.",
+    }),
+  ]);
+});
+
+test("a local uses: to a file that isn't in the Workflow set is a Diagnostic (RU-4) on the uses: line, and even the independent jobs get no Verdicts", () => {
+  const { verdicts, diagnostics } = simulate(
+    [wf("ci.yml", caller("./.github/workflows/release.yml"))],
+    push,
+  );
+  expect(verdicts).toEqual([]);
+  expect(diagnostics).toEqual([
+    expect.objectContaining({
+      path: ".github/workflows/ci.yml",
+      line: 8,
+      rule: "RU-4",
+      message:
+        "`.github/workflows/release.yml` isn't in the Workflow set. Paste or upload it.",
+    }),
+  ]);
+});
+
+test("every direct local caller of a local callee with Diagnostics gets an RU-4 Diagnostic on its uses: line, and it never cascades past depth 1", () => {
+  const { verdicts, diagnostics } = simulate(
     [
+      wf("ci.yml", caller("./.github/workflows/release.yml")),
+      wf("nightly.yml", caller("$/.github/workflows/release.yml")),
+      // release.yml calls a missing file, so it has a Diagnostic of its own.
       wf(
-        "ci.yml",
-        "on: push\njobs:\n  call:\n    uses: ./.github/workflows/lib.yml\n",
+        "release.yml",
+        "on: workflow_call\njobs:\n  inner:\n    uses: ./.github/workflows/gone.yml\n",
+      ),
+      // top.yml calls ci.yml, whose Diagnostic comes only from its callee.
+      wf(
+        "top.yml",
+        "on: push\njobs:\n  ci:\n    uses: ./.github/workflows/ci.yml\n",
       ),
     ],
     push,
   );
-  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › call"]);
+  const message =
+    "Called workflow `.github/workflows/release.yml` has Diagnostics; fix them to simulate this file.";
+  expect(diagnostics).toEqual([
+    expect.objectContaining({
+      path: ".github/workflows/ci.yml",
+      line: 8,
+      rule: "RU-4",
+      message,
+    }),
+    expect.objectContaining({
+      path: ".github/workflows/nightly.yml",
+      line: 8,
+      rule: "RU-4",
+      message,
+    }),
+    expect.objectContaining({
+      path: ".github/workflows/release.yml",
+      line: 4,
+      rule: "RU-4",
+    }),
+  ]);
+  expect(verdicts.map((v) => v.key)).toContain("top.yml › ci");
 });
 
 // Actor kinds (#64): fork contributors and dependabot[bot].
@@ -1524,6 +1593,278 @@ const actorPr = (actor: "member" | "fork" | "dependabot", extra = {}) => ({
     ...extra,
   },
   repo: { date },
+});
+
+const callerSet = [
+  wf(
+    "ci.yml",
+    "on: [push, pull_request]\npermissions:\n  contents: write\n  id-token: write\njobs:\n" +
+      `  build:\n${steps}` +
+      "  deploy:\n    permissions:\n      contents: read\n      id-token: write\n    secrets: inherit\n    uses: ./.github/workflows/lib.yml\n" +
+      "  plain:\n    uses: ./.github/workflows/lib.yml\n",
+  ),
+  wf(
+    "lib.yml",
+    "on:\n  workflow_call:\npermissions:\n  contents: write\n  pull-requests: write\njobs:\n" +
+      `  publish:\n${steps}`,
+  ),
+];
+
+test("a local uses: caller gets only its run key; its callee's jobs are keyed <callerFile> › <callerJob>/<calleeJob>, capped by the caller's permissions: (PERM-7) and given only the secrets it passes (RU-1); the workflow_call-only file gets no keys of its own", () => {
+  const { verdicts, diagnostics } = simulate(callerSet, push);
+  expect(diagnostics).toEqual([]);
+  expect(runVerdicts(verdicts).map((v) => [v.key, v.value])).toEqual([
+    ["ci.yml", "runs"],
+    ["ci.yml › build", "runs"],
+    ["ci.yml › deploy", "runs"],
+    ["ci.yml › deploy/publish", "runs"],
+    ["ci.yml › plain", "runs"],
+    ["ci.yml › plain/publish", "runs"],
+  ]);
+  expect(accessOf(verdicts, "ci.yml › deploy")).toEqual({});
+  expect(verdicts.some((v) => v.key.startsWith("lib.yml"))).toBe(false);
+
+  // deploy's own block caps the callee: contents write → read, pull-requests write → none.
+  const deploy = accessOf(verdicts, "ci.yml › deploy/publish");
+  expect(levels(deploy)).toEqual(
+    allScopes("none", { "token.contents": "read", secrets: "available" }),
+  );
+  expect(deploy["token.contents"]!.causes[0]).toEqual({
+    rule: "PERM-7",
+    spans: [
+      expect.objectContaining({ path: ".github/workflows/ci.yml", line: 11 }),
+    ],
+    inputs: [],
+  });
+  expect(deploy["token.pull-requests"]!.causes[0]!.rule).toBe("PERM-7");
+  // The callee's block doesn't list id-token, so the cap doesn't decide it.
+  expect(deploy["token.id-token"]!.causes[0]!.rule).toBe("PERM-3");
+  expect(deploy.secrets!.causes.map((c) => c.rule)).toEqual(["RU-1", "FK-0"]);
+  expect(deploy.secrets!.causes[0]!.spans).toEqual([
+    expect.objectContaining({ line: 14 }),
+  ]);
+
+  // plain sets no block, so the caller's workflow-level one caps it; it passes no secrets.
+  const plain = accessOf(verdicts, "ci.yml › plain/publish");
+  expect(levels(plain)).toEqual(
+    allScopes("none", { "token.contents": "write", secrets: "empty" }),
+  );
+  expect(plain["token.pull-requests"]!.causes[0]).toMatchObject({
+    rule: "PERM-7",
+    spans: [expect.objectContaining({ line: 2 })],
+  });
+  expect(plain.secrets!.causes).toEqual([
+    {
+      rule: "RU-1",
+      spans: [expect.objectContaining({ line: 17 })],
+      inputs: [],
+    },
+  ]);
+});
+
+test("a callee with no permissions: of its own takes the caller's levels (PERM-7)", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        "on: push\njobs:\n  deploy:\n    permissions:\n      issues: write\n    uses: ./.github/workflows/lib.yml\n",
+      ),
+      wf("lib.yml", lib()),
+    ],
+    push,
+  );
+  const publish = accessOf(verdicts, "ci.yml › deploy/publish");
+  expect(levels(publish)).toEqual(
+    allScopes("none", { "token.issues": "write", secrets: "empty" }),
+  );
+  expect(publish["token.issues"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-3",
+    "PERM-7",
+  ]);
+});
+
+test.each([
+  ["fork", "empty", "FK-2"],
+  ["dependabot", "dependabot-only", "FK-8"],
+] as const)(
+  "a %s caller passes its callee only what its own run has (RU-1a): %s",
+  (actor, value, rule) => {
+    const { verdicts } = simulate(callerSet, actorPr(actor));
+    const secrets = byKey(verdicts, "ci.yml › deploy/publish › secrets")!;
+    expect(secrets.value).toBe(value);
+    expect(secrets.causes.map((c) => c.rule)).toEqual(["RU-1a", rule, "RU-1"]);
+  },
+);
+
+test("a callee job whose caller job is skipped by its if: is no-run, with its chain copied from the caller job", () => {
+  const { verdicts } = simulate(
+    [
+      wf("ci.yml", caller("./.github/workflows/lib.yml", "    if: false\n")),
+      wf("lib.yml", lib()),
+    ],
+    push,
+  );
+  const deploy = byKey(verdicts, "ci.yml › deploy")!;
+  expect(deploy).toMatchObject({ value: "skipped" });
+  expect(deploy.causes[0]!.rule).toBe("JG-3");
+  expect(byKey(verdicts, "ci.yml › deploy/publish")).toEqual({
+    key: "ci.yml › deploy/publish",
+    value: "no-run",
+    causes: deploy.causes,
+  });
+});
+
+test.each([
+  [
+    "passes a secret the callee doesn't declare",
+    "\n    secrets:\n      token:",
+    "    secrets:\n      token: x\n      extra: y\n",
+  ],
+  [
+    "leaves out one the callee declares required: true",
+    "\n    secrets:\n      token:\n        required: true",
+    "",
+  ],
+])(
+  "a caller that %s makes its GitHub workflow fail (root RU-2) and its jobs no-run",
+  (_, declared, passed) => {
+    const { verdicts, diagnostics } = simulate(
+      [
+        wf("ci.yml", caller("./.github/workflows/lib.yml", passed)),
+        wf("lib.yml", lib(declared)),
+      ],
+      push,
+    );
+    expect(diagnostics).toEqual([]);
+    const workflow = byKey(verdicts, "ci.yml")!;
+    expect(workflow.value).toBe("fails");
+    expect(workflow.causes[0]).toEqual({
+      rule: "RU-2",
+      spans: [expect.objectContaining({ line: passed ? 11 : 8 })],
+      inputs: [],
+    });
+    expect(RULES["RU-2"]!.text).toMatch(/don't say whether/);
+    expect(
+      runVerdicts(verdicts)
+        .slice(1)
+        .map((v) => [v.key, v.value, v.causes[0]!.rule]),
+    ).toEqual([
+      ["ci.yml › build", "no-run", "RU-2"],
+      ["ci.yml › deploy", "no-run", "RU-2"],
+      ["ci.yml › deploy/publish", "no-run", "RU-2"],
+    ]);
+  },
+);
+
+test("a secrets: mapping that matches the callee's declarations, ignoring case, lets the run go ahead", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        caller("./.github/workflows/lib.yml", "    secrets:\n      TOKEN: x\n"),
+      ),
+      wf(
+        "lib.yml",
+        lib("\n    secrets:\n      token:\n        required: true"),
+      ),
+    ],
+    push,
+  );
+  expect(byKey(verdicts, "ci.yml")!.value).toBe("runs");
+  expect(byKey(verdicts, "ci.yml › deploy/publish › secrets")!.value).toBe(
+    "available",
+  );
+});
+
+const remoteSet = [
+  wf(
+    "ci.yml",
+    "on: [push, pull_request]\njobs:\n" +
+      "  none:\n    permissions:\n      id-token: write\n      contents: read\n    uses: octo/lib/.github/workflows/x.yml@v1\n" +
+      "  mapped:\n    secrets:\n      TOKEN: ${{ secrets.TOKEN }}\n    uses: octo/lib/.github/workflows/x.yml@v1\n" +
+      "  inherit:\n    secrets: inherit\n    uses: Octo/lib/.github/workflows/x.yml@v1\n",
+  ),
+];
+
+test("a remote caller gets its run key, citing WN-2 on it and on its GitHub workflow, decided secrets, and 17 token keys Uncertain at or below its cap (WN-6)", () => {
+  const { verdicts } = simulate(remoteSet, push);
+  const rules = byKey(verdicts, "ci.yml")!.causes.map((c) => c.rule);
+  expect(rules[0]).toBe("EV-0");
+  expect(rules.slice(-3)).toEqual(["WN-2", "WN-2", "WN-2"]);
+  expect(byKey(verdicts, "ci.yml › none")).toMatchObject({ value: "runs" });
+  expect(byKey(verdicts, "ci.yml › none")!.causes.at(-1)!.rule).toBe("WN-2");
+  expect(verdicts.some((v) => v.key.startsWith("ci.yml › none/"))).toBe(false);
+
+  const none = accessOf(verdicts, "ci.yml › none");
+  expect(levels(none)).toEqual(
+    allScopes("none", {
+      "token.contents": ["none", "read"],
+      "token.id-token": ["none", "write"],
+      secrets: "empty",
+    }),
+  );
+  expect(none["token.id-token"]).toEqual({
+    key: "ci.yml › none › token.id-token",
+    value: "uncertain",
+    causes: [
+      expect.objectContaining({ rule: "WN-6" }),
+      expect.objectContaining({ rule: "PERM-7" }),
+      expect.objectContaining({ rule: "PERM-3" }),
+    ],
+    possible: ["none", "write"],
+    settle: [],
+  });
+  // A cap of none decides the scope.
+  expect(none["token.issues"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-3",
+    "PERM-7",
+    "WN-6",
+  ]);
+  expect(none.secrets!.causes.map((c) => c.rule)).toEqual(["RU-1", "WN-6"]);
+
+  const mapped = byKey(verdicts, "ci.yml › mapped › secrets")!;
+  expect(mapped.value).toBe("available");
+  // The Explanation shows the mapping's lines, which list the names passed.
+  expect(mapped.causes[0]).toMatchObject({
+    rule: "RU-1",
+    spans: [expect.objectContaining({ line: 10, endLine: 11 })],
+  });
+});
+
+test("a remote caller's secrets: inherit is decided only when the callee's owner is the repo's; otherwise it is Uncertain with nothing to settle it", () => {
+  const unset = byKey(
+    simulate(remoteSet, push).verdicts,
+    "ci.yml › inherit › secrets",
+  );
+  expect(unset).toMatchObject({
+    value: "uncertain",
+    possible: ["available", "empty"],
+    settle: [],
+  });
+  expect(unset!.causes[0]!.rule).toBe("WN-6");
+  const other = simulate(remoteSet, {
+    ...push,
+    repo: { date, repository: "acme/app" },
+  }).verdicts;
+  expect(byKey(other, "ci.yml › inherit › secrets")!.value).toBe("uncertain");
+
+  const same = byKey(
+    simulate(remoteSet, { ...push, repo: { date, repository: "octo/app" } })
+      .verdicts,
+    "ci.yml › inherit › secrets",
+  )!;
+  expect(same.value).toBe("available");
+  expect(same.causes[0]).toMatchObject({
+    rule: "RU-1",
+    inputs: [{ path: "repo.repository", value: "octo/app" }],
+  });
+  // A fork's run has nothing to pass, so inherit is decided whoever owns the callee.
+  expect(
+    byKey(
+      simulate(remoteSet, actorPr("fork")).verdicts,
+      "ci.yml › inherit › secrets",
+    )!.value,
+  ).toBe("empty");
 });
 
 test("the example's Fork PR: ci.yml › test gets pull-requests downgraded to read (root PERM-2 at its line, then PERM-6) and secrets empty (FK-2); a Member PR gets write and available (FK-0)", () => {
