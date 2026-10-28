@@ -135,3 +135,56 @@ test('adding "job X fails" in Assumptions turns its dependent\'s check May not b
   await expect(causes).toContainText("root RQ-3");
   await expect(causes).toContainText("WN-1");
 });
+
+test("the merge-queue toggle, in Repo facts and atop the tab, makes the example's checks Pending and blocks merge, root RQ-6", async ({
+  page,
+}) => {
+  await results(page).getByLabel("Merge queue").selectOption("on");
+  await expect(scenarioPane(page).getByLabel("Merge queue")).toHaveValue("on");
+  await checkRow(page, "check › build")
+    .getByRole("button", { name: "pending and blocks merge" })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Explanation" }).getByLabel("Causes"),
+  ).toContainText("root RQ-6");
+});
+
+test("Require every produced check adds build, test and the other job names as chips, and counts what it left out", async ({
+  page,
+}) => {
+  const preset = results(page).getByRole("button", {
+    name: "Require every produced check",
+  });
+  await preset.click();
+  await expect(chips(page, results(page))).toHaveText([
+    /^build/,
+    /^test/,
+    /^changes/,
+    /^e2e/,
+    /^deploy/,
+    /^triage/,
+  ]);
+  await expect(page.locator("#toasts")).toHaveText(
+    "Required 4 more produced checks. Left out 0 matrix jobs, 0 remote reusable callers and 0 job name: expressions.",
+  );
+
+  // A matrix job's and a remote caller's checks can't be known, so they are counted, not added.
+  await page.getByRole("banner").getByRole("button", { name: "Paste" }).click();
+  const dialog = page.getByRole("dialog", { name: "Paste a GitHub workflow" });
+  await dialog.getByLabel("Path").fill(".github/workflows/matrix.yml");
+  await dialog
+    .getByLabel("YAML")
+    .fill(
+      "on: pull_request\njobs:\n" +
+        "  lint:\n    runs-on: x\n    steps:\n      - run: echo\n" +
+        "  unit:\n    strategy:\n      matrix:\n        node: [20, 22]\n    runs-on: x\n    steps:\n      - run: echo\n" +
+        "  call:\n    uses: octo/lib/.github/workflows/ci.yml@v1\n",
+    );
+  await dialog.getByRole("button", { name: "Add file" }).click();
+  await results(page).getByRole("tab", { name: "Merge readiness" }).click();
+  await preset.click();
+  await expect(chips(page, results(page)).last()).toHaveText(/^lint/);
+  await expect(page.locator("#toasts")).toHaveText(
+    "Required 1 more produced check. Left out 1 matrix job, 1 remote reusable caller and 0 job name: expressions.",
+  );
+});

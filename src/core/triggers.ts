@@ -88,11 +88,13 @@ export function trigger(
   const decided = byRef(parsed, event, defaultBranch);
   if (decided.value === "skipped") return decided;
   const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
-  // SK-1: the head commit's message skips a push or pull_request run, never pull_request_target.
+  // SK-1: the head commit's message skips a push or pull_request run, never pull_request_target
+  // or a merge group.
   const message = event.message;
   if (
     result.value === "skipped" ||
     event.name === "pull_request_target" ||
+    event.name === "merge_group" ||
     message === undefined ||
     !SKIP.test(message)
   )
@@ -150,6 +152,8 @@ function byPaths(
   decided: Omit<Verdict, "key">,
 ): Omit<Verdict, "key"> {
   const name = event.name;
+  // BR-10: merge_group has no path filters.
+  if (name === "merge_group") return decided;
   const settings = settingsOf(parsed, name);
   const has = (key: string) => Object.hasOwn(settings, key);
   const key = has("paths") ? "paths" : "paths-ignore";
@@ -259,14 +263,17 @@ function byRef(
   const after: Cause[] = [];
 
   // EV-1: the activity type; an unset one (in the Event or the file) is GitHub's defaults.
+  // EV-6: merge_group has only checks_requested.
   if (name !== "push") {
+    const defaults =
+      name === "merge_group" ? ["checks_requested"] : PR_DEFAULT_TYPES;
     const types =
       Array.isArray(settings.types) && settings.types.length > 0
         ? settings.types.map(String)
-        : PR_DEFAULT_TYPES;
-    const wanted = event.type === undefined ? PR_DEFAULT_TYPES : [event.type];
+        : defaults;
+    const wanted = event.type === undefined ? defaults : [event.type];
     const typed: Cause = {
-      rule: "EV-1",
+      rule: name === "merge_group" ? "EV-6" : "EV-1",
       spans: spans(has("types") ? `${name}.types` : name),
       inputs:
         event.type === undefined
@@ -281,9 +288,11 @@ function byRef(
   }
   // DB-4: pull_request_target runs the default branch's copy of the GitHub workflow.
   const copy = { push: "DB-2", pull_request: "DB-3" }[name] ?? "DB-4";
-  after.push({ rule: copy, spans: [], inputs: [named] });
+  if (name !== "merge_group")
+    after.push({ rule: copy, spans: [], inputs: [named] });
 
-  // The ref a filter is tried against: the pushed ref (BR-3) or the base branch (BR-2).
+  // The ref a filter is tried against: the pushed ref (BR-3), or the base branch (BR-2), which
+  // for a merge group is its target branch (BR-10).
   const given = name === "push" ? event.ref : event.base;
   const input =
     given === undefined
@@ -318,7 +327,7 @@ function byRef(
   const at = (i: number) =>
     spans(i >= 0 ? `${name}.${key}.${i}` : `${name}.${key}`);
   const matched: Cause = {
-    rule: name === "push" ? "BR-3" : "BR-2",
+    rule: name === "push" ? "BR-3" : name === "merge_group" ? "BR-10" : "BR-2",
     spans: spans(`${name}.${key}`),
     inputs: [input],
   };

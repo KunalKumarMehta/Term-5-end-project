@@ -28,6 +28,12 @@ const rows: Rule[] = [
     confidence: "Med",
   },
   {
+    id: "EV-6",
+    text: "`merge_group` has one activity type, `checks_requested`: a merge queue asks for its required checks on the merge group's commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High",
+  },
+  {
     id: "BR-1",
     text: "`branches` and `branches-ignore` can't both appear on one event, and neither can `tags` and `tags-ignore`: GitHub rejects the file.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
@@ -74,6 +80,12 @@ const rows: Rule[] = [
     text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
     confidence: "Med",
+  },
+  {
+    id: "BR-10",
+    text: "For `merge_group`, `branches` and `branches-ignore` match the merge group's target branch. `merge_group` has no path filters.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High",
   },
   {
     id: "GL-1",
@@ -424,8 +436,20 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "RQ-6",
+    text: "With a merge queue, a required check must also be reported for the merge group: a GitHub workflow without a `merge_group` trigger never reports it there, so the merge waits and fails.",
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
     id: "RQ-8",
     text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High",
+  },
+  {
+    id: "RQ-9",
+    text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
     confidence: "High",
   },
