@@ -1,8 +1,7 @@
 import { accessVerdicts } from "./access";
-import { checkVerdicts, type Producer } from "./checks";
+import { checkVerdicts, nameOf, unreadable, type Producer } from "./checks";
 import { jobVerdicts } from "./jobs";
 import {
-  checkName,
   parseWorkflowFile,
   type Diagnostic,
   type ParsedWorkflow,
@@ -248,11 +247,24 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts: Verdict[] = [];
   const producers: Producer[] = [];
+  // A same-repo or Dependabot PR's head branch is pushed too, and that run reports on the
+  // head SHA, reusing the PR's changed files (PA-4, #6).
+  const pushed: Scenario | undefined =
+    event.name !== "push" && event.actor !== "fork"
+      ? { ...scenario, event: { ...event, name: "push" } }
+      : undefined;
+  const pa4: Cause = {
+    rule: "PA-4",
+    spans: [],
+    inputs: [{ path: "event.changed", value: event.changed }],
+  };
   for (const { key, bytes, ...file } of parsed) {
+    if (file.diagnostics.length > 0 && !calleeOnly(file))
+      producers.push(...unreadable(key, file, scenario));
     // A file GitHub would reject gets no Verdicts; a callee's jobs appear under its callers.
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
     // PL-9: GitHub starts no runs from it, but it isn't a Diagnostic, so its keys stay (ADR 0001).
-    const workflow: Verdict =
+    const run = (s: Scenario): Verdict =>
       bytes > MAX_BYTES
         ? {
             key,
@@ -263,20 +275,31 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
             key,
             ...called(
               policy(
-                awaiting(trigger(file, event, repo.defaultBranch!), event),
-                scenario,
+                awaiting(trigger(file, s.event, repo.defaultBranch!), s.event),
+                s,
               ),
               file,
               files,
             ),
           };
+    const workflow = run(scenario);
     const jobs = jobVerdicts(`${key} › `, file, workflow, scenario);
-    for (const job of file.jobs)
-      producers.push({
-        name: checkName(job),
-        job: jobs.find((v) => v.key === `${key} › ${job.id.value}`)!,
-        workflow,
-      });
+    const produce = (s: Scenario, w: Verdict, vs: Verdict[], note: Cause[]) => {
+      for (const job of file.jobs) {
+        const v = vs.find((v) => v.key === `${key} › ${job.id.value}`)!;
+        producers.push({
+          ...nameOf(job, s),
+          job: { ...v, causes: [...note, ...v.causes] },
+          workflow: w,
+          spans: file.jobSpans.get(job.id.value),
+        });
+      }
+    };
+    produce(scenario, workflow, jobs, []);
+    if (pushed) {
+      const w = run(pushed);
+      produce(pushed, w, jobVerdicts(`${key} › `, file, w, pushed), [pa4]);
+    }
     verdicts.push(
       workflow,
       ...jobs,

@@ -718,7 +718,7 @@ function merge(base: unknown, over: Obj): Obj {
  * The `github` context worked out from the Event (#8 §6). Fields the event doesn't define
  * are left out, so they resolve to empty as on GitHub.
  */
-function githubContext({ event, repo }: Scenario): { event: Obj } & Obj {
+export function githubContext({ event, repo }: Scenario): { event: Obj } & Obj {
   const pr =
     event.name === "pull_request" || event.name === "pull_request_target";
   // A bare name is a branch, as the Scenario form takes it.

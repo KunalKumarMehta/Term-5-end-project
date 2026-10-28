@@ -2966,16 +2966,16 @@ test("a required job that runs passes (RQ-4); one skipped by its own if: passes 
 test("a required name no job produces is Pending and blocks merge, root RQ-0 with the typed name", () => {
   const { verdicts } = simulate([chain], {
     ...push,
-    repo: { date, required: ["Test"] },
+    repo: { date, required: ["unit"] },
   });
-  expect(byKey(verdicts, "check › Test")).toEqual({
-    key: "check › Test",
+  expect(byKey(verdicts, "check › unit")).toEqual({
+    key: "check › unit",
     value: "pending and blocks merge",
     causes: [
       {
         rule: "RQ-0",
         spans: [],
-        inputs: [{ path: "repo.required", value: "Test" }],
+        inputs: [{ path: "repo.required", value: "unit" }],
       },
       { rule: "RQ-8", spans: [], inputs: [] },
     ],
@@ -3071,6 +3071,256 @@ test("a check › <name> key is never a candidate for an Assumption on a job", (
   expect(unmatchedAssumptions).toEqual([
     { key: "old.yml › test", candidates: ["ci.yml › test"] },
   ]);
+});
+
+// Failures, approval and every producer (#72)
+
+test("with the Assumption \"job X fails\", X's check fails and blocks merge (RQ-4, then WN-1), and a required check skipped through X's needs may not block (RQ-3)", () => {
+  const checks = checksOf([chain], {
+    ...push,
+    repo: { date, required: ["test", "deploy", "report"] },
+    assume: { "ci.yml › test": "fails" },
+  });
+  expect(checks.test).toEqual(["fails and blocks merge", "RQ-4", "WN-1"]);
+  expect(checks.deploy!.slice(0, 4)).toEqual([
+    "may not block",
+    "RQ-3",
+    "WN-1",
+    "JG-1",
+  ]);
+  // always() runs it past the failure, so it reports.
+  expect(checks.report![0]).toBe("passes");
+});
+
+test("a job that fails at a refused checkout fails and blocks merge (RQ-4, then CO-1)", () => {
+  const checks = checksOf(example, {
+    ...forkTarget({}, { date: "2026-12-01" }),
+    repo: { date: "2026-12-01", required: ["triage"] },
+  });
+  expect(checks.triage!.slice(0, 3)).toEqual([
+    "fails and blocks merge",
+    "RQ-4",
+    "CO-1",
+  ]);
+});
+
+test("a GitHub workflow a policy fails fails and blocks merge, PRT-5's unknown check conclusion only noted", () => {
+  const { verdicts } = simulate(example, {
+    ...forkTarget(),
+    repo: { date, required: ["triage"] },
+  });
+  const check = byKey(verdicts, "check › triage")!;
+  expect(check.value).toBe("fails and blocks merge");
+  expect(check.causes.map((c) => c.rule).slice(0, 3)).toEqual([
+    "RQ-4",
+    "PRT-2",
+    "PRT-3",
+  ]);
+  expect(check.causes.map((c) => c.rule)).toContain("PRT-5");
+});
+
+test("a required job that fails with continue-on-error: true is Uncertain (JG-11) [fails and blocks merge, passes], its settle empty", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        "on: push\njobs:\n" + job("flaky", "    continue-on-error: true\n"),
+      ),
+    ],
+    {
+      ...push,
+      repo: { date, required: ["flaky"] },
+      assume: { "ci.yml › flaky": "fails" },
+    },
+  );
+  const check = byKey(verdicts, "check › flaky")!;
+  expect(check).toMatchObject({
+    value: "uncertain",
+    possible: ["fails and blocks merge", "passes"],
+    settle: [],
+  });
+  expect(check.causes.map((c) => [c.rule, c.spans[0]?.line])).toEqual([
+    ["JG-11", 4],
+    ["RQ-4", undefined],
+    ["WN-1", 3],
+  ]);
+});
+
+test("a check whose producer is Uncertain is Uncertain with its chain: the example's e2e reads an output the Scenario lacks (WN-4)", () => {
+  const { verdicts } = simulate(example, {
+    ...actorPr("fork"),
+    repo: { date, required: ["e2e"] },
+  });
+  const check = byKey(verdicts, "check › e2e")!;
+  expect(check.value).toBe("uncertain");
+  expect(check.causes[0]!.rule).toBe("WN-4");
+  expect(check.settle).toEqual(["ci.yml › changes › outputs.src"]);
+});
+
+test("two jobs with one check name are Uncertain, root RQ-0 at both jobs", () => {
+  const { verdicts } = simulate(
+    [
+      wf("a.yml", `on: push\njobs:\n${job("build")}`),
+      wf("b.yml", `on: push\njobs:\n${job("other", "    name: build\n")}`),
+    ],
+    { ...push, repo: { date, required: ["build"] } },
+  );
+  const check = byKey(verdicts, "check › build")!;
+  expect(check).toMatchObject({
+    value: "uncertain",
+    possible: ["passes"],
+    settle: [],
+  });
+  expect(check.causes).toEqual([
+    {
+      rule: "RQ-0",
+      spans: [
+        expect.objectContaining({ path: ".github/workflows/a.yml", line: 3 }),
+        expect.objectContaining({ path: ".github/workflows/b.yml", line: 3 }),
+      ],
+      inputs: [{ path: "repo.required", value: "build" }],
+    },
+  ]);
+});
+
+test("a check whose only producer's file has a Diagnostic is Uncertain, root RQ-0 at the job and the Diagnostic", () => {
+  const { verdicts, diagnostics } = simulate(
+    [wf("ci.yml", `on: push\njobs:\n${job("build", "    bogus: 1\n")}`)],
+    { ...push, repo: { date, required: ["build"] } },
+  );
+  expect(diagnostics).not.toEqual([]);
+  expect(byKey(verdicts, "check › build")).toEqual({
+    key: "check › build",
+    value: "uncertain",
+    causes: [
+      {
+        rule: "RQ-0",
+        spans: [
+          expect.objectContaining({ line: 3 }),
+          expect.objectContaining({ line: diagnostics[0]!.line }),
+        ],
+        inputs: [],
+      },
+    ],
+    settle: [],
+  });
+});
+
+test("a fork contributor's run awaiting approval leaves every check it would produce Pending and blocks merge (root FK-4, then PL-5), quoting RQ-8", () => {
+  const { verdicts } = simulate(example, {
+    ...actorPr("fork", { approval: "awaiting" }),
+    repo: { date, required: ["build", "test"] },
+  });
+  for (const key of ["check › build", "check › test"]) {
+    const check = byKey(verdicts, key)!;
+    expect(check.value).toBe("pending and blocks merge");
+    const rules = check.causes.map((c) => c.rule);
+    expect(rules.slice(0, 2)).toEqual(["FK-4", "PL-5"]);
+    expect(rules).toContain("RQ-8");
+  }
+});
+
+// Runs only on a push: a PR's own run is skipped (EV-0), so only the implied push reports.
+const pushOnly = [
+  wf("ci.yml", `on:\n  push:\n    branches: [feature]\njobs:\n${job("build")}`),
+];
+
+test("a same-repo PR counts a check from a push-triggered job on the head SHA, noting PA-4; so does a Dependabot PR, but a fork's never pushes to the repo", () => {
+  for (const actor of ["member", "dependabot"] as const) {
+    const { verdicts } = simulate(pushOnly, {
+      ...actorPr(actor),
+      repo: { date, required: ["build"] },
+    });
+    // The PR's own GitHub workflow Verdict stays skipped.
+    expect(byKey(verdicts, "ci.yml")!.value).toBe("skipped");
+    const check = byKey(verdicts, "check › build")!;
+    expect(check.value).toBe("passes");
+    expect(check.causes.slice(0, 2)).toEqual([
+      { rule: "RQ-4", spans: [], inputs: [] },
+      {
+        rule: "PA-4",
+        spans: [],
+        inputs: [{ path: "event.changed", value: ["src/app.ts"] }],
+      },
+    ]);
+  }
+  const fork = simulate(pushOnly, {
+    ...actorPr("fork"),
+    repo: { date, required: ["build"] },
+  });
+  expect(
+    byKey(fork.verdicts, "check › build")!.causes.map((c) => c.rule),
+  ).toEqual(["RQ-1", "EV-0", "RQ-8"]);
+});
+
+test("a same-repo PR whose push and PR runs are both filtered out stays Pending, with the PR's own chain (RQ-1, then PA-2)", () => {
+  const { verdicts } = simulate(example, {
+    ...actorPr("member", { changed: ["docs/README.md"] }),
+    repo: { date, required: ["build"] },
+  });
+  expect(
+    byKey(verdicts, "check › build")!
+      .causes.map((c) => c.rule)
+      .slice(0, 2),
+  ).toEqual(["RQ-1", "PA-2"]);
+});
+
+test("a required name that differs only in case from the job's name is Uncertain, root RQ-0 at the job [passes, pending and blocks merge]", () => {
+  const { verdicts } = simulate([chain], {
+    ...push,
+    repo: { date, required: ["Test"] },
+  });
+  const check = byKey(verdicts, "check › Test")!;
+  expect(check).toMatchObject({
+    value: "uncertain",
+    possible: ["passes", "pending and blocks merge"],
+    settle: [],
+  });
+  expect(check.causes.map((c) => [c.rule, c.spans[0]?.line])).toEqual([
+    ["RQ-0", 8],
+    ["RQ-4", undefined],
+    ["WN-2", 8],
+  ]);
+});
+
+test("a name: expression is evaluated for the check name, and one needing a value the Scenario lacks is Uncertain (WN-4 at the name:) until it's given", () => {
+  const files = [
+    wf(
+      "ci.yml",
+      "on: push\njobs:\n" +
+        job("b", "    name: Build ${{ github.event_name }}\n") +
+        job("k", "    name: ${{ vars.KIND }}\n") +
+        job("m", "    name: test ${{ matrix.os }}\n"),
+    ),
+  ];
+  const required = ["Build push", "lint"];
+  expect(checksOf(files, { ...push, repo: { date, required } })).toEqual({
+    "Build push": ["passes", "RQ-4", "WN-2"],
+    lint: ["uncertain", "WN-4", "RQ-0"],
+  });
+  const { verdicts } = simulate(files, { ...push, repo: { date, required } });
+  expect(byKey(verdicts, "check › lint")).toMatchObject({
+    settle: ["vars.KIND"],
+    causes: [
+      { rule: "WN-4", spans: [expect.objectContaining({ line: 9 })] },
+      {},
+    ],
+  });
+  // Given the variable, only the matrix name stays unknown, and it exists only at run time.
+  const given = simulate(files, {
+    ...push,
+    repo: { date, required, vars: { KIND: "lint" } },
+  });
+  expect(byKey(given.verdicts, "check › lint")!.value).toBe("passes");
+  expect(byKey(given.verdicts, "check › Build push")!.value).toBe("passes");
+  const other = simulate(files, {
+    ...push,
+    repo: { date, required: ["other"], vars: { KIND: "lint" } },
+  });
+  expect(byKey(other.verdicts, "check › other")).toMatchObject({
+    value: "uncertain",
+    settle: [],
+  });
 });
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
