@@ -8,12 +8,12 @@ declare global {
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 
-// All Verdicts' GitHub workflow and job rows, leaving out access keys (#62).
+// All Verdicts' GitHub workflow and job rows, leaving out access keys (#62) and checks (#71).
 const runRows = (page: Page) =>
   results(page)
     .locator(".verdicts")
     .getByRole("listitem")
-    .filter({ hasNotText: / › (token\.|secrets)/ });
+    .filter({ hasNotText: /^check › | › (token\.|secrets)/ });
 const header = (page: Page) => page.getByRole("banner");
 const source = (page: Page) => page.locator("#set-source");
 const confirm = (page: Page) => page.getByRole("alertdialog");
