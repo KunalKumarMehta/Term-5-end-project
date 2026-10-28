@@ -37,6 +37,7 @@ import {
   type CauseLinks,
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
+import { MergeReadiness, RequiredChecks } from "./MergeReadiness";
 import { PasteDialog } from "./PasteDialog";
 import { RepoFacts, sourceOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
@@ -95,8 +96,11 @@ function diagnosticNews(
   });
 }
 
-/** A job key is `<file> › <jobId>`. */
-const isJob = (key: string) => key.split(" › ").length === 2;
+/** A job key is `<file> › <jobId>`; a required check's `check › <name>` isn't, as no file is named check. */
+const isJob = (key: string) => {
+  const parts = key.split(" › ");
+  return parts.length === 2 && parts[0] !== "check";
+};
 
 /** A nested payload's leaves as `[path segments, value]`; a list is one leaf. */
 function leaves(node: unknown, at: string[] = []): [string[], unknown][] {
@@ -134,8 +138,8 @@ export function App() {
   // An owner/repo the check refused, shown while the Scenario keeps its last value (addendum B).
   const [repoDraft, setRepoDraft] = useState<string>();
   const [diffOnly, setDiffOnly] = useState(false);
-  // The results tab (#9 §1); Merge readiness and Concurrency arrive with their tickets.
-  const [tab, setTab] = useState<"access" | "all">("all");
+  // The results tab (#9 §1); Concurrency arrives with its ticket.
+  const [tab, setTab] = useState<"access" | "checks" | "all">("all");
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
@@ -618,6 +622,24 @@ export function App() {
     ? "No Verdicts: every file has Diagnostics (see above)."
     : `No Verdicts: every file${diagnosed.size > 0 ? " has Diagnostics (see above) or" : ""} is only a called workflow (on: workflow_call), and its jobs appear under the jobs that call it.`;
 
+  // #9 §4: the form Scenario's required checks, in Repo facts and atop Merge readiness.
+  const requiredChecks = (
+    <RequiredChecks
+      required={scenario.repo.required ?? []}
+      strict={scenario.repo.strict ?? false}
+      onChange={(field, value) => setInput(["repo", field], value)}
+      announce={announce}
+    />
+  );
+  const mergeReadiness = (
+    <MergeReadiness
+      columns={columns}
+      control={requiredChecks}
+      open={open}
+      onOpen={openExplanation}
+    />
+  );
+
   let results: ReactNode;
   if (files.length === 0)
     results = (
@@ -628,7 +650,9 @@ export function App() {
     );
   else if (compare)
     results =
-      tab === "access" ? (
+      tab === "checks" ? (
+        mergeReadiness
+      ) : tab === "access" ? (
         <Access
           columns={columns}
           open={open}
@@ -658,6 +682,8 @@ export function App() {
   else if (verdicts === undefined) results = null;
   else if (unsupported)
     results = <UnsupportedPanel verdict={unsupported} {...linksFor(0)} />;
+  // With no required checks there may be no Verdicts, and the control must stay (addendum F).
+  else if (tab === "checks") results = mergeReadiness;
   else if (verdicts.length === 0) results = <p>{noVerdicts}</p>;
   else if (tab === "access")
     results = (
@@ -997,6 +1023,7 @@ export function App() {
               </button>
             </div>
             <RepoFacts scenario={scenario} onChange={setRepoFact} />
+            {requiredChecks}
             <label htmlFor="repo-repository">
               <code>owner/repo</code>{" "}
               <span className="optional">(optional)</span>
@@ -1088,6 +1115,7 @@ export function App() {
             {(
               [
                 ["access", "Access"],
+                ["checks", "Merge readiness"],
                 ["all", "All Verdicts"],
               ] as const
             ).map(([id, name]) => (
