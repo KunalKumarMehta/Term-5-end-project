@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -10,10 +11,18 @@ import {
   PLATFORM_BASELINE,
   RULES,
   simulate,
+  type Span,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
 import { Editor } from "./Editor";
+import {
+  Causes,
+  Explanation,
+  basename,
+  prose,
+  type CauseLinks,
+} from "./Explanation";
 import { PasteDialog } from "./PasteDialog";
 
 type Pane = "yaml" | "scenario" | "results";
@@ -23,13 +32,6 @@ const INTERNAL_ERROR =
 
 const statusRegion = document.getElementById("status")!;
 const toastRegion = document.getElementById("toasts")!;
-
-/** Renders `code` spans in the core's prose as code, and everything else as text. */
-function prose(text: string): ReactNode {
-  return text
-    .split("`")
-    .map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
-}
 
 /** #12 addendum E: per-key changes of `value` or `possible`, plus keys that came or went. */
 function changedCount(before: Verdict[], after: Verdict[]): number {
@@ -48,8 +50,6 @@ function samePossible(a: Verdict, b: Verdict): boolean {
   return key(a) === key(b);
 }
 
-const basename = (path: string) => path.slice(path.lastIndexOf("/") + 1);
-
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [active, setActive] = useState<string>();
@@ -61,6 +61,11 @@ export function App() {
   const [pasting, setPasting] = useState(false);
   const [toast, setToast] = useState<{ id: number; node: ReactNode }>();
   const [status, setStatus] = useState("");
+  // The subject key of the open Explanation, and the YAML lines a file:line link showed.
+  const [open, setOpen] = useState<string>();
+  const [highlight, setHighlight] = useState<Span>();
+  const sheet = useRef<HTMLElement>(null);
+  const sheetScroll = useRef(0);
 
   // What the last run left on screen and what was last announced, read by the next run.
   const last = useRef<{ verdicts?: Verdict[]; failed: boolean }>({
@@ -136,10 +141,42 @@ export function App() {
     });
   };
 
+  // #12 addendum J: the sheet belongs to Results and comes back where it was left.
+  // Chromium keeps a hidden element's scroll offset; this restores it where an engine doesn't.
+  useLayoutEffect(() => {
+    if (pane === "results" && sheet.current)
+      sheet.current.scrollTop = sheetScroll.current;
+  }, [pane]);
+
+  const openExplanation = (key: string) => {
+    sheetScroll.current = 0;
+    if (sheet.current) sheet.current.scrollTop = 0;
+    setOpen(key);
+  };
+
+  const closeExplanation = (key: string) => {
+    setOpen(undefined);
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)
+        ?.focus(),
+    );
+  };
+
   /** Shows the pane a field lives in, then focuses the field. */
   const focusField = (id: string) => {
     setPane("scenario");
     requestAnimationFrame(() => document.getElementById(id)?.focus());
+  };
+
+  const links: CauseLinks = {
+    files,
+    focusField,
+    showLines: (span) => {
+      setActive(span.path);
+      setPane("yaml");
+      setHighlight({ ...span }); // A fresh object, so a second click shows the lines again.
+    },
   };
 
   const actions = (
@@ -188,9 +225,7 @@ export function App() {
     );
   else if (verdicts === undefined) results = null;
   else if (unsupported)
-    results = (
-      <UnsupportedPanel verdict={unsupported} focusField={focusField} />
-    );
+    results = <UnsupportedPanel verdict={unsupported} {...links} />;
   else if (verdicts.length === 0)
     results = <p>No Verdicts: every file has Diagnostics (see above).</p>;
   else
@@ -198,8 +233,16 @@ export function App() {
       <ul className="verdicts">
         {verdicts.map((v) => (
           <li key={v.key}>
-            <span className="key">{v.key}</span> <Value verdict={v} />{" "}
-            <span className="root">root {v.causes[0]?.rule}</span>
+            <button
+              type="button"
+              className="verdict"
+              data-key={v.key}
+              aria-expanded={open === v.key}
+              onClick={() => openExplanation(v.key)}
+            >
+              <span className="key">{v.key}</span> <Value verdict={v} />{" "}
+              <span className="root">root {v.causes[0]?.rule}</span>
+            </button>
           </li>
         ))}
       </ul>
@@ -246,7 +289,11 @@ export function App() {
                   </button>
                 ))}
               </div>
-              <Editor file={activeFile!} onEdit={onEdit} />
+              <Editor
+                file={activeFile!}
+                onEdit={onEdit}
+                highlight={highlight}
+              />
             </>
           )}
         </section>
@@ -311,6 +358,16 @@ export function App() {
           <div className={failed && !blocked ? "stale" : undefined}>
             {results}
           </div>
+          {open !== undefined && !blocked && !unsupported && (
+            <Explanation
+              subject={open}
+              verdict={verdicts?.find((v) => v.key === open)}
+              onClose={() => closeExplanation(open)}
+              sheet={sheet}
+              onScroll={(top) => (sheetScroll.current = top)}
+              {...links}
+            />
+          )}
         </section>
       </main>
 
@@ -387,20 +444,10 @@ function Value({ verdict }: { verdict: Verdict }) {
   );
 }
 
-// The Scenario inputs that have a form field so far; the others arrive with their tickets.
-const FIELDS: Record<string, { id: string; label: string }> = {
-  "event.name": { id: "event-name", label: "Event name" },
-  "repo.date": { id: "sim-date", label: "Simulation date" },
-};
-const LABELS: Record<string, string> = { "event.actor": "Actor kind" };
-
 function UnsupportedPanel({
   verdict,
-  focusField,
-}: {
-  verdict: Verdict;
-  focusField: (id: string) => void;
-}) {
+  ...links
+}: { verdict: Verdict } & CauseLinks) {
   const root = verdict.causes[0]!;
   return (
     <div className="unsupported">
@@ -408,37 +455,7 @@ function UnsupportedPanel({
         Unsupported Scenario: {prose(RULES[root.rule]?.text ?? "")} ({root.rule}
         )
       </p>
-      <ol className="explanation">
-        {verdict.causes.map((cause, i) => (
-          <li key={i}>
-            {i === 0 && <span className="root">root </span>}
-            {cause.rule}: {prose(RULES[cause.rule]?.text ?? "")}
-            <ul>
-              {cause.inputs.map(({ path, value }) => {
-                const field = FIELDS[path];
-                const text = `${field?.label ?? LABELS[path] ?? path} = ${String(value)}`;
-                return (
-                  <li key={path}>
-                    {field ? (
-                      <a
-                        href={`#${field.id}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          focusField(field.id);
-                        }}
-                      >
-                        {text}
-                      </a>
-                    ) : (
-                      text
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        ))}
-      </ol>
+      <Causes causes={verdict.causes} {...links} />
     </div>
   );
 }
