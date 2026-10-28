@@ -208,6 +208,10 @@ textarea {
   padding-left: 1.5rem;
 }
 
+.verdicts li.access {
+  padding-left: 3rem;
+}
+
 .assumptions {
   margin: 0;
   padding-left: 1.25rem;
@@ -305,6 +309,41 @@ textarea {
 
 .value[data-tone="neutral"] {
   background: var(--neutral);
+}
+
+.value[data-tone="strong"] {
+  background: var(--fg);
+}
+
+.value[data-tone="mid"] {
+  color: var(--fg);
+  background: var(--line);
+}
+
+.value[data-tone="faint"] {
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.card {
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+}
+
+.card h3 {
+  margin: 0.25rem 0;
+  font-size: 1rem;
+}
+
+.card .run .verdict {
+  display: inline;
+  width: auto;
+}
+
+.card .hint {
+  font-size: 0.875rem;
+  font-weight: 400;
 }
 
 .value[data-tone="uncertain"] {

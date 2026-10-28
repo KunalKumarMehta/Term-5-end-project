@@ -1,3 +1,4 @@
+import { accessVerdicts } from "./access";
 import { jobVerdicts } from "./jobs";
 import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
 import { validateScenario, withDefaults, type Scenario } from "./scenario";
@@ -151,7 +152,11 @@ export function simulate(
             causes: [{ rule: "PL-9", spans: [], inputs: [] }],
           }
         : { key, ...trigger(file, event, repo.defaultBranch!) };
-    verdicts.push(workflow, ...jobVerdicts(key, file, workflow, scenario));
+    verdicts.push(
+      workflow,
+      ...jobVerdicts(key, file, workflow, scenario),
+      ...accessVerdicts(key, file, scenario),
+    );
   }
   // Code-unit order, so the result never depends on the host's locale.
   verdicts.sort((a, b) => compare(a.key, b.key));

@@ -1,0 +1,11 @@
+name: CI
+on: push
+permissions: read-all
+jobs:
+  test:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm test

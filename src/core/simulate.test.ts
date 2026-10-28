@@ -21,6 +21,9 @@ const simulate: typeof coreSimulate = (files, scenario) => {
 const citedElsewhere = ["GL-5"];
 
 const date = "2026-12-03";
+// The GitHub workflow and job Verdicts, leaving out access keys, for tests not about access.
+const runVerdicts = (verdicts: Verdict[]) =>
+  verdicts.filter((v) => !/ › (token\.[a-z-]+|secrets)$/.test(v.key));
 const push = { event: { name: "push" }, repo: { date } };
 const wf = (name: string, text: string) => ({
   path: `.github/workflows/${name}`,
@@ -96,7 +99,7 @@ test("only .yml and .yaml files directly in .github/workflows/ load, sorted by s
     ],
     push,
   );
-  expect(verdicts.map((v) => v.key)).toEqual([
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
     "a.yml",
     "a.yml › a",
     "z.yaml",
@@ -114,7 +117,10 @@ test("a push to a branch a branches: filter lists runs, rooted in BR-4 on the ma
     event: { name: "push", ref: "refs/heads/releases/v1" },
     repo: { date },
   });
-  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › a"]);
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
+    "ci.yml",
+    "ci.yml › a",
+  ]);
   expect(verdicts[0]).toMatchObject({ key: "ci.yml", value: "runs" });
   expect(verdicts[0]!.causes[0]).toMatchObject({
     rule: "BR-4",
@@ -149,7 +155,10 @@ function verdictOf(on: string, event: Event) {
     repo: { date },
   });
   expect(diagnostics).toEqual([]);
-  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › a"]);
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
+    "ci.yml",
+    "ci.yml › a",
+  ]);
   return verdicts[0]!;
 }
 // [value, root rule, root line]
@@ -448,7 +457,10 @@ test.each([
       [wf("bad.yml", `on:\n${on}${jobs}`), wf("ok.yml", `on: push\n${jobs}`)],
       { event: { name: "push" }, repo: { date } },
     );
-    expect(verdicts.map((v) => v.key)).toEqual(["ok.yml", "ok.yml › a"]);
+    expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
+      "ok.yml",
+      "ok.yml › a",
+    ]);
     expect(diagnostics).toEqual([
       expect.objectContaining({
         rule: "BR-1",
@@ -470,7 +482,7 @@ test("a BR-1 Diagnostic is reported even when the Event is unsupported", () => {
     ],
     { event: { name: "schedule" }, repo: { date } },
   );
-  expect(verdicts.map((v) => v.value)).toEqual(["unsupported"]);
+  expect(runVerdicts(verdicts).map((v) => v.value)).toEqual(["unsupported"]);
   expect(diagnostics).toEqual([
     expect.objectContaining({ rule: "BR-1", line: 4 }),
   ]);
@@ -762,7 +774,7 @@ test.each([
     expect(diagnostics).toEqual([
       expect.objectContaining({ path: ".github/workflows/bad.yml", ...at }),
     ]);
-    expect(verdicts.map((v) => [v.key, v.value])).toEqual([
+    expect(runVerdicts(verdicts).map((v) => [v.key, v.value])).toEqual([
       ["good.yml", "runs"],
       ["good.yml › a", "runs"],
     ]);
@@ -791,7 +803,10 @@ test("a 6-level alias bomb is stopped quickly with one Diagnostic on line 1", ()
       message: "Too many YAML aliases: WhyNoRun stopped reading this file",
     },
   ]);
-  expect(verdicts.map((v) => v.key)).toEqual(["good.yml", "good.yml › a"]);
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
+    "good.yml",
+    "good.yml › a",
+  ]);
 });
 
 test("cache-mode and a step's background, which GitHub documents but the bundled schema rejects, are no Diagnostic and keep their Verdicts", () => {
@@ -805,7 +820,10 @@ test("cache-mode and a step's background, which GitHub documents but the bundled
     push,
   );
   expect(diagnostics).toEqual([]);
-  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › a"]);
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
+    "ci.yml",
+    "ci.yml › a",
+  ]);
 });
 
 test("Diagnostics are reported for an unsupported Event too, beside its single event Verdict", () => {
@@ -813,7 +831,7 @@ test("Diagnostics are reported for an unsupported Event too, beside its single e
     [wf("bad.yml", "on: push\njobs: [\n")],
     { event: { name: "schedule" }, repo: { date } },
   );
-  expect(verdicts.map((v) => v.key)).toEqual(["event"]);
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual(["event"]);
   expect(diagnostics).toEqual([
     expect.objectContaining({ path: ".github/workflows/bad.yml" }),
   ]);
@@ -1083,7 +1101,10 @@ test("paths and paths-ignore on one event is a PA-1 Diagnostic at paths-ignore, 
     ],
     push,
   );
-  expect(verdicts.map((v) => v.key)).toEqual(["good.yml", "good.yml › a"]);
+  expect(runVerdicts(verdicts).map((v) => v.key)).toEqual([
+    "good.yml",
+    "good.yml › a",
+  ]);
   expect(diagnostics).toEqual([
     {
       rule: "PA-1",
@@ -1102,7 +1123,7 @@ test("a GitHub workflow file over 500 KB is skipped with root PL-9, not a Diagno
   const big = `on: push\n${jobs}${"# padding\n".repeat(52_000)}`;
   const { verdicts, diagnostics } = simulate([wf("big.yml", big), good], push);
   expect(diagnostics).toEqual([]);
-  expect(verdicts).toEqual([
+  expect(runVerdicts(verdicts)).toEqual([
     {
       key: "big.yml",
       value: "skipped",
@@ -1126,6 +1147,267 @@ test("a GitHub workflow file over 500 KB is skipped with root PL-9, not a Diagno
     simulate([wf("big.yml", `${under.slice(0, -1)}é`)], push).verdicts[0]!
       .causes[0]!.rule,
   ).toBe("PL-9");
+});
+
+// Access keys (#62): 17 token scopes (no `metadata`) and secrets per job with steps.
+const SCOPES = [
+  "actions",
+  "artifact-metadata",
+  "attestations",
+  "checks",
+  "code-quality",
+  "contents",
+  "copilot-requests",
+  "deployments",
+  "discussions",
+  "id-token",
+  "issues",
+  "packages",
+  "pages",
+  "pull-requests",
+  "security-events",
+  "statuses",
+  "vulnerability-alerts",
+];
+/** A job's access Verdicts by subject (`token.<scope>` or `secrets`). */
+const accessOf = (verdicts: Verdict[], job: string) =>
+  Object.fromEntries(
+    verdicts
+      .filter((v) => v.key.startsWith(`${job} › `))
+      .map((v) => [v.key.slice(job.length + 3), v]),
+  );
+const levels = (access: Record<string, Verdict>) =>
+  Object.fromEntries(
+    Object.entries(access).map(([k, v]) => [k, v.possible ?? v.value]),
+  );
+const allScopes = (level: string, except: Record<string, unknown> = {}) => ({
+  ...Object.fromEntries(SCOPES.map((s) => [`token.${s}`, level])),
+  ...except,
+});
+
+test("the example set on a member's pull_request touching src: ci.yml › test gets pull-requests write and contents read from its permissions: block, its other 15 scopes none, and secrets available (FK-0)", () => {
+  const { verdicts } = simulate(example, {
+    event: {
+      name: "pull_request",
+      ref: "feature",
+      base: "main",
+      changed: ["src/app.ts"],
+    },
+    repo: { date },
+  });
+  const access = accessOf(verdicts, "ci.yml › test");
+  expect(levels(access)).toEqual(
+    allScopes("none", {
+      "token.contents": "read",
+      "token.pull-requests": "write",
+      secrets: "available",
+    }),
+  );
+  expect(access["token.pull-requests"]!.causes[0]).toEqual({
+    rule: "PERM-3",
+    spans: [
+      {
+        path: ".github/workflows/ci.yml",
+        line: 44,
+        col: 7,
+        endLine: 44,
+        endCol: 27,
+      },
+    ],
+    inputs: [],
+  });
+  expect(access["token.contents"]!.causes[0]).toMatchObject({
+    rule: "PERM-3",
+    spans: [{ line: 43 }],
+  });
+  // An unlisted scope is none, at the permissions: line (PERM-3).
+  expect(access["token.issues"]!.causes[0]).toMatchObject({
+    rule: "PERM-3",
+    spans: [{ line: 42 }],
+  });
+  expect(access.secrets!.causes[0]).toEqual({
+    rule: "FK-0",
+    spans: [],
+    inputs: [{ path: "event.actor", value: "member" }],
+  });
+});
+
+test("the example set on a push to main: deploy.yml › deploy gets contents write from the workflow-level block, and secrets available", () => {
+  const { verdicts } = simulate(example, {
+    event: { name: "push", ref: "main" },
+    repo: { date },
+  });
+  const access = accessOf(verdicts, "deploy.yml › deploy");
+  expect(levels(access)).toEqual(
+    allScopes("none", { "token.contents": "write", secrets: "available" }),
+  );
+  expect(access["token.contents"]!.causes).toEqual([
+    {
+      rule: "PERM-3",
+      spans: [expect.objectContaining({ line: 10, col: 3, endCol: 18 })],
+      inputs: [],
+    },
+  ]);
+  expect(access.secrets!.value).toBe("available");
+});
+
+const steps = "    runs-on: x\n    steps:\n      - run: echo\n";
+
+test("a job-level permissions: block replaces the workflow-level one (PERM-4), and its unlisted scopes are none (PERM-3)", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        `on: push\npermissions: write-all\njobs:\n  a:\n    permissions:\n      issues: write\n${steps}  b:\n${steps}`,
+      ),
+    ],
+    push,
+  );
+  const a = accessOf(verdicts, "ci.yml › a");
+  expect(levels(a)).toEqual(
+    allScopes("none", { "token.issues": "write", secrets: "available" }),
+  );
+  expect(a["token.contents"]!.causes).toEqual([
+    {
+      rule: "PERM-3",
+      spans: [expect.objectContaining({ line: 5, col: 5 })],
+      inputs: [],
+    },
+    {
+      rule: "PERM-4",
+      spans: [expect.objectContaining({ line: 2, col: 1 })],
+      inputs: [],
+    },
+  ]);
+  // b has no block of its own, so write-all applies; vulnerability-alerts can hold only read (PERM-5).
+  const b = accessOf(verdicts, "ci.yml › b");
+  expect(levels(b)).toEqual(
+    allScopes("write", {
+      "token.vulnerability-alerts": "read",
+      secrets: "available",
+    }),
+  );
+  expect(b["token.vulnerability-alerts"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-3",
+    "PERM-5",
+  ]);
+});
+
+test("read-all gives every scope read, except id-token and copilot-requests, which can hold only write or none (PERM-5)", () => {
+  const { verdicts } = simulate(
+    [wf("ci.yml", `on: push\npermissions: read-all\njobs:\n  a:\n${steps}`)],
+    push,
+  );
+  const a = accessOf(verdicts, "ci.yml › a");
+  expect(levels(a)).toEqual(
+    allScopes("read", {
+      "token.id-token": "none",
+      "token.copilot-requests": "none",
+      secrets: "available",
+    }),
+  );
+  expect(a["token.id-token"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-3",
+    "PERM-5",
+  ]);
+  // {} sets every scope to none.
+  const empty = simulate(
+    [wf("ci.yml", `on: push\npermissions: {}\njobs:\n  a:\n${steps}`)],
+    push,
+  ).verdicts;
+  expect(levels(accessOf(empty, "ci.yml › a"))).toEqual(
+    allScopes("none", { secrets: "available" }),
+  );
+});
+
+test("a job skipped by its own if: still gets all 17 token keys and its secrets key, computed as if it runs (ADR 0001)", () => {
+  const { verdicts } = simulate(
+    [wf("ci.yml", `on: push\njobs:\n  a:\n    if: false\n${steps}`)],
+    push,
+  );
+  expect(verdicts.find((v) => v.key === "ci.yml › a")!.value).toBe("skipped");
+  const a = accessOf(verdicts, "ci.yml › a");
+  expect(Object.keys(a).sort()).toEqual(
+    [...SCOPES.map((s) => `token.${s}`), "secrets"].sort(),
+  );
+  // No permissions: anywhere, so the restricted token default reads contents and packages (PERM-1).
+  expect(levels(a)).toEqual(
+    allScopes("none", {
+      "token.contents": "read",
+      "token.packages": "read",
+      secrets: "available",
+    }),
+  );
+  expect(a["token.contents"]!.causes).toEqual([
+    {
+      rule: "PERM-1",
+      spans: [],
+      inputs: [{ path: "repo.tokenDefault", value: "restricted" }],
+    },
+  ]);
+});
+
+test("a job with environment: is computed normally, and its secrets Explanation notes the environment (PL-16) and that RU-3 isn't modelled", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        `on: push\njobs:\n  a:\n    environment: production\n${steps}`,
+      ),
+    ],
+    push,
+  );
+  expect(verdicts.find((v) => v.key === "ci.yml › a")!.value).toBe("runs");
+  const { secrets } = accessOf(verdicts, "ci.yml › a");
+  expect(secrets!.value).toBe("available");
+  expect(secrets!.causes.map((c) => c.rule)).toEqual(["FK-0", "PL-16"]);
+  expect(secrets!.causes[1]!.spans).toEqual([
+    expect.objectContaining({ line: 4, col: 5 }),
+  ]);
+  expect(RULES["PL-16"]!.text).toContain("RU-3");
+});
+
+test("with a permissive token default, a job with no permissions: gets id-token and copilot-requests Uncertain [none, write] with an empty settle (PERM-8)", () => {
+  const { verdicts } = simulate(
+    [wf("ci.yml", `on: push\njobs:\n  a:\n${steps}`)],
+    { event: { name: "push" }, repo: { date, tokenDefault: "permissive" } },
+  );
+  const a = accessOf(verdicts, "ci.yml › a");
+  expect(levels(a)).toEqual(
+    allScopes("write", {
+      "token.id-token": ["none", "write"],
+      "token.copilot-requests": ["none", "write"],
+      "token.vulnerability-alerts": "read",
+      secrets: "available",
+    }),
+  );
+  expect(a["token.id-token"]).toEqual({
+    key: "ci.yml › a › token.id-token",
+    value: "uncertain",
+    causes: [
+      { rule: "PERM-8", spans: [], inputs: [] },
+      {
+        rule: "PERM-1",
+        spans: [],
+        inputs: [{ path: "repo.tokenDefault", value: "permissive" }],
+      },
+    ],
+    possible: ["none", "write"],
+    settle: [],
+  });
+});
+
+test("a uses: caller job gets no access keys until reusable workflows land", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        "on: push\njobs:\n  call:\n    uses: ./.github/workflows/lib.yml\n",
+      ),
+    ],
+    push,
+  );
+  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › call"]);
 });
 
 // A member's pull_request touching src: ci.yml runs, and e2e reads the changes job's output.
