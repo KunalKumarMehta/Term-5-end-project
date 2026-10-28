@@ -1,6 +1,8 @@
 import { accessVerdicts } from "./access";
+import { checkVerdicts, type Producer } from "./checks";
 import { jobVerdicts } from "./jobs";
 import {
+  checkName,
   parseWorkflowFile,
   type Diagnostic,
   type ParsedWorkflow,
@@ -223,7 +225,8 @@ function unmatched(
 ): UnmatchedAssumption[] {
   const jobs = verdicts
     .map((v) => v.key.split(" › "))
-    .filter((parts) => parts.length === 2);
+    // A required check's key, `check › <name>`, has two segments too; no file is named check.
+    .filter((parts) => parts.length === 2 && parts[0] !== "check");
   return Object.keys(scenario.assume ?? {}).flatMap((key) => {
     const [file, id] = key.split(" › ");
     if (jobs.some(([f, j]) => f === file && j === id)) return [];
@@ -244,6 +247,7 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
   const { event, repo } = scenario;
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts: Verdict[] = [];
+  const producers: Producer[] = [];
   for (const { key, bytes, ...file } of parsed) {
     // A file GitHub would reject gets no Verdicts; a callee's jobs appear under its callers.
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
@@ -267,6 +271,12 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
             ),
           };
     const jobs = jobVerdicts(`${key} › `, file, workflow, scenario);
+    for (const job of file.jobs)
+      producers.push({
+        name: checkName(job),
+        job: jobs.find((v) => v.key === `${key} › ${job.id.value}`)!,
+        workflow,
+      });
     verdicts.push(
       workflow,
       ...jobs,
@@ -285,6 +295,7 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
       );
     }
   }
+  verdicts.push(...checkVerdicts(producers, scenario));
   return verdicts;
 }
 

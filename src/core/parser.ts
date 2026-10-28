@@ -22,6 +22,7 @@ import type { FunctionDefinition } from "@actions/expressions/funcs/info";
 import { truthy } from "@actions/expressions/result";
 import {
   NoOperationTraceWriter,
+  isString,
   parseWorkflow,
 } from "@actions/workflow-parser";
 import { convertConcurrency } from "@actions/workflow-parser/model/converter/concurrency";
@@ -128,6 +129,13 @@ export interface Checkout {
   /** Only when step-level `continue-on-error` is literally `true`. */
   continueOnError?: Span;
 }
+
+/**
+ * A job's required-check name (RQ-0): its `name:` if set and non-empty, else its id, as the
+ * parser's `jobName()` gives it. Undefined when `name:` is an expression.
+ */
+export const checkName = (job: WorkflowJob): string | undefined =>
+  job.name && isString(job.name) ? job.name.value : undefined;
 
 const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
 
