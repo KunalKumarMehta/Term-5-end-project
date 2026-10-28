@@ -10,6 +10,8 @@ import {
   PLATFORM_BASELINE,
   RULES,
   simulate,
+  type ActorKind,
+  type Event,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
@@ -54,6 +56,10 @@ export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [active, setActive] = useState<string>();
   const [eventName, setEventName] = useState("push");
+  const [eventType, setEventType] = useState("");
+  const [ref, setRef] = useState("");
+  const [base, setBase] = useState("");
+  const [actor, setActor] = useState<ActorKind>("member");
   const [date, setDate] = useState("");
   const [verdicts, setVerdicts] = useState<Verdict[]>();
   const [failed, setFailed] = useState(false);
@@ -80,12 +86,14 @@ export function App() {
         setFailed(false);
         return;
       }
+      // Empty fields stay unset, so GitHub's defaults and the default branch apply.
+      const event: Event = { name: eventName, actor };
+      if (eventType !== "") event.type = eventType;
+      if (ref !== "") event.ref = ref;
+      if (base !== "") event.base = base;
       let next: Verdict[];
       try {
-        next = simulate(files, {
-          event: { name: eventName },
-          repo: { date },
-        }).verdicts;
+        next = simulate(files, { event, repo: { date } }).verdicts;
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
         last.current.failed = true;
@@ -106,7 +114,7 @@ export function App() {
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [files, eventName, date, announce]);
+  }, [files, eventName, eventType, ref, base, actor, date, announce]);
 
   useEffect(() => {
     if (!toast) return;
@@ -277,6 +285,49 @@ export function App() {
             <p id="event-name-error" className="error">
               {eventName.trim() === "" && "Enter an event name, such as push"}
             </p>
+            <label htmlFor="event-type">Activity type</label>
+            <input
+              id="event-type"
+              list="event-types"
+              placeholder="GitHub's defaults"
+              value={eventType}
+              onChange={(e) => setEventType(e.target.value)}
+            />
+            <datalist id="event-types">
+              <option value="opened" />
+              <option value="synchronize" />
+              <option value="reopened" />
+              <option value="labeled" />
+              <option value="closed" />
+            </datalist>
+            <label htmlFor="event-actor">Actor kind</label>
+            <select
+              id="event-actor"
+              value={actor}
+              onChange={(e) => setActor(e.target.value as ActorKind)}
+            >
+              <option value="member">Member</option>
+              <option value="fork">Fork contributor</option>
+              <option value="dependabot">dependabot[bot]</option>
+            </select>
+            <label htmlFor="event-ref">Ref</label>
+            <input
+              id="event-ref"
+              placeholder="the default branch"
+              aria-describedby="event-ref-hint"
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+            />
+            <p id="event-ref-hint" className="hint">
+              A branch, <code>refs/heads/…</code> or <code>refs/tags/…</code>
+            </p>
+            <label htmlFor="event-base">Base branch</label>
+            <input
+              id="event-base"
+              placeholder="the default branch"
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+            />
           </fieldset>
           <fieldset>
             <legend>Repo facts</legend>
@@ -390,9 +441,12 @@ function Value({ verdict }: { verdict: Verdict }) {
 // The Scenario inputs that have a form field so far; the others arrive with their tickets.
 const FIELDS: Record<string, { id: string; label: string }> = {
   "event.name": { id: "event-name", label: "Event name" },
+  "event.type": { id: "event-type", label: "Activity type" },
+  "event.actor": { id: "event-actor", label: "Actor kind" },
+  "event.ref": { id: "event-ref", label: "Ref" },
+  "event.base": { id: "event-base", label: "Base branch" },
   "repo.date": { id: "sim-date", label: "Simulation date" },
 };
-const LABELS: Record<string, string> = { "event.actor": "Actor kind" };
 
 function UnsupportedPanel({
   verdict,
@@ -416,7 +470,7 @@ function UnsupportedPanel({
             <ul>
               {cause.inputs.map(({ path, value }) => {
                 const field = FIELDS[path];
-                const text = `${field?.label ?? LABELS[path] ?? path} = ${String(value)}`;
+                const text = `${field?.label ?? path} = ${String(value)}`;
                 return (
                   <li key={path}>
                     {field ? (

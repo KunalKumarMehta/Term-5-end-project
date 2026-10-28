@@ -39,7 +39,10 @@ export interface ParsedWorkflow {
   events: EventsConfig;
   /** The `on` key itself. */
   onSpan: Span | undefined;
-  /** Each `on:` entry by event name, at its own position (an alias reports its own line). */
+  /**
+   * Each `on:` entry by event name, at its own position (an alias reports its own line),
+   * plus each event's settings as `event.key` and their list items as `event.key.i`.
+   */
   onEntries: Map<string, Span>;
 }
 
@@ -108,6 +111,28 @@ function indexOn(
     const event = name(doc, entry);
     if (event !== undefined && !onEntries.has(event))
       onEntries.set(event, own ?? span(entry as Node));
+  }
+  // Settings reached through an alias point at the alias, as the entries above do.
+  for (const pair of isMap(value) ? value.items : []) {
+    const event = name(doc, pair.key);
+    if (event === undefined) continue;
+    const viaEvent =
+      own ?? (isAlias(pair.value) ? span(pair.value) : undefined);
+    const settings = resolve(doc, pair.value);
+    for (const setting of isMap(settings) ? settings.items : []) {
+      const key = name(doc, setting.key);
+      if (key === undefined || !isScalar(setting.key)) continue;
+      const at = `${event}.${key}`;
+      if (!onEntries.has(at)) onEntries.set(at, viaEvent ?? span(setting.key));
+      const via =
+        viaEvent ?? (isAlias(setting.value) ? span(setting.value) : undefined);
+      const list = resolve(doc, setting.value);
+      const items = isSeq(list) ? list.items : [list];
+      items.forEach((item, i) => {
+        if (isAlias(item) || isScalar(item))
+          onEntries.set(`${at}.${i}`, via ?? span(item));
+      });
+    }
   }
   return { onSpan: span(pair.key), onEntries };
 }

@@ -1,5 +1,6 @@
 import { parseWorkflowFile, type Span } from "./parser";
 import { validateScenario, withDefaults, type Scenario } from "./scenario";
+import { filterDiagnostics, trigger } from "./triggers";
 
 export { PLATFORM_BASELINE } from "./baseline";
 export type { Span } from "./parser";
@@ -39,11 +40,21 @@ export interface Verdict {
   settle?: string[];
 }
 
-export interface SimulationResult {
-  verdicts: Verdict[];
-  diagnostics: unknown[];
+/** A problem that makes GitHub reject a file; the file gets no Verdicts. */
+export interface Diagnostic {
+  /** The rule ID, when a rule in the catalogue says GitHub rejects it. */
+  rule?: string;
+  span: Span;
+  /** GitHub's own error text where it has one. */
+  message: string;
 }
 
+export interface SimulationResult {
+  verdicts: Verdict[];
+  diagnostics: Diagnostic[];
+}
+
+const SUPPORTED = new Set(["push", "pull_request"]);
 const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 
 /**
@@ -56,10 +67,27 @@ export function simulate(
 ): SimulationResult {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { event } = withDefaults(input).scenario;
+  const { event, repo } = withDefaults(input).scenario;
 
-  // Until later tickets support them, every Event but a member's push is outside the model.
-  if (event.name !== "push" || event.actor !== "member") {
+  const readable: {
+    key: string;
+    parsed: ReturnType<typeof parseWorkflowFile>;
+  }[] = [];
+  const diagnostics: Diagnostic[] = [];
+  for (const file of files) {
+    const key = loaded.exec(file.path)?.[1];
+    if (key === undefined) continue;
+    const parsed = parseWorkflowFile(file.path, file.text);
+    // A file GitHub would reject gets no Verdicts; its parser Diagnostics land with #54.
+    if (!parsed.ok) continue;
+    const found = filterDiagnostics(file.path, parsed);
+    if (found.length > 0) diagnostics.push(...found);
+    else readable.push({ key, parsed });
+  }
+
+  // Until later tickets support them, every Event but a member's push or pull_request
+  // is outside the model.
+  if (!SUPPORTED.has(event.name) || event.actor !== "member") {
     const inputs = [
       { path: "event.name", value: event.name },
       { path: "event.actor", value: event.actor },
@@ -72,32 +100,15 @@ export function simulate(
           causes: [{ rule: "WN-3", spans: [], inputs }],
         },
       ],
-      diagnostics: [],
+      diagnostics,
     };
   }
 
-  const verdicts: Verdict[] = [];
-  for (const file of files) {
-    const key = loaded.exec(file.path)?.[1];
-    if (key === undefined) continue;
-    const parsed = parseWorkflowFile(file.path, file.text);
-    // A file GitHub would reject gets no Verdicts; its Diagnostics land with #54.
-    if (!parsed.ok) continue;
-    const listed = Object.hasOwn(parsed.events, event.name);
-    const span = listed ? parsed.onEntries.get(event.name) : parsed.onSpan;
-    verdicts.push({
-      key,
-      value: listed ? "runs" : "skipped",
-      causes: [
-        {
-          rule: "EV-0",
-          spans: span ? [span] : [],
-          inputs: [{ path: "event.name", value: event.name }],
-        },
-      ],
-    });
-  }
+  const verdicts: Verdict[] = readable.map(({ key, parsed }) => ({
+    key,
+    ...trigger(parsed, event, repo.defaultBranch!),
+  }));
   // Code-unit order, so the result never depends on the host's locale.
   verdicts.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  return { verdicts, diagnostics: [] };
+  return { verdicts, diagnostics };
 }

@@ -144,6 +144,86 @@ test.each(["checks", "concurrency"])(
   },
 );
 
+const filters = fileURLToPath(new URL("fixtures/filters", import.meta.url));
+// The Verdict lines: everything after the last blank line.
+const verdictLines = (stdout: string) =>
+  stdout.slice(stdout.lastIndexOf("\n\n", stdout.length - 2) + 2);
+
+test("show --ref with a tag ref skips a GitHub workflow with only a branches: filter, root BR-3 on its line", () => {
+  const { code, stdout } = run(
+    "show",
+    "--repo",
+    filters,
+    "--event",
+    "push",
+    "--ref",
+    "refs/tags/v1.0.0",
+    "--date",
+    "2026-12-03",
+  );
+  expect(code).toBe(0);
+  expect(verdictLines(stdout)).toBe(
+    "release.yml: skipped (root BR-3, line 4)\n",
+  );
+});
+
+test.each([
+  ["main", "release.yml: runs (root BR-4, line 6)\n"],
+  ["dev", "release.yml: skipped (root BR-4, line 6)\n"],
+])(
+  "show --event pull_request --base %s matches the base branch",
+  (base, line) => {
+    const { code, stdout } = run(
+      "show",
+      "--repo",
+      filters,
+      "--event",
+      "pull_request",
+      "--ref",
+      "feature",
+      "--base",
+      base,
+      "--date",
+      "2026-12-03",
+    );
+    expect(code).toBe(0);
+    expect(verdictLines(stdout)).toBe(line);
+  },
+);
+
+test("show --actor fork prints the Unsupported Verdict until fork PRs land", () => {
+  const { code, stdout } = run(
+    "show",
+    "--repo",
+    filters,
+    "--event",
+    "pull_request",
+    "--actor",
+    "fork",
+    "--date",
+    "2026-12-03",
+  );
+  expect(code).toBe(0);
+  expect(verdictLines(stdout)).toBe("event: unsupported (root WN-3)\n");
+});
+
+test("show --actor with an unknown Actor kind exits 2 and names the kinds", () => {
+  const { code, stdout, stderr } = run(
+    "show",
+    "--repo",
+    filters,
+    "--event",
+    "push",
+    "--actor",
+    "admin",
+    "--date",
+    "2026-12-03",
+  );
+  expect(code).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr).toContain("--actor must be member, fork or dependabot");
+});
+
 test("show in a folder without .github/workflows/ exits 2 and names the folder", () => {
   const empty = fileURLToPath(new URL("fixtures", import.meta.url));
   const { code, stderr } = run(
