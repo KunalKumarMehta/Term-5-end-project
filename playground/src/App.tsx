@@ -12,13 +12,14 @@ import {
   RULES,
   setScenarioValue,
   simulate,
+  type Diagnostic,
   type Scenario,
   type Span,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
 import { ConfirmDialog, type Confirm } from "./ConfirmDialog";
-import { Editor } from "./Editor";
+import { Editor, type Target } from "./Editor";
 import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
 import {
   Causes,
@@ -59,8 +60,35 @@ const sameFiles = (a: readonly WorkflowFile[], b: readonly WorkflowFile[]) =>
   a.length === b.length &&
   a.every((f, i) => f.path === b[i]!.path && f.text === b[i]!.text);
 
-// The form keeps an empty date as "", and simulates only once one is set (#12 §3).
+// The form keeps an empty date as "", and shows Verdicts only once one is set (#12 §3).
 const BLANK: Scenario = { event: { name: "push" }, repo: { date: "" } };
+
+// Diagnostics never depend on the Scenario, so this stands in for the date while it's empty.
+const ANY_DATE = "2000-01-01";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function countByPath(diagnostics: Diagnostic[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const d of diagnostics)
+    counts.set(d.path, (counts.get(d.path) ?? 0) + 1);
+  return counts;
+}
+
+/** #12 addendum E: "· `ci.yml` has N Diagnostics" or "· `ci.yml` Diagnostics cleared". */
+function diagnosticNews(
+  before: Map<string, number>,
+  after: Map<string, number>,
+): string[] {
+  const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
+  return paths.flatMap((path) => {
+    const n = after.get(path) ?? 0;
+    if (n === (before.get(path) ?? 0)) return [];
+    return n
+      ? [`· ${basename(path)} has ${plural(n, "Diagnostic")}`]
+      : [`· ${basename(path)} Diagnostics cleared`];
+  });
+}
 
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
@@ -76,6 +104,8 @@ export function App() {
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
   const [verdicts, setVerdicts] = useState<Verdict[]>();
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [target, setTarget] = useState<Target>();
   const [failed, setFailed] = useState(false);
   const [pane, setPane] = useState<Pane>("yaml");
   const [pasting, setPasting] = useState(false);
@@ -89,9 +119,13 @@ export function App() {
   const picker = useRef<HTMLInputElement>(null);
 
   // What the last run left on screen and what was last announced, read by the next run.
-  const last = useRef<{ verdicts?: Verdict[]; failed: boolean }>({
-    failed: false,
-  });
+  const last = useRef<{
+    verdicts?: Verdict[];
+    counts: Map<string, number>;
+    failed: boolean;
+    /** Set by a wholesale replacement, whose first run stays silent. */
+    replaced?: boolean;
+  }>({ counts: new Map(), failed: false });
 
   const announce = useCallback((message: string) => {
     setStatus((prev) => (message === "" || message === prev ? prev : message));
@@ -103,32 +137,46 @@ export function App() {
   useEffect(() => {
     if (scenario.event.name.trim() === "") return; // The field shows why; the last results stay.
     const timer = setTimeout(() => {
-      if (files.length === 0 || scenario.repo.date === "") {
-        last.current = { failed: false };
+      if (files.length === 0) {
+        last.current = { counts: new Map(), failed: false };
         setVerdicts(undefined);
+        setDiagnostics([]);
         setFailed(false);
         return;
       }
-      let next: Verdict[];
+      const dated = scenario.repo.date !== "";
+      let result;
       try {
-        next = simulate(files, scenario).verdicts;
+        result = simulate(
+          files,
+          dated
+            ? scenario
+            : setScenarioValue(scenario, ["repo", "date"], ANY_DATE),
+        );
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
         last.current.failed = true;
         setFailed(true);
         return;
       }
-      const before = last.current.verdicts;
+      const next = dated ? result.verdicts : undefined;
+      const counts = countByPath(result.diagnostics);
+      const { verdicts: before, counts: was, replaced } = last.current;
+      const news = diagnosticNews(was, counts);
+      // Files with Diagnostics on either side are counted by their own news, not as Verdicts.
+      const broken = new Set([...was.keys(), ...counts.keys()].map(basename));
+      const kept = (vs: Verdict[]) =>
+        vs.filter((v) => !broken.has(v.key.split(" › ")[0]!));
       // Runs where either side had no Verdicts stay silent.
-      if (before?.length && next.length) {
-        const n = changedCount(before, next);
+      if (before?.length && next?.length) {
+        const n = changedCount(kept(before), kept(next));
         if (n > 0)
-          announce(
-            `Results updated: ${n} Verdict${n === 1 ? "" : "s"} changed`,
-          );
+          news.unshift(`Results updated: ${plural(n, "Verdict")} changed`);
       }
-      last.current = { verdicts: next, failed: false };
+      if (!replaced) announce(news.join(" "));
+      last.current = { verdicts: next, counts, failed: false };
       setVerdicts(next);
+      setDiagnostics(result.diagnostics);
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
@@ -222,7 +270,7 @@ export function App() {
 
   // #12 addendum E: the first run after a wholesale replacement stays silent.
   const replaceFiles = (next: readonly WorkflowFile[]) => {
-    last.current.verdicts = undefined;
+    last.current.replaced = true;
     setFiles([...next]);
     setBase(next);
     setUploadNote(undefined);
@@ -431,6 +479,7 @@ export function App() {
     );
 
   const blocked = files.length === 0 || date === "";
+  const counts = countByPath(diagnostics);
 
   return (
     <>
@@ -489,11 +538,26 @@ export function App() {
                     onClick={() => setActive(f.path)}
                   >
                     {basename(f.path)}
+                    {counts.has(f.path) && (
+                      <>
+                        {" "}
+                        <span className="count">
+                          {counts.get(f.path)}
+                          <span className="visually-hidden">
+                            {counts.get(f.path) === 1
+                              ? " Diagnostic"
+                              : " Diagnostics"}
+                          </span>
+                        </span>
+                      </>
+                    )}
                   </button>
                 ))}
               </div>
               <Editor
                 file={activeFile!}
+                diagnostics={diagnostics}
+                target={target}
                 onEdit={onEdit}
                 highlight={highlight}
               />
@@ -562,6 +626,29 @@ export function App() {
               All Verdicts
             </button>
           </div>
+          {diagnostics.length > 0 && (
+            <ul className="banner diagnostics" aria-label="Diagnostics">
+              {diagnostics.map((d) => (
+                <li key={`${d.path}:${d.line}:${d.col}:${d.message}`}>
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      // #12 §10: on a narrow screen this also switches to the YAML tab.
+                      setPane("yaml");
+                      setActive(d.path);
+                      setTarget({ path: d.path, line: d.line, col: d.col });
+                    }}
+                  >
+                    <code>
+                      {basename(d.path)}:{d.line}
+                    </code>{" "}
+                    {d.message}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
           {failed && !blocked && <p className="banner">{INTERNAL_ERROR}</p>}
           <div className={failed && !blocked ? "stale" : undefined}>
             {results}

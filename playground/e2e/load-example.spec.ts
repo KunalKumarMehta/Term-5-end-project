@@ -64,7 +64,7 @@ test("editing a file marks the example edited, and Reset asks first, then restor
   await results(page).getByRole("button", { name: "Load example" }).click();
   await confirm(page).getByRole("button", { name: "Load example" }).click();
   await expect(source(page)).toHaveText("Example");
-  const rows = results(page).getByRole("listitem");
+  const rows = results(page).locator(".verdicts").getByRole("listitem");
   const all = [
     "ci.yml runs root EV-0",
     "deploy.yml runs root EV-0",
@@ -72,8 +72,8 @@ test("editing a file marks the example edited, and Reset asks first, then restor
   ];
   await expect(rows).toHaveText(all);
 
-  // Two files lose their jobs one run at a time, so the last announcement is "1 Verdict
-  // changed" and a Reset that spoke would say something new ("2 Verdicts changed").
+  // Two files lose their jobs, so get Diagnostics, one run at a time: the last announcement
+  // is deploy.yml's, and a Reset that spoke would say something new (both "cleared").
   for (const [i, name] of ["ci.yml", "deploy.yml"].entries()) {
     await page.getByRole("tab", { name }).click();
     await page
@@ -102,7 +102,7 @@ test("editing a file marks the example edited, and Reset asks first, then restor
   await expect(source(page)).toHaveText("Example · edited");
 
   await expect(page.locator("#status")).toHaveText(
-    "Results updated: 1 Verdict changed",
+    "· deploy.yml has 1 Diagnostic",
   );
   await page.evaluate(() => window.said.splice(0));
   await header(page).getByRole("button", { name: "Reset" }).click();
