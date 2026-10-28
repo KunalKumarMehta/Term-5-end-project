@@ -3092,6 +3092,25 @@ test("with the Assumption \"job X fails\", X's check fails and blocks merge (RQ-
   expect(checks.report![0]).toBe("passes");
 });
 
+test("the example's e2e, skipped because changes fails, may not block (RQ-3, then WN-1): its if: reads changes' output only as if changes had succeeded", () => {
+  const { verdicts } = simulate(example, {
+    ...actorPr("fork"),
+    repo: { date, required: ["e2e"] },
+    assume: { "ci.yml › changes": "fails" },
+  });
+  expect(
+    chainOf(verdicts, "ci.yml › e2e")
+      .map(([rule]) => rule)
+      .slice(0, 3),
+  ).toEqual(["WN-1", "JG-1", "JG-2"]);
+  expect(
+    byKey(verdicts, "check › e2e")!
+      .causes.map((c) => c.rule)
+      .slice(0, 3),
+  ).toEqual(["RQ-3", "WN-1", "JG-1"]);
+  expect(byKey(verdicts, "check › e2e")!.value).toBe("may not block");
+});
+
 test("a job that fails at a refused checkout fails and blocks merge (RQ-4, then CO-1)", () => {
   const checks = checksOf(example, {
     ...forkTarget({}, { date: "2026-12-01" }),
