@@ -3,8 +3,8 @@
 // or the merge commit (DB-2, DB-3). How the branch and tag filters combine follows Gitea's
 // Actions workflow detector (MIT, go-gitea/gitea modules/actions/workflows.go): a push is
 // tried only against the filters of its own ref kind, and a pull request against its base.
-import type { Cause, Diagnostic, Verdict } from "./index";
-import type { ParsedWorkflow, Span } from "./parser";
+import type { Cause, Verdict } from "./index";
+import type { Diagnostic, ParsedWorkflow, Span } from "./parser";
 import type { Event } from "./scenario";
 import {
   compilePattern,
@@ -25,22 +25,20 @@ const settingsOf = (parsed: ParsedWorkflow, event: string): Settings => {
 };
 
 /** The branch and tag filter problems that make GitHub reject the file. */
-export function filterDiagnostics(
-  path: string,
-  parsed: ParsedWorkflow,
-): Diagnostic[] {
-  const at = (key: string): Span =>
-    parsed.onEntries.get(key) ??
-    parsed.onSpan ?? { path, line: 1, col: 1, endLine: 1, endCol: 1 };
+export function filterDiagnostics(parsed: ParsedWorkflow): Diagnostic[] {
   const found: Diagnostic[] = [];
   for (const event of Object.keys(parsed.events)) {
+    const at = (key: string): Span =>
+      parsed.onEntries.get(key) ??
+      parsed.onEntries.get(event) ??
+      parsed.onSpan!;
     const settings = settingsOf(parsed, event);
     for (const kind of KINDS) {
       const ignore = `${kind}-ignore`;
       if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
         found.push({
+          ...at(`${event}.${ignore}`),
           rule: "BR-1",
-          span: at(`${event}.${ignore}`),
           message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`,
         });
       for (const key of [kind, ignore]) {
@@ -51,7 +49,7 @@ export function filterDiagnostics(
             compilePattern(String(pattern));
           } catch (err) {
             found.push({
-              span: at(`${event}.${key}.${i}`),
+              ...at(`${event}.${key}.${i}`),
               message: (err as Error).message,
             });
           }

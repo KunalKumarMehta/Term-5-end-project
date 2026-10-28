@@ -58,11 +58,11 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
     page.locator('meta[http-equiv="Content-Security-Policy"]'),
   ).toHaveAttribute("content", CSP);
   await expect(results(page)).toContainText("No Workflow set yet");
-  for (const name of ["Load example", "Upload", "Import repo"])
-    await expect(results(page).getByRole("button", { name })).toBeDisabled();
   await expect(
-    results(page).getByRole("button", { name: "Paste" }),
-  ).toBeEnabled();
+    results(page).getByRole("button", { name: "Import repo" }),
+  ).toBeDisabled();
+  for (const name of ["Load example", "Paste", "Upload"])
+    await expect(results(page).getByRole("button", { name })).toBeEnabled();
 
   await paste(page, CI, ".github/workflows/ci.yml");
   await expect(page.locator("#toasts")).toHaveText("Pasted ci.yml");

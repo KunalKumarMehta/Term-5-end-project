@@ -85,11 +85,24 @@ function show(args: string[]): number {
       text: readFileSync(join(dir, e.name), "utf8"),
     }));
 
-  const lines = simulate(files, scenario).verdicts.map((v) => {
-    const root = v.causes[0];
-    const line = root?.spans[0]?.line;
-    return `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""})`;
-  });
+  const { verdicts, diagnostics } = simulate(files, scenario);
+  // A broken file's Diagnostics print where its Verdicts would, in subject-key order.
+  const lines = [
+    ...verdicts.map((v) => {
+      const root = v.causes[0];
+      const line = root?.spans[0]?.line;
+      return [
+        v.key,
+        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""})`,
+      ];
+    }),
+    ...diagnostics.map((d) => [
+      d.path.slice(d.path.lastIndexOf("/") + 1),
+      `${d.path}:${d.line}: ${d.message}`,
+    ]),
+  ]
+    .sort(([a], [b]) => (a! < b! ? -1 : a! > b! ? 1 : 0))
+    .map(([, text]) => text);
   process.stdout.write(
     [
       `whynorun ${__VERSION__}`,

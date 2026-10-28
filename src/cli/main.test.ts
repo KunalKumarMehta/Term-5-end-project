@@ -84,6 +84,25 @@ test.each(["all", "access"])(
   },
 );
 
+test("show prints a broken file's Diagnostic at file:line in place of its Verdicts, and the other files' Verdicts", () => {
+  const broken = fileURLToPath(
+    new URL("fixtures/broken-repo", import.meta.url),
+  );
+  const { code, stdout } = run(
+    "show",
+    "--repo",
+    broken,
+    "--event",
+    "push",
+    "--date",
+    "2026-12-03",
+  );
+  expect(code).toBe(0);
+  expect(stdout).toMatch(
+    /\n\n\.github\/workflows\/broken\.yml:3: Unexpected value 'branchez'\nci\.yml: runs \(root EV-0, line 3\)\ndocs\.yml: skipped \(root EV-0, line 2\)\n$/,
+  );
+});
+
 test("show prints an Unsupported Event as one event line, root WN-3", () => {
   const { code, stdout } = run(
     "show",

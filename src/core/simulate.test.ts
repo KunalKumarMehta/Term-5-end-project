@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { RULES, simulate as coreSimulate, type Event } from "./index";
 
@@ -423,14 +424,12 @@ test.each([
     );
     expect(verdicts.map((v) => v.key)).toEqual(["ok.yml"]);
     expect(diagnostics).toEqual([
-      {
+      expect.objectContaining({
         rule: "BR-1",
-        span: expect.objectContaining({
-          path: ".github/workflows/bad.yml",
-          line,
-        }),
+        path: ".github/workflows/bad.yml",
+        line,
         message: `you may only define one of \`${kind}\` and \`${kind}-ignore\` for a single event`,
-      },
+      }),
     ]);
   },
 );
@@ -447,10 +446,7 @@ test("a BR-1 Diagnostic is reported even when the Event is unsupported", () => {
   );
   expect(verdicts.map((v) => v.value)).toEqual(["unsupported"]);
   expect(diagnostics).toEqual([
-    expect.objectContaining({
-      rule: "BR-1",
-      span: expect.objectContaining({ line: 4 }),
-    }),
+    expect.objectContaining({ rule: "BR-1", line: 4 }),
   ]);
 });
 
@@ -466,14 +462,12 @@ test("an invalid pattern is a Diagnostic at the pattern, and the file gets no Ve
   );
   expect(verdicts).toEqual([]);
   expect(diagnostics).toEqual([
-    {
-      span: expect.objectContaining({
-        path: ".github/workflows/ci.yml",
-        line: 5,
-      }),
+    expect.objectContaining({
+      path: ".github/workflows/ci.yml",
+      line: 5,
       message:
         "invalid Pattern 'v[]': Position: 2 Error: Unexpected empty brackets '[]'",
-    },
+    }),
   ]);
 });
 
@@ -507,6 +501,113 @@ test.each<[string, Event]>([
     ]);
   },
 );
+
+const good = wf("good.yml", `on: push\n${jobs}`);
+
+test.each([
+  [
+    "malformed YAML",
+    "on: push\njobs:\n  a:\n    runs-on: [x\n",
+    { line: 5, col: 1, message: expect.stringMatching(/^Flow sequence/) },
+  ],
+  [
+    "a schema error",
+    `on:\n  push:\n    branchez: [main]\n${jobs}`,
+    { line: 3, col: 5, message: "Unexpected value 'branchez'" },
+  ],
+  [
+    "a converter error",
+    `on: push\n${jobs}  b:\n    runs-on: x\n    needs: missing\n    steps:\n      - run: echo\n`,
+    { line: 9, col: 12, message: "Job 'b' depends on unknown job 'missing'." },
+  ],
+])(
+  "%s is a Diagnostic at its position, and only that file loses its Verdicts",
+  (_, text, at) => {
+    const { verdicts, diagnostics } = simulate(
+      [wf("bad.yml", text), good],
+      push,
+    );
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ path: ".github/workflows/bad.yml", ...at }),
+    ]);
+    expect(verdicts.map((v) => [v.key, v.value])).toEqual([
+      ["good.yml", "runs"],
+    ]);
+  },
+);
+
+test("a 6-level alias bomb is stopped quickly with one Diagnostic on line 1", () => {
+  let text = "a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n";
+  for (let i = 1; i <= 6; i++)
+    text += `a${i}: &a${i} [${Array(10)
+      .fill(`*a${i - 1}`)
+      .join(", ")}]\n`;
+  const start = performance.now();
+  const { verdicts, diagnostics } = simulate(
+    [wf("ci.yml", `on: push\n${jobs}${text}`), good],
+    push,
+  );
+  expect(performance.now() - start).toBeLessThan(1000);
+  expect(diagnostics).toEqual([
+    {
+      path: ".github/workflows/ci.yml",
+      line: 1,
+      col: 1,
+      endLine: 1,
+      endCol: 1,
+      message: "Too many YAML aliases: WhyNoRun stopped reading this file",
+    },
+  ]);
+  expect(verdicts.map((v) => v.key)).toEqual(["good.yml"]);
+});
+
+test("cache-mode and a step's background, which GitHub documents but the bundled schema rejects, are no Diagnostic and keep their Verdicts", () => {
+  const { verdicts, diagnostics } = simulate(
+    [
+      wf(
+        "ci.yml",
+        `on: push\ncache-mode: read-only\n${jobs}        background: true\n`,
+      ),
+    ],
+    push,
+  );
+  expect(diagnostics).toEqual([]);
+  expect(verdicts).toEqual([expect.objectContaining({ key: "ci.yml" })]);
+});
+
+test("Diagnostics are reported for an unsupported Event too, beside its single event Verdict", () => {
+  const { verdicts, diagnostics } = simulate(
+    [wf("bad.yml", "on: push\njobs: [\n")],
+    { event: { name: "schedule" }, repo: { date } },
+  );
+  expect(verdicts.map((v) => v.key)).toEqual(["event"]);
+  expect(diagnostics).toEqual([
+    expect.objectContaining({ path: ".github/workflows/bad.yml" }),
+  ]);
+});
+
+// The bundled example Workflow set behind Load example (#15 §2), byte for byte.
+const example = ["ci.yml", "deploy.yml", "triage.yml"].map((name) =>
+  wf(
+    name,
+    readFileSync(
+      new URL(`../../playground/src/example/${name}`, import.meta.url),
+      "utf8",
+    ),
+  ),
+);
+
+test("the example Workflow set on a member's push to main: ci.yml and deploy.yml run through their branch filters, triage.yml is skipped", () => {
+  const { verdicts } = simulate(example, {
+    event: { name: "push", ref: "main" },
+    repo: { date },
+  });
+  expect(verdicts.map((v) => [v.key, v.value, v.causes[0]!.rule])).toEqual([
+    ["ci.yml", "runs", "BR-4"],
+    ["deploy.yml", "runs", "BR-4"],
+    ["triage.yml", "skipped", "EV-0"],
+  ]);
+});
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {

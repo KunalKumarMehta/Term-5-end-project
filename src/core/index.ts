@@ -1,9 +1,9 @@
-import { parseWorkflowFile, type Span } from "./parser";
+import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
 import { validateScenario, withDefaults, type Scenario } from "./scenario";
 import { filterDiagnostics, trigger } from "./triggers";
 
 export { PLATFORM_BASELINE } from "./baseline";
-export type { Span } from "./parser";
+export type { Diagnostic, Span } from "./parser";
 export { RULES, type Rule } from "./rules";
 export {
   SHOW_DEFAULTS,
@@ -40,22 +40,17 @@ export interface Verdict {
   settle?: string[];
 }
 
-/** A problem that makes GitHub reject a file; the file gets no Verdicts. */
-export interface Diagnostic {
-  /** The rule ID, when a rule in the catalogue says GitHub rejects it. */
-  rule?: string;
-  span: Span;
-  /** GitHub's own error text where it has one. */
-  message: string;
-}
-
 export interface SimulationResult {
   verdicts: Verdict[];
+  /** Sorted by path, then position. */
   diagnostics: Diagnostic[];
 }
 
 const SUPPORTED = new Set(["push", "pull_request"]);
 const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
+
+/** Whether GitHub reads the file at this path: a `.yml`/`.yaml` file directly in `.github/workflows/`. */
+export const isLoaded = (path: string): boolean => loaded.test(path);
 
 /**
  * Simulates the Workflow set for the Scenario. Pure, synchronous and deterministic.
@@ -69,21 +64,21 @@ export function simulate(
   if (problems.length > 0) throw new TypeError(problems.join("; "));
   const { event, repo } = withDefaults(input).scenario;
 
-  const readable: {
-    key: string;
-    parsed: ReturnType<typeof parseWorkflowFile>;
-  }[] = [];
-  const diagnostics: Diagnostic[] = [];
-  for (const file of files) {
+  // Diagnostics never depend on the Scenario, so an unsupported Event still reports them.
+  const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
-    if (key === undefined) continue;
-    const parsed = parseWorkflowFile(file.path, file.text);
-    // A file GitHub would reject gets no Verdicts; its parser Diagnostics land with #54.
-    if (!parsed.ok) continue;
-    const found = filterDiagnostics(file.path, parsed);
-    if (found.length > 0) diagnostics.push(...found);
-    else readable.push({ key, parsed });
-  }
+    return key === undefined
+      ? []
+      : [{ key, ...parseWorkflowFile(file.path, file.text) }];
+  });
+  // Branch and tag filter checks need a file the parser accepted.
+  for (const p of parsed)
+    if (p.diagnostics.length === 0) p.diagnostics = filterDiagnostics(p);
+  const diagnostics = parsed
+    .flatMap((p) => p.diagnostics)
+    .sort(
+      (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col,
+    );
 
   // Until later tickets support them, every Event but a member's push or pull_request
   // is outside the model.
@@ -104,11 +99,15 @@ export function simulate(
     };
   }
 
-  const verdicts: Verdict[] = readable.map(({ key, parsed }) => ({
-    key,
-    ...trigger(parsed, event, repo.defaultBranch!),
-  }));
+  const verdicts: Verdict[] = [];
+  for (const { key, ...workflow } of parsed) {
+    // A file GitHub would reject gets no Verdicts.
+    if (workflow.diagnostics.length > 0) continue;
+    verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch!) });
+  }
   // Code-unit order, so the result never depends on the host's locale.
-  verdicts.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  verdicts.sort((a, b) => compare(a.key, b.key));
   return { verdicts, diagnostics };
 }
+
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

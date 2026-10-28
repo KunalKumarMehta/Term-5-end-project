@@ -148,6 +148,24 @@ textarea {
   color: var(--bad);
 }
 
+.diagnostics {
+  margin: 0 0 0.75rem;
+  padding-left: 1.75rem;
+}
+
+.diagnostics a {
+  color: inherit;
+}
+
+.count {
+  margin-left: 0.25rem;
+  padding: 0 0.35rem;
+  border-radius: 0.75rem;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
 .stale {
   opacity: 0.5;
 }
@@ -164,6 +182,63 @@ textarea {
 
 .key {
   font-family: ui-monospace, monospace;
+}
+
+.verdict {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+}
+
+.verdict:focus-visible {
+  outline: 2px solid var(--fg);
+}
+
+.verdict[aria-expanded="true"] {
+  font-weight: 600;
+}
+
+.explanation-panel {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.explanation-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.explanation-panel .row {
+  justify-content: space-between;
+}
+
+.explanation > li {
+  margin-bottom: 0.5rem;
+}
+
+.excerpt pre {
+  margin: 0.25rem 0;
+  padding: 0.25rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  background: #f6f8fa;
+}
+
+.excerpt .ln {
+  display: inline-block;
+  width: 3ch;
+  margin-right: 1ch;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+}
+
+.excerpt mark,
+.editor .cm-line.highlighted {
+  background: #fff8c5;
 }
 
 .root {
@@ -220,6 +295,15 @@ dialog {
   width: min(40rem, calc(100vw - 2rem));
 }
 
+/* No padding on the dialog itself, so a click on the dialog element is on its backdrop. */
+dialog.confirm {
+  padding: 0;
+}
+
+dialog.confirm > div {
+  padding: 1rem;
+}
+
 dialog form {
   display: grid;
   gap: 0.5rem;
@@ -245,8 +329,20 @@ dialog form {
     display: none;
   }
 
+  /* The Explanation opens as a full-screen sheet that scrolls on its own (#12 §10). */
+  .explanation-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    margin: 0;
+    padding-bottom: 4rem;
+    overflow-y: auto;
+    border: none;
+  }
+
   .pane-bar {
     position: sticky;
+    z-index: 2;
     bottom: 0;
     display: flex;
     background: var(--bg);
@@ -261,4 +357,10 @@ dialog form {
   .pane-bar [aria-pressed="true"] {
     font-weight: 600;
   }
+}
+
+/* An upload's message or summary takes its own line under the Workflow set source. */
+.source > .error,
+.source > .ignored {
+  flex-basis: 100%;
 }
