@@ -1,8 +1,8 @@
-import { parseWorkflowFile, type Span } from "./parser";
+import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
 import { validateScenario, withDefaults, type Scenario } from "./scenario";
 
 export { PLATFORM_BASELINE } from "./baseline";
-export type { Span } from "./parser";
+export type { Diagnostic, Span } from "./parser";
 export { RULES, type Rule } from "./rules";
 export {
   SHOW_DEFAULTS,
@@ -41,7 +41,8 @@ export interface Verdict {
 
 export interface SimulationResult {
   verdicts: Verdict[];
-  diagnostics: unknown[];
+  /** Sorted by path, then position. */
+  diagnostics: Diagnostic[];
 }
 
 const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
@@ -58,6 +59,19 @@ export function simulate(
   if (problems.length > 0) throw new TypeError(problems.join("; "));
   const { event } = withDefaults(input).scenario;
 
+  // Diagnostics never depend on the Scenario, so an unsupported Event still reports them.
+  const parsed = files.flatMap((file) => {
+    const key = loaded.exec(file.path)?.[1];
+    return key === undefined
+      ? []
+      : [{ key, ...parseWorkflowFile(file.path, file.text) }];
+  });
+  const diagnostics = parsed
+    .flatMap((p) => p.diagnostics)
+    .sort(
+      (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col,
+    );
+
   // Until later tickets support them, every Event but a member's push is outside the model.
   if (event.name !== "push" || event.actor !== "member") {
     const inputs = [
@@ -72,19 +86,16 @@ export function simulate(
           causes: [{ rule: "WN-3", spans: [], inputs }],
         },
       ],
-      diagnostics: [],
+      diagnostics,
     };
   }
 
   const verdicts: Verdict[] = [];
-  for (const file of files) {
-    const key = loaded.exec(file.path)?.[1];
-    if (key === undefined) continue;
-    const parsed = parseWorkflowFile(file.path, file.text);
-    // A file GitHub would reject gets no Verdicts; its Diagnostics land with #54.
-    if (!parsed.ok) continue;
-    const listed = Object.hasOwn(parsed.events, event.name);
-    const span = listed ? parsed.onEntries.get(event.name) : parsed.onSpan;
+  for (const { key, ...workflow } of parsed) {
+    // A file GitHub would reject gets no Verdicts.
+    if (workflow.diagnostics.length > 0) continue;
+    const listed = Object.hasOwn(workflow.events, event.name);
+    const span = listed ? workflow.onEntries.get(event.name) : workflow.onSpan;
     verdicts.push({
       key,
       value: listed ? "runs" : "skipped",
@@ -98,6 +109,8 @@ export function simulate(
     });
   }
   // Code-unit order, so the result never depends on the host's locale.
-  verdicts.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  return { verdicts, diagnostics: [] };
+  verdicts.sort((a, b) => compare(a.key, b.key));
+  return { verdicts, diagnostics };
 }
+
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

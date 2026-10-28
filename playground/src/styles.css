@@ -141,6 +141,24 @@ textarea {
   color: var(--bad);
 }
 
+.diagnostics {
+  margin: 0 0 0.75rem;
+  padding-left: 1.75rem;
+}
+
+.diagnostics a {
+  color: inherit;
+}
+
+.count {
+  margin-left: 0.25rem;
+  padding: 0 0.35rem;
+  border-radius: 0.75rem;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
 .stale {
   opacity: 0.5;
 }

@@ -32,9 +32,14 @@ export interface Span {
   endCol: number;
 }
 
+/** A problem that makes GitHub reject a file, at its position; the file gets no Verdicts. */
+export interface Diagnostic extends Span {
+  message: string;
+}
+
 export interface ParsedWorkflow {
-  /** False when GitHub would reject the file (malformed YAML, schema or converter errors). */
-  ok: boolean;
+  /** Why GitHub would reject the file (malformed YAML, schema or converter errors), if it would. */
+  diagnostics: Diagnostic[];
   /** The events `on:` lists, as the parser converted them. */
   events: EventsConfig;
   /** The `on` key itself. */
@@ -43,16 +48,85 @@ export interface ParsedWorkflow {
   onEntries: Map<string, Span>;
 }
 
+const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
+
+// Keys GitHub documents that the bundled schema rejects (#2 risks), by the mapping they sit in.
+const SCHEMA_LAG = { root: ["cache-mode"], step: ["background"] };
+
 export function parseWorkflowFile(path: string, text: string): ParsedWorkflow {
-  const index = indexOn(path, text);
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(text, { lineCounter });
+  const span = (node: Node): Span => {
+    const [start, end] = node.range ?? [0, 0];
+    const a = lineCounter.linePos(start);
+    const b = lineCounter.linePos(end);
+    return { path, line: a.line, col: a.col, endLine: b.line, endCol: b.col };
+  };
+  const at = (line: number, col: number, endLine = line, endCol = col) => ({
+    path,
+    line,
+    col,
+    endLine,
+    endCol,
+  });
+  const none = { events: {}, onSpan: undefined, onEntries: new Map() };
+
+  // The workflow parser expands every alias with no limit (#2 risks), so stop a bomb first.
+  try {
+    doc.toJS({ maxAliasCount: 1000 });
+  } catch (err) {
+    // Other throws (an alias with no anchor) are malformed YAML the parser reports itself.
+    if (err instanceof ReferenceError && /alias count/.test(err.message))
+      return { ...none, diagnostics: [{ ...at(1, 1), message: ALIAS_BOMB }] };
+  }
+
   const { context, value } = parseWorkflow(
     { name: path, content: text },
     new NoOperationTraceWriter(),
   );
   // Malformed YAML leaves no token tree; converting it would only add a junk error.
-  if (value === undefined) return { ...index, ok: false, events: {} };
-  const events = convert(context, value);
-  return { ...index, ok: context.errors.getErrors().length === 0, events };
+  const events = value === undefined ? {} : convert(context, value);
+  const lagging = schemaLag(doc, span);
+  const diagnostics: Diagnostic[] = [];
+  for (const e of context.errors.getErrors()) {
+    const where = e.range
+      ? at(
+          e.range.start.line,
+          e.range.start.column,
+          e.range.end.line,
+          e.range.end.column,
+        )
+      : at(1, 1);
+    if (lagging.has(`${where.line}:${where.col}`)) continue;
+    // A YAML error repeats its position and the source line after the first line.
+    const message = e.rawMessage
+      .split("\n")[0]!
+      .replace(/ at line \d+, column \d+:$/, "");
+    diagnostics.push({ ...where, message });
+  }
+  return { ...indexOn(doc, span), diagnostics, events };
+}
+
+/** The positions of the keys in SCHEMA_LAG, as `line:col`. */
+function schemaLag(doc: Document, span: (node: Node) => Span): Set<string> {
+  const found = new Set<string>();
+  const keys = (map: unknown, names: string[]) => {
+    if (!isMap(map)) return;
+    for (const pair of map.items)
+      if (isScalar(pair.key) && names.includes(String(pair.key.value))) {
+        const { line, col } = span(pair.key);
+        found.add(`${line}:${col}`);
+      }
+  };
+  keys(doc.contents, SCHEMA_LAG.root);
+  const jobs = isMap(doc.contents) ? doc.contents.get("jobs") : undefined;
+  if (isMap(jobs))
+    for (const job of jobs.items) {
+      const steps = isMap(job.value) ? job.value.get("steps") : undefined;
+      if (isSeq(steps))
+        for (const step of steps.items) keys(step, SCHEMA_LAG.step);
+    }
+  return found;
 }
 
 // convertWorkflowTemplate() under ErrorPolicy.TryConversion (convert even when the schema
@@ -80,17 +154,9 @@ function convert(
 // Positions come from the yaml library's own nodes: the workflow parser gives a node reached
 // through an alias its anchor's line, and Verdicts must point at the line that uses it.
 function indexOn(
-  path: string,
-  text: string,
+  doc: Document,
+  span: (node: Node) => Span,
 ): Pick<ParsedWorkflow, "onSpan" | "onEntries"> {
-  const lineCounter = new LineCounter();
-  const doc = parseDocument(text, { lineCounter });
-  const span = (node: Node): Span => {
-    const [start, end] = node.range ?? [0, 0];
-    const a = lineCounter.linePos(start);
-    const b = lineCounter.linePos(end);
-    return { path, line: a.line, col: a.col, endLine: b.line, endCol: b.col };
-  };
   const onEntries = new Map<string, Span>();
   if (!isMap(doc.contents)) return { onSpan: undefined, onEntries };
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
