@@ -166,7 +166,8 @@ export function setScenarioValue(
 }
 
 // What #8 §6 works out from the Event, so a value for it goes on the Event's own fields.
-const FROM_EVENT = new Set([
+// The job resolver reads these `github.*` fields from the context it works out, too.
+export const FROM_EVENT: ReadonlySet<string> = new Set([
   "event_name",
   "ref",
   "ref_name",
@@ -189,8 +190,9 @@ const FROM_EVENT_PAYLOAD = [
  * Returns a copy of the Scenario with a `settle` path's value stored where #8 §5 puts it: a
  * job output as an Assumption, `vars.<NAME>` as a repository variable, `github.event.*` on
  * the main Event or the Follow-up event (a `.*.<field>` path takes a list), and the
- * `owner/repo`, actor login and event policy fields directly. Throws on a path no Scenario
- * input holds: `matrix.*`, `steps.*`, function results and what the Event works out.
+ * `owner/repo`, actor login, activity type and event policy fields directly. Throws on a
+ * path no Scenario input holds: `matrix.*`, `steps.*`, function results and what the Event
+ * works out.
  */
 export function settleValue(
   scenario: Scenario,
@@ -223,6 +225,7 @@ export function settleValue(
   if (path === "event.login" || path === "github.actor")
     return set([on, "login"], String(value));
   if (path === "repo.eventPolicy") return set(["repo", "eventPolicy"]);
+  if (path === "event.type") return set([on, "type"], String(value));
   if (context !== "github") refuse("no Scenario input holds it");
   if (FROM_EVENT.has(field!))
     refuse("it is worked out from the Event: set it on the Event");
@@ -243,4 +246,19 @@ export function settleValue(
     [on, "payload", ...rest.slice(0, star)],
     (value as unknown[]).map((v) => ({ [item!]: v })),
   );
+}
+
+const BLANK: Scenario = {
+  event: { name: "push" },
+  repo: { date: "2026-01-01" },
+};
+
+/** Whether settleValue takes the path: the core never offers another in `settle`. */
+export function settleable(path: string): boolean {
+  try {
+    settleValue(BLANK, path, []);
+    return true;
+  } catch {
+    return false;
+  }
 }

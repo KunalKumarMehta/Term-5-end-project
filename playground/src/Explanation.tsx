@@ -221,8 +221,11 @@ function Excerpt({
   );
 }
 
-/** Stores a settle path's value in the Scenario the Verdict belongs to. */
-export type OnSettle = (path: string, value: unknown) => void;
+/**
+ * Stores a settle path's value in the Scenario the Verdict belongs to; returns why it
+ * refused, leaving the Scenario unchanged.
+ */
+export type OnSettle = (path: string, value: unknown) => string | undefined;
 
 /** #9 §7: the box at the end of an Uncertain Verdict's Explanation. */
 function SettleIt({
@@ -280,8 +283,7 @@ function SettlePath({
   );
   const submit = () => {
     if (repository && !isOwnerRepo(text)) return setError(OWNER_REPO_ERROR);
-    setError(undefined);
-    onSettle(path, parse(path, text));
+    setError(onSettle(path, parse(path, text)));
   };
   const field = {
     id,
@@ -300,7 +302,7 @@ function SettlePath({
           <button
             key={literal(c)}
             type="button"
-            onClick={() => onSettle(path, list ? [c] : c)}
+            onClick={() => setError(onSettle(path, list ? [c] : c))}
           >
             {literal(c)}
           </button>

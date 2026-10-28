@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   PLATFORM_BASELINE,
+  isAccess,
   simulate,
   validateScenario,
   type ActorKind,
@@ -106,10 +107,7 @@ function show(args: string[], stdin: () => string): number {
   // `--flow access`: the token scope and secrets keys, plus an Unsupported Event's own line.
   const shown =
     flow === "access"
-      ? verdicts.filter(
-          (v) =>
-            v.key === "event" || / › (token\.[a-z-]+|secrets)$/.test(v.key),
-        )
+      ? verdicts.filter((v) => v.key === "event" || isAccess(v.key))
       : verdicts;
   // A broken file's Diagnostics print where its Verdicts would, in subject-key order.
   const lines = [

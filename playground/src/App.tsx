@@ -14,6 +14,7 @@ import {
   setScenarioValue,
   settleValue,
   simulate,
+  validateScenario,
   type ActorKind,
   type Diagnostic,
   type Scenario,
@@ -504,11 +505,21 @@ export function App() {
     );
   };
 
-  /** #9 §7: settles a value in Scenario `i` only, which then re-simulates. */
+  /**
+   * #9 §7: settles a value in Scenario `i` only, which then re-simulates. A refused path or a
+   * value the Scenario can't hold changes nothing and returns why, for the Settle it box.
+   */
   const settle = (i: number, path: string, value: unknown) => {
-    setScenarios((ss) =>
-      ss.map((s, j) => (j === i ? settleValue(s, path, value) : s)),
-    );
+    let next: Scenario;
+    try {
+      next = settleValue(scenarios[i]!, path, value);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    const problems = validateScenario(next);
+    if (problems.length > 0)
+      return `${path} can't be ${literal(value)}: ${problems[0]}`;
+    setScenarios((ss) => ss.map((s, j) => (j === i ? next : s)));
     if (i === 0) setTouched(true);
     setToast({
       id: Date.now(),
@@ -600,6 +611,13 @@ export function App() {
     return { label: labels[i]!, verdicts: runs[i] };
   });
 
+  // #12 addendum F: why a set with no Diagnostics-free caller has no Verdicts.
+  const diagnosed = new Set(diagnostics.map((d) => d.path));
+  const loaded = files.filter((f) => isLoaded(f.path));
+  const noVerdicts = loaded.every((f) => diagnosed.has(f.path))
+    ? "No Verdicts: every file has Diagnostics (see above)."
+    : `No Verdicts: every file${diagnosed.size > 0 ? " has Diagnostics (see above) or" : ""} is only a called workflow (on: workflow_call), and its jobs appear under the jobs that call it.`;
+
   let results: ReactNode;
   if (files.length === 0)
     results = (
@@ -611,7 +629,12 @@ export function App() {
   else if (compare)
     results =
       tab === "access" ? (
-        <Access columns={columns} open={open} onOpen={openExplanation} />
+        <Access
+          columns={columns}
+          open={open}
+          onOpen={openExplanation}
+          noVerdicts={noVerdicts}
+        />
       ) : (
         <Grid
           columns={columns}
@@ -635,10 +658,16 @@ export function App() {
   else if (verdicts === undefined) results = null;
   else if (unsupported)
     results = <UnsupportedPanel verdict={unsupported} {...linksFor(0)} />;
-  else if (verdicts.length === 0)
-    results = <p>No Verdicts: every file has Diagnostics (see above).</p>;
+  else if (verdicts.length === 0) results = <p>{noVerdicts}</p>;
   else if (tab === "access")
-    results = <Access columns={columns} open={open} onOpen={openExplanation} />;
+    results = (
+      <Access
+        columns={columns}
+        open={open}
+        onOpen={openExplanation}
+        noVerdicts={noVerdicts}
+      />
+    );
   else
     results = (
       <ul className="verdicts">

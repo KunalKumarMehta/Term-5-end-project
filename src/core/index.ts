@@ -13,6 +13,7 @@ import {
   calleeOnly,
   calls,
   contractError,
+  inputsOf,
 } from "./reusable";
 import {
   ASSUMED,
@@ -22,6 +23,7 @@ import {
 } from "./scenario";
 import { filterDiagnostics, trigger } from "./triggers";
 
+export { isAccess } from "./access";
 export { PLATFORM_BASELINE } from "./baseline";
 export type { Diagnostic, Span } from "./parser";
 export { RULES, type Rule } from "./rules";
@@ -278,7 +280,7 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
       const prefix = `${key} › ${job.id.value}/`;
       const caller = jobs.find((v) => v.key === `${key} › ${job.id.value}`)!;
       verdicts.push(
-        ...jobVerdicts(prefix, callee, caller, scenario),
+        ...jobVerdicts(prefix, callee, caller, scenario, inputsOf(job, callee)),
         ...accessVerdicts(prefix, callee, scenario, { parsed: file, job }),
       );
     }

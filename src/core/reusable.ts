@@ -117,3 +117,40 @@ export function contractError(
   }
   return undefined;
 }
+
+// What GitHub gives a declared input with no value and no default.
+const UNSET: Record<string, unknown> = { boolean: false, number: 0 };
+
+/**
+ * The callee's `inputs` context for one call, keyed by lower-cased name as GitHub matches
+ * them: the caller job's `with:` value, else the declared default, else the type's empty
+ * value. An expression stays `${{ }}` text for the job resolver to evaluate.
+ */
+export function inputsOf(
+  job: ReusableWorkflowJob,
+  callee: ParsedWorkflow,
+): Map<string, unknown> {
+  const given = new Map<string, unknown>();
+  const values = job["input-values"];
+  for (let i = 0; i < (values?.count ?? 0); i++) {
+    const { key, value } = values!.get(i);
+    const expression = (value as { expression?: string }).expression;
+    given.set(
+      key.toString().toLowerCase(),
+      expression === undefined
+        ? (value as { value?: unknown }).value
+        : `\${{ ${expression} }}`,
+    );
+  }
+  return new Map(
+    [...callee.callInputs].map(([name, declared]) => {
+      const lower = name.toLowerCase();
+      return [
+        lower,
+        given.has(lower)
+          ? given.get(lower)
+          : (declared.default ?? UNSET[String(declared.type)] ?? ""),
+      ];
+    }),
+  );
+}

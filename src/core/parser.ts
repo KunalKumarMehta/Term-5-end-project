@@ -79,6 +79,11 @@ export interface ParsedWorkflow {
   jobSpans: Map<string, JobSpans>;
   /** The workflow-level `permissions:` block. */
   permissions?: Permissions;
+  /**
+   * `on.workflow_call.inputs` as written, by declared name: the converter drops number and
+   * expression defaults.
+   */
+  callInputs: Map<string, { type?: unknown; default?: unknown }>;
 }
 
 /** A `permissions:` block as written: the parser drops it, so it's read from the YAML (PERM-11). */
@@ -151,6 +156,7 @@ export function parseWorkflowFile(path: string, text: string): ParsedWorkflow {
     onSpan: undefined,
     onEntries: new Map(),
     jobSpans: new Map(),
+    callInputs: new Map(),
   };
 
   // The workflow parser expands every alias with no limit (#2 risks), so stop a bomb first.
@@ -187,7 +193,24 @@ export function parseWorkflowFile(path: string, text: string): ParsedWorkflow {
       .replace(/ at line \d+, column \d+:$/, "");
     diagnostics.push({ ...where, message });
   }
-  return { ...indexOn(doc, span), diagnostics, events, jobs };
+  return {
+    ...indexOn(doc, span),
+    callInputs: callInputs(doc),
+    diagnostics,
+    events,
+    jobs,
+  };
+}
+
+function callInputs(doc: Document): ParsedWorkflow["callInputs"] {
+  const node = doc.getIn(["on", "workflow_call", "inputs"], true);
+  const inputs: unknown = isMap(node) ? node.toJS(doc) : {};
+  return new Map(
+    Object.entries(inputs as object).map(([k, v]) => [
+      k,
+      typeof v === "object" && v !== null ? v : {},
+    ]),
+  );
 }
 
 /** The positions of the keys in SCHEMA_LAG, as `line:col`. */
@@ -531,6 +554,10 @@ const stubs = (status: Status): FunctionDefinition[] => [
   stub("always", 0, () => new data.BooleanData(true)),
   stub("failure", 0, () => new data.BooleanData(status.failure)),
   stub("cancelled", 0, () => new data.BooleanData(false)),
+  // The files exist only in the run's workspace, so its result is a run-time value.
+  stub("hashFiles", 1, () => {
+    throw new RuntimeValueNeeded("hashFiles()");
+  }),
 ];
 
 function stub(
@@ -563,6 +590,25 @@ export function evaluateTemplate(
   return text.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, source: string) =>
     evaluate(source, contexts, status, resolve).coerceString(),
   );
+}
+
+/** A value written with `${{ }}`: one expression alone keeps its type, as GitHub's inputs do. */
+export function evaluateValue(
+  text: string,
+  contexts: Record<string, unknown>,
+  resolve: Resolve,
+): unknown {
+  const alone = /^\$\{\{([\s\S]*?)\}\}$/.exec(text.trim());
+  return alone && !alone[1]!.includes("}}")
+    ? plain(
+        evaluate(
+          alone[1]!,
+          contexts,
+          { success: true, failure: false },
+          resolve,
+        ),
+      )
+    : evaluateTemplate(text, contexts, resolve);
 }
 
 function evaluate(

@@ -148,3 +148,43 @@ test("owner/repo is checked wherever it's entered, a list path takes one value p
     "Settle itNothing you can enter decides this: the value exists only at run time.",
   );
 });
+
+test("a typed event policy that isn't allowed is refused inline and leaves the Scenario as it was", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on: pull_request_target\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n",
+  );
+  await page.getByLabel("Event name").fill("pull_request_target");
+  await page.getByLabel("Created before 2026-09-17").selectOption("no");
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  await listed(page, "ci.yml").click();
+  await expect(listed(page, "ci.yml")).toContainText("uncertain");
+
+  await settleIt(page).getByLabel("Another value").fill("maybe");
+  await settleIt(page).getByRole("button", { name: "Settle" }).click();
+  await expect(settleIt(page).getByRole("alert")).toContainText(
+    "repo.eventPolicy can't be 'maybe'",
+  );
+  await expect(listed(page, "ci.yml")).toContainText("uncertain");
+  await expect(page.getByText(/internal error/)).toHaveCount(0);
+
+  // Its job's box offers the same one-click values.
+  await listed(page, "ci.yml › a").click();
+  await settleIt(page).getByRole("button", { name: "'blocks'" }).click();
+  await expect(listed(page, "ci.yml")).toContainText("fails");
+});
+
+test("with only called workflows, the empty Verdict list says they appear under their callers", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on: workflow_call\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n",
+  );
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  await expect(results(page)).toContainText(
+    "No Verdicts: every file is only a called workflow (on: workflow_call), and its jobs appear under the jobs that call it.",
+  );
+});

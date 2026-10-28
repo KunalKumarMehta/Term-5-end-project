@@ -36,7 +36,7 @@ const globCauses = (pattern: string, spans: Span[]): Cause[] =>
     spans,
     inputs: [],
   }));
-const PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
+export const PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
 
 const settingsOf = (parsed: ParsedWorkflow, event: string): Settings => {
   const value = (parsed.events as Record<string, unknown>)[event];

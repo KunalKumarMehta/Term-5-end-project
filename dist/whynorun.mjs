@@ -8517,6 +8517,28 @@ function contractError(parsed, files) {
   }
   return void 0;
 }
+var UNSET = { boolean: false, number: 0 };
+function inputsOf(job, callee) {
+  const given = /* @__PURE__ */ new Map();
+  const values = job["input-values"];
+  for (let i = 0; i < (values?.count ?? 0); i++) {
+    const { key, value } = values.get(i);
+    const expression = value.expression;
+    given.set(
+      key.toString().toLowerCase(),
+      expression === void 0 ? value.value : `\${{ ${expression} }}`
+    );
+  }
+  return new Map(
+    [...callee.callInputs].map(([name2, declared]) => {
+      const lower = name2.toLowerCase();
+      return [
+        lower,
+        given.has(lower) ? given.get(lower) : declared.default ?? UNSET[String(declared.type)] ?? ""
+      ];
+    })
+  );
+}
 
 // src/core/access.ts
 var SCOPES = [
@@ -8661,6 +8683,7 @@ function passed(caller, passes2, run, actor, target = false) {
   return { ...run, causes: [ru1a, ...run.causes, ru1] };
 }
 var passes = (job) => job["inherit-secrets"] === true || job["secret-values"] !== void 0;
+var isAccess = (key) => / › (token\.[a-z-]+|secrets)$/.test(key);
 function accessVerdicts(prefix, parsed, scenario, caller) {
   const tokenDefault = scenario.repo.tokenDefault;
   const actor = scenario.event.actor;
@@ -14270,7 +14293,8 @@ function parseWorkflowFile(path, text) {
     jobs: [],
     onSpan: void 0,
     onEntries: /* @__PURE__ */ new Map(),
-    jobSpans: /* @__PURE__ */ new Map()
+    jobSpans: /* @__PURE__ */ new Map(),
+    callInputs: /* @__PURE__ */ new Map()
   };
   try {
     doc.toJS({ maxAliasCount: 1e3 });
@@ -14296,7 +14320,23 @@ function parseWorkflowFile(path, text) {
     const message = e.rawMessage.split("\n")[0].replace(/ at line \d+, column \d+:$/, "");
     diagnostics.push({ ...where, message });
   }
-  return { ...indexOn(doc, span), diagnostics, events, jobs };
+  return {
+    ...indexOn(doc, span),
+    callInputs: callInputs(doc),
+    diagnostics,
+    events,
+    jobs
+  };
+}
+function callInputs(doc) {
+  const node = doc.getIn(["on", "workflow_call", "inputs"], true);
+  const inputs = (0, import_yaml2.isMap)(node) ? node.toJS(doc) : {};
+  return new Map(
+    Object.entries(inputs).map(([k, v]) => [
+      k,
+      typeof v === "object" && v !== null ? v : {}
+    ])
+  );
 }
 function schemaLag(doc, span) {
   const found = /* @__PURE__ */ new Set();
@@ -14546,7 +14586,11 @@ var stubs = (status) => [
   stub("success", 0, () => new data_exports.BooleanData(status.success)),
   stub("always", 0, () => new data_exports.BooleanData(true)),
   stub("failure", 0, () => new data_exports.BooleanData(status.failure)),
-  stub("cancelled", 0, () => new data_exports.BooleanData(false))
+  stub("cancelled", 0, () => new data_exports.BooleanData(false)),
+  // The files exist only in the run's workspace, so its result is a run-time value.
+  stub("hashFiles", 1, () => {
+    throw new RuntimeValueNeeded("hashFiles()");
+  })
 ];
 function stub(name2, minArgs, call) {
   return { name: name2, minArgs, maxArgs: Number.MAX_SAFE_INTEGER, call };
@@ -14560,6 +14604,17 @@ function evaluateTemplate(text, contexts, resolve4) {
     /\$\{\{([\s\S]*?)\}\}/g,
     (_, source) => evaluate(source, contexts, status, resolve4).coerceString()
   );
+}
+function evaluateValue(text, contexts, resolve4) {
+  const alone = /^\$\{\{([\s\S]*?)\}\}$/.exec(text.trim());
+  return alone && !alone[1].includes("}}") ? plain(
+    evaluate(
+      alone[1],
+      contexts,
+      { success: true, failure: false },
+      resolve4
+    )
+  ) : evaluateTemplate(text, contexts, resolve4);
 }
 function evaluate(source, contexts, status, resolve4) {
   const funcs = stubs(status);
@@ -14576,509 +14631,6 @@ function evaluate(source, contexts, status, resolve4) {
     new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
     resolve4
   ).evaluate();
-}
-
-// src/core/jobs.ts
-var OTHER = "\0other";
-var cause2 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
-var FROM_EVENT = /* @__PURE__ */ new Set([
-  "event_name",
-  "ref",
-  "ref_name",
-  "head_ref",
-  "base_ref",
-  "sha",
-  "run_id"
-]);
-var ABSENT = {
-  push: ["pull_request"],
-  pull_request: ["head_commit"],
-  pull_request_target: ["head_commit"]
-};
-var RUN_TIME = /* @__PURE__ */ new Set([
-  "steps",
-  "env",
-  "matrix",
-  "runner",
-  "job",
-  "secrets",
-  "strategy"
-]);
-var PR_REF = /^refs\/pull\/[0-9]+\/(?:head|merge)$/;
-function covered(version) {
-  const m = /^v(\d+)(\.\d+){0,2}$/.exec(version);
-  if (!m) return void 0;
-  const major = Number(m[1]);
-  if (major < 2) return false;
-  return m[2] === void 0 || major >= 7 ? true : void 0;
-}
-function jobVerdicts(prefix, parsed, workflow, scenario) {
-  const key = (id) => prefix + id;
-  const ids = parsed.jobs.map((j) => j.id.value);
-  if (workflow.value === "uncertain")
-    return ids.map((id) => ({
-      key: key(id),
-      value: "uncertain",
-      causes: workflow.causes,
-      settle: workflow.settle
-    }));
-  if (workflow.value !== "runs")
-    return ids.map((id) => ({
-      key: key(id),
-      value: "no-run",
-      causes: workflow.causes
-    }));
-  const jobs = new Map(parsed.jobs.map((j) => [j.id.value, j]));
-  const spans = (id) => parsed.jobSpans.get(id) ?? {};
-  const assume = scenario.assume ?? {};
-  const fails = (id) => Object.hasOwn(assume, key(id)) && assume[key(id)] === "fails";
-  const github = githubContext(scenario);
-  const contexts = { github, vars: { ...scenario.repo.vars }, inputs: {} };
-  const { event, repo } = scenario;
-  const unsettled = /* @__PURE__ */ new Map();
-  const outputOf = (id, name2) => {
-    const outputs = jobs.get(id)?.outputs;
-    for (let i = 0; i < (outputs?.count ?? 0); i++) {
-      const { key: k, value } = outputs.get(i);
-      const declared = k.toString();
-      if (declared.toLowerCase() !== name2.toLowerCase()) continue;
-      const expression = value.expression;
-      return expression === void 0 ? { value: value.toString() } : { name: declared, expression };
-    }
-    return void 0;
-  };
-  const resolver = (id, needs, assigned, reads) => (path, compared) => {
-    const lack = (name2) => {
-      if (!assigned.has(name2)) return { needed: name2 };
-      note(name2, compared(), id);
-      reads.push(name2);
-      return { value: assigned.get(name2) };
-    };
-    const [context, ...rest] = path.map((s, i) => i ? s : s.toLowerCase());
-    if (context === "vars" && rest.length > 0) {
-      const vars = scenario.repo.vars ?? {};
-      const found = ownKey(vars, rest[0]);
-      if (found === void 0) return lack(`vars.${rest[0]}`);
-      return { value: rest.length === 1 ? vars[found] : null };
-    }
-    if (context === "needs" && rest.length === 3 && rest[1].toLowerCase() === "outputs") {
-      const need = needs.find(
-        ([id2]) => id2.toLowerCase() === rest[0].toLowerCase()
-      );
-      if (need?.[1].conclusion !== "success") return void 0;
-      const output = outputOf(need[0], rest[2]);
-      if (!output || "value" in output) return output;
-      const name2 = `${key(need[0])} \u203A outputs.${output.name}`;
-      return Object.hasOwn(assume, name2) ? { value: assume[name2] } : lack(name2);
-    }
-    if (context !== "github" || rest.length === 0) return void 0;
-    const field = rest[0].toLowerCase();
-    if (field === "repository" || field === "repository_owner") {
-      const got = repo.repository === void 0 ? lack("repo.repository") : { value: repo.repository };
-      if (!("value" in got) || field === "repository") return got;
-      return { value: String(got.value).split("/")[0] };
-    }
-    if (field === "actor" || field === "triggering_actor")
-      return event.actor === "dependabot" ? { value: "dependabot[bot]" } : event.login === void 0 ? lack("event.login") : { value: event.login };
-    if (FROM_EVENT.has(field)) return void 0;
-    if (field !== "event") return lack(`github.${rest[0]}`);
-    if (rest.length === 1) return void 0;
-    const star = rest.indexOf("*");
-    const walk2 = rest.slice(1, star < 0 ? void 0 : star);
-    let at = github.event;
-    for (const seg of walk2) {
-      if (!isObj(at)) return { value: null };
-      const found = ownKey(at, seg);
-      if (found === void 0) {
-        if (ABSENT[event.name]?.includes(walk2[0].toLowerCase()))
-          return { value: null };
-        if (walk2.join(".").toLowerCase() === "pull_request.head.repo.full_name")
-          return lack("repo.repository");
-        return lack(`github.event.${rest.slice(1).join(".")}`);
-      }
-      at = at[found];
-    }
-    return star < 0 ? { value: at } : void 0;
-  };
-  const candidatesOf = (name2, compared) => {
-    if (name2.includes(".*.")) return [...compared.map((c) => [c]), [], [OTHER]];
-    const nonEmpty = name2 === "repo.repository" || name2 === "event.login";
-    return [
-      .../* @__PURE__ */ new Set([
-        ...compared,
-        // Either side of a number an expression compares with.
-        ...compared.flatMap(
-          (c) => typeof c === "number" ? [c - 1, c + 1] : []
-        ),
-        ...nonEmpty ? [] : [""],
-        OTHER
-      ])
-    ];
-  };
-  let grown;
-  const note = (name2, compared, id) => {
-    const known = unsettled.get(name2);
-    if (!known) {
-      unsettled.set(name2, {
-        rule: "WN-4",
-        span: spans(id).if ?? spans(id).id,
-        job: id,
-        // Other github.* fields exist only at run time.
-        settle: !name2.startsWith("github.") || name2.startsWith("github.event."),
-        compared,
-        candidates: candidatesOf(name2, compared)
-      });
-      return;
-    }
-    const fresh = compared.filter((c) => !known.compared.includes(c));
-    if (known.rule !== "WN-4" || fresh.length === 0) return;
-    known.compared = [...known.compared, ...fresh];
-    known.candidates = candidatesOf(name2, known.compared);
-    grown = true;
-  };
-  const ask = (name2, u, assigned) => {
-    if (!assigned.has(name2)) {
-      unsettled.set(name2, u);
-      throw new RuntimeValueNeeded(name2);
-    }
-    return assigned.get(name2) === true;
-  };
-  const refused = (id, needs, assigned, reads) => {
-    if (event.name !== "pull_request_target" || event.actor !== "fork")
-      return void 0;
-    const found = [];
-    for (const [i, step] of spans(id).checkouts?.entries() ?? []) {
-      if (step.optOut || !step.ref && !step.repository) continue;
-      const target = headOf(id, i, step, needs, assigned, reads);
-      if (!target) continue;
-      const version = covered(step.version);
-      if (version === false) continue;
-      const pinned = [];
-      if (version === void 0) {
-        const name2 = `CO-3 ${id} ${i}`;
-        const yes = ask(
-          name2,
-          {
-            rule: "CO-3",
-            span: step.uses,
-            job: id,
-            settle: false,
-            compared: [],
-            candidates: [false, true],
-            after: [cause2("CO-1", step.uses)]
-          },
-          assigned
-        );
-        reads.push(name2);
-        if (!yes) continue;
-        pinned.push(cause2("CO-3", step.uses));
-      }
-      const co1 = {
-        rule: "CO-1",
-        spans: [step.uses, target],
-        inputs: [{ path: "event.actor", value: event.actor }]
-      };
-      if (!step.continueOnError)
-        return { fails: true, parts: [co1, ...pinned, ...found] };
-      found.push(cause2("CO-6", step.continueOnError), co1, ...pinned);
-    }
-    return found.length > 0 ? { fails: false, parts: found } : void 0;
-  };
-  const headOf = (id, i, step, needs, assigned, reads) => {
-    const base = resolver(id, needs, assigned, reads);
-    const context = {
-      ...contexts,
-      needs: Object.fromEntries(
-        needs.map(([n, o]) => [n, { result: o.conclusion, outputs: {} }])
-      ),
-      ...Object.fromEntries([...RUN_TIME].map((c) => [c, {}]))
-    };
-    const pr = github.event.pull_request;
-    const heads = [pr.head.sha, pr.merge_commit_sha];
-    const value = (input) => {
-      try {
-        return evaluateTemplate(
-          input.text,
-          context,
-          (path, compared) => RUN_TIME.has(path[0].toLowerCase()) ? { needed: path.join(".") } : base(path, compared)
-        );
-      } catch (e) {
-        if (!(e instanceof RuntimeValueNeeded)) throw e;
-        const name2 = `CO-5 ${id} ${i}`;
-        const context2 = e.needed.split(".")[0];
-        const yes = ask(
-          name2,
-          {
-            rule: "WN-4",
-            span: input.span,
-            job: id,
-            settle: !RUN_TIME.has(context2) && (context2 !== "github" || e.needed.startsWith("github.event.")),
-            compared: [],
-            candidates: [false, true],
-            path: e.needed,
-            after: [cause2("CO-5", input.span), cause2("CO-1", step.uses)]
-          },
-          assigned
-        );
-        reads.push(name2);
-        return yes ? void 0 : null;
-      }
-    };
-    for (const [input, matches] of [
-      [
-        step.repository,
-        (v) => v.toLowerCase() === pr.head.repo.full_name?.toLowerCase()
-      ],
-      [step.ref, (v) => PR_REF.test(v) || heads.includes(v)]
-    ]) {
-      if (!input) continue;
-      const v = value(input);
-      if (v === void 0 || v !== null && matches(v)) return input.span;
-    }
-    return void 0;
-  };
-  const evaluate3 = (assigned) => {
-    const memo = /* @__PURE__ */ new Map();
-    const outcome = (id) => {
-      const known = memo.get(id);
-      if (known) return known;
-      const job = jobs.get(id);
-      const at = spans(id);
-      const needs = (job.needs ?? []).map((n) => [
-        n.value,
-        outcome(n.value)
-      ]);
-      const results = (all2) => Object.fromEntries(
-        needs.map(([n, o]) => [
-          n,
-          { result: all2 ?? o.conclusion, outputs: {} }
-        ])
-      );
-      const failed = needs.some(([, o]) => o.failed);
-      const blocker = needs.find(([, o]) => o.conclusion !== "success")?.[0];
-      const reads = [];
-      let runs;
-      try {
-        runs = evaluateCondition(
-          job.if.expression,
-          { ...contexts, needs: results() },
-          { success: !blocker, failure: failed },
-          resolver(id, needs, assigned, reads)
-        );
-      } catch (e) {
-        if (e instanceof RuntimeValueNeeded) note(e.needed, e.compared, id);
-        throw e;
-      }
-      let result;
-      if (runs && fails(id)) {
-        let succeeds = false;
-        if (at.continueOnError) {
-          const name2 = `JG-11 ${id}`;
-          if (!assigned.has(name2)) {
-            unsettled.set(name2, {
-              rule: "JG-11",
-              span: at.continueOnError,
-              job: id,
-              settle: false,
-              compared: [],
-              candidates: [false, true]
-            });
-            throw new RuntimeValueNeeded(name2);
-          }
-          reads.push(name2);
-          succeeds = assigned.get(name2) === true;
-        }
-        result = {
-          value: "fails",
-          parts: [cause2("WN-1", at.id, [{ path: key(id), value: "fails" }])],
-          conclusion: succeeds ? "success" : "failure",
-          failed: failed || !succeeds
-        };
-      } else if (runs) {
-        const refusal = refused(id, needs, assigned, reads);
-        result = refusal?.fails ? {
-          value: "fails",
-          parts: refusal.parts,
-          conclusion: "failure",
-          failed: true
-        } : {
-          value: "runs",
-          parts: [
-            // A dependent that runs past a failed or skipped need does so by its status function.
-            ...blocker ? [cause2("JG-1", at.if ?? at.id), { from: blocker }] : [],
-            ...refusal?.parts ?? [],
-            cause2("WN-2", at.id)
-          ],
-          conclusion: "success",
-          failed
-        };
-      } else {
-        let byNeeds = false;
-        if (blocker)
-          try {
-            byNeeds = evaluateCondition(
-              job.if.expression,
-              { ...contexts, needs: results("success") },
-              { success: true, failure: false },
-              resolver(id, needs, assigned, [])
-            );
-          } catch (e) {
-            if (!(e instanceof RuntimeValueNeeded)) throw e;
-            byNeeds = true;
-          }
-        const implicit = at.if && job.if.expression.startsWith("success() && (");
-        result = {
-          value: "skipped",
-          parts: byNeeds ? [
-            { from: blocker },
-            cause2("JG-1", at.needs ?? at.id),
-            ...implicit ? [cause2("JG-2", at.if)] : []
-          ] : [cause2("JG-3", at.if ?? at.id)],
-          conclusion: "skipped",
-          failed
-        };
-      }
-      const all = [...needs.flatMap(([, o]) => o.reads), ...reads];
-      const done = { ...result, reads: [...new Set(all)] };
-      memo.set(id, done);
-      return done;
-    };
-    return new Map(ids.map((id) => [id, outcome(id)]));
-  };
-  let branches = [];
-  const explore = (assigned) => {
-    try {
-      branches.push(evaluate3(assigned));
-    } catch (e) {
-      if (!(e instanceof RuntimeValueNeeded)) throw e;
-      for (const value of unsettled.get(e.needed).candidates)
-        explore(new Map(assigned).set(e.needed, value));
-    }
-  };
-  do {
-    grown = false;
-    branches = [];
-    explore(/* @__PURE__ */ new Map());
-  } while (grown);
-  const finals = /* @__PURE__ */ new Map();
-  const final = (id) => {
-    const done = finals.get(id);
-    if (done) return done;
-    const results = branches.map((b) => b.get(id));
-    const values = [...new Set(results.map((r) => r.value))];
-    let verdict;
-    if (values.length === 1) {
-      const linked = (r) => r.parts.some((p) => "from" in p);
-      const chosen = linked(results[0]) ? results[0] : results.find(linked) ?? results[0];
-      verdict = {
-        key: key(id),
-        value: values[0],
-        causes: chosen.parts.flatMap(
-          (p) => "from" in p ? final(p.from).causes : [p]
-        )
-      };
-    } else {
-      const reads = [...new Set(results.flatMap((r) => r.reads))].map(
-        (name2) => [name2, unsettled.get(name2)]
-      );
-      const causes = reads.flatMap(([, u]) => [
-        cause2(u.rule, u.span),
-        ...u.after ?? []
-      ]);
-      if (reads[0][1].job !== id && spans(id).needs)
-        causes.push(cause2("JG-1", spans(id).needs));
-      const settle = reads.filter(([, u]) => u.settle);
-      verdict = {
-        key: key(id),
-        value: "uncertain",
-        causes,
-        ...values.length <= 3 && { possible: values.sort() },
-        settle: settle.map(([name2, u]) => u.path ?? name2),
-        ...settle.length > 0 && {
-          hints: settle.map(([name2, u]) => ({
-            path: u.path ?? name2,
-            text: hint(u.path ?? name2),
-            candidates: u.compared
-          }))
-        }
-      };
-    }
-    finals.set(id, verdict);
-    return verdict;
-  };
-  const hint = (path) => {
-    const output = path.startsWith(prefix) ? /^(.+) › outputs\.(.+)$/.exec(path.slice(prefix.length)) : null;
-    if (output) {
-      const [, id, name2] = output;
-      const step = /\bsteps\.([\w-]+)\.outputs\b/i.exec(
-        outputOf(id, name2).expression ?? ""
-      )?.[1];
-      const job = jobs.get(id);
-      const uses = step && job?.type === "job" ? job.steps.find((s) => s.id === step && "uses" in s) : void 0;
-      const action = uses && "uses" in uses ? uses.uses.value.replace(/@.*$/, "") : "";
-      return action ? `output \`${name2}\` of \`${action}\` in job \`${id}\`` : `output \`${name2}\` of job \`${id}\``;
-    }
-    if (path.startsWith("vars."))
-      return `repository variable \`${path.slice(5)}\``;
-    if (path === "repo.repository")
-      return "the `owner/repo` Repo fact, which `github.repository` reads";
-    if (path === "event.login")
-      return "the actor login on the Event, which `github.actor` reads";
-    return `\`${path}\` on the Event`;
-  };
-  return ids.map(final);
-}
-var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-function ownKey(obj, name2) {
-  if (Object.hasOwn(obj, name2)) return name2;
-  const lower = name2.toLowerCase();
-  return Object.keys(obj).find((k) => k.toLowerCase() === lower);
-}
-function merge(base, over) {
-  const out = Object.assign(
-    /* @__PURE__ */ Object.create(null),
-    isObj(base) ? base : {}
-  );
-  for (const [k, v] of Object.entries(over))
-    out[k] = isObj(v) ? merge(out[k], v) : v;
-  return out;
-}
-function githubContext({ event, repo }) {
-  const pr = event.name === "pull_request" || event.name === "pull_request_target";
-  const given = event.ref ?? repo.defaultBranch;
-  const ref = given.startsWith("refs/") ? given : `refs/heads/${given}`;
-  const short = (r) => r.replace(/^refs\/(heads|tags)\//, "");
-  const fork = event.actor === "fork";
-  const computed = pr ? {
-    pull_request: {
-      head: {
-        sha: "<head_sha>",
-        ref: short(ref),
-        repo: {
-          fork,
-          // Left out while unknown, so reading it needs the owner/repo fact.
-          ...(fork || repo.repository !== void 0) && {
-            full_name: fork ? "<fork>" : repo.repository
-          }
-        }
-      },
-      merge_commit_sha: "<merge_commit_sha>"
-    }
-  } : { head_commit: { message: event.message } };
-  if (event.type !== void 0) computed.action = event.type;
-  const merged = event.name === "pull_request";
-  return {
-    event_name: event.name,
-    event: merge(event.payload, computed),
-    ref: merged ? "refs/pull/<number>/merge" : pr ? `refs/heads/${repo.defaultBranch}` : ref,
-    ref_name: merged ? "<number>/merge" : pr ? repo.defaultBranch : short(ref),
-    ...pr && {
-      head_ref: short(ref),
-      base_ref: event.base ?? repo.defaultBranch
-    },
-    sha: merged ? "<merge_commit_sha>" : "<sha>",
-    run_id: "<run_id>"
-  };
 }
 
 // src/core/generated/validate-scenario.ts
@@ -15895,6 +15447,95 @@ function walk(node, path) {
   }
   return typeof at === "object" && at !== null ? at : void 0;
 }
+var REFUSED = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
+function setScenarioValue(scenario, path, value) {
+  if (path.length === 0 || path.some((seg) => REFUSED.has(seg)))
+    throw new Error(`refused Scenario path: ${path.join(".")}`);
+  const copy = JSON.parse(JSON.stringify(scenario));
+  let node = copy;
+  for (const seg of path.slice(0, -1)) {
+    const next = Object.hasOwn(node, seg) ? node[seg] : void 0;
+    node = typeof next === "object" && next !== null ? next : node[seg] = /* @__PURE__ */ Object.create(null);
+  }
+  node[path.at(-1)] = value;
+  return copy;
+}
+var FROM_EVENT = /* @__PURE__ */ new Set([
+  "event_name",
+  "ref",
+  "ref_name",
+  "base_ref",
+  "head_ref",
+  "sha",
+  "run_id"
+]);
+var FROM_EVENT_PAYLOAD = [
+  "action",
+  "pull_request.head.sha",
+  "pull_request.head.ref",
+  "pull_request.head.repo.fork",
+  "pull_request.head.repo.full_name",
+  "pull_request.merge_commit_sha",
+  "head_commit.message"
+];
+function settleValue(scenario, path, value, on = "event") {
+  const refuse = (why) => {
+    throw new Error(`refused \`${path}\`: ${why}`);
+  };
+  const set = (at, v = value) => setScenarioValue(scenario, at, v);
+  if (/[()]/.test(path))
+    refuse("function results such as hashFiles() exist only at run time");
+  if (path.includes(" \u203A ")) {
+    if (!/^[^›]+ › [^›]+ › outputs\.[^›]+$/.test(path))
+      refuse("only a job's output is settled by its key");
+    return set(["assume", path], String(value));
+  }
+  const segs = path.split(".");
+  const [context, field] = segs;
+  if (context === "matrix") refuse("there's no matrix expansion");
+  if (context === "steps")
+    refuse("step outputs exist only at run time: settle the job's output");
+  if (context === "vars") {
+    if (segs.length !== 2) refuse("a repository variable is `vars.<NAME>`");
+    return set(["repo", "vars", field], String(value));
+  }
+  if (path === "repo.repository" || path === "github.repository")
+    return set(["repo", "repository"], String(value));
+  if (path === "event.login" || path === "github.actor")
+    return set([on, "login"], String(value));
+  if (path === "repo.eventPolicy") return set(["repo", "eventPolicy"]);
+  if (path === "event.type") return set([on, "type"], String(value));
+  if (context !== "github") refuse("no Scenario input holds it");
+  if (FROM_EVENT.has(field))
+    refuse("it is worked out from the Event: set it on the Event");
+  if (field !== "event" || segs.length < 3)
+    refuse("it exists only at run time");
+  const rest = segs.slice(2);
+  const joined = rest.join(".");
+  if (FROM_EVENT_PAYLOAD.some((p) => p === joined || p.startsWith(`${joined}.`)))
+    refuse("it is worked out from the Event: set it on the Event");
+  const star = rest.indexOf("*");
+  if (star < 0) return set([on, "payload", ...rest]);
+  const item = rest[star + 1];
+  if (star !== rest.length - 2 || !Array.isArray(value) || REFUSED.has(item))
+    refuse("a `.*.<field>` path takes a list of values");
+  return set(
+    [on, "payload", ...rest.slice(0, star)],
+    value.map((v) => ({ [item]: v }))
+  );
+}
+var BLANK = {
+  event: { name: "push" },
+  repo: { date: "2026-01-01" }
+};
+function settleable(path) {
+  try {
+    settleValue(BLANK, path, []);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // src/core/workflowpattern.ts
 var quoteMeta = (s) => s.replace(/[\\.+*?()|[\]{}^$]/g, "\\$&");
@@ -16277,6 +15918,553 @@ function byRef(parsed, event, defaultBranch) {
       ...globCauses(patterns[base.by] ?? "", at(base.by)),
       ...after
     ]
+  };
+}
+
+// src/core/jobs.ts
+var OTHER = "\0other";
+var cause2 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
+var ABSENT = {
+  push: ["pull_request", "action"],
+  pull_request: ["head_commit"],
+  pull_request_target: ["head_commit"]
+};
+var RUN_TIME = /* @__PURE__ */ new Set([
+  "steps",
+  "env",
+  "matrix",
+  "runner",
+  "job",
+  "secrets",
+  "strategy"
+]);
+var PR_REF = /^refs\/pull\/[0-9]+\/(?:head|merge)$/;
+function covered(version) {
+  const m = /^v(\d+)(\.\d+){0,2}$/.exec(version);
+  if (!m) return void 0;
+  const major = Number(m[1]);
+  if (major < 2) return false;
+  return m[2] === void 0 || major >= 7 ? true : void 0;
+}
+function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
+  const key = (id) => prefix + id;
+  const ids = parsed.jobs.map((j) => j.id.value);
+  if (workflow.value === "uncertain" && workflow.possible?.includes("runs") !== false)
+    return jobVerdicts(
+      prefix,
+      parsed,
+      { ...workflow, value: "runs" },
+      scenario,
+      inputs
+    ).map((v) => {
+      const own = v.value === "uncertain";
+      const values = own ? v.possible : [v.value];
+      const settle = [
+        .../* @__PURE__ */ new Set([...workflow.settle ?? [], ...v.settle ?? []])
+      ];
+      const hints = [
+        ...workflow.hints ?? [],
+        ...own ? v.hints ?? [] : []
+      ];
+      return {
+        key: v.key,
+        value: "uncertain",
+        causes: [...workflow.causes, ...own ? v.causes : []],
+        ...values && values.length < 3 && {
+          possible: [.../* @__PURE__ */ new Set(["no-run", ...values])].sort()
+        },
+        settle,
+        ...settle.length > 0 && {
+          hints: hints.filter(
+            (h, i) => hints.findIndex((o) => o.path === h.path) === i
+          )
+        }
+      };
+    });
+  if (workflow.value !== "runs")
+    return ids.map((id) => ({
+      key: key(id),
+      value: "no-run",
+      causes: workflow.causes
+    }));
+  const jobs = new Map(parsed.jobs.map((j) => [j.id.value, j]));
+  const spans = (id) => parsed.jobSpans.get(id) ?? {};
+  const assume = scenario.assume ?? {};
+  const fails = (id) => Object.hasOwn(assume, key(id)) && assume[key(id)] === "fails";
+  const github = githubContext(scenario);
+  const contexts = { github, vars: { ...scenario.repo.vars }, inputs: {} };
+  const { event, repo } = scenario;
+  const unsettled = /* @__PURE__ */ new Map();
+  const listed = parsed.events[event.name]?.types;
+  const activityTypes = PR_DEFAULT_TYPES.filter(
+    (t) => !Array.isArray(listed) || listed.length === 0 || listed.includes(t)
+  );
+  const outputOf = (id, name2) => {
+    const outputs = jobs.get(id)?.outputs;
+    for (let i = 0; i < (outputs?.count ?? 0); i++) {
+      const { key: k, value } = outputs.get(i);
+      const declared = k.toString();
+      if (declared.toLowerCase() !== name2.toLowerCase()) continue;
+      const expression = value.expression;
+      return expression === void 0 ? { value: value.toString() } : { name: declared, expression };
+    }
+    return void 0;
+  };
+  const resolver = (id, needs, assigned, reads) => (path, compared) => {
+    const lack = (name2) => {
+      if (!assigned.has(name2)) return { needed: name2 };
+      note(name2, compared(), id);
+      reads.push(name2);
+      return { value: assigned.get(name2) };
+    };
+    const [context, ...rest] = path.map((s, i) => i ? s : s.toLowerCase());
+    if (context === "inputs" && inputs && rest.length > 0) {
+      const name2 = rest[0].toLowerCase();
+      const given = inputs.get(name2);
+      if (rest.length > 1 || given === void 0) return { value: null };
+      if (typeof given !== "string" || !given.includes("${{"))
+        return { value: given };
+      let runTime = false;
+      const self = resolver(id, needs, assigned, reads);
+      const value = evaluateValue(
+        given,
+        { ...contexts, inputs: {}, needs: {}, matrix: {}, strategy: {} },
+        (p, inner) => {
+          if (["github", "vars"].includes(p[0].toLowerCase()))
+            return self(p, () => [...inner(), ...compared()]);
+          runTime = true;
+          return { value: null };
+        }
+      );
+      return runTime ? lack(`inputs.${name2}`) : { value };
+    }
+    if (context === "vars" && rest.length > 0) {
+      const vars = scenario.repo.vars ?? {};
+      const found = ownKey(vars, rest[0]);
+      if (found === void 0) return lack(`vars.${rest[0]}`);
+      return { value: rest.length === 1 ? vars[found] : null };
+    }
+    if (context === "needs" && rest.length === 3 && rest[1].toLowerCase() === "outputs") {
+      const need = needs.find(
+        ([id2]) => id2.toLowerCase() === rest[0].toLowerCase()
+      );
+      if (need?.[1].conclusion !== "success") return void 0;
+      const output = outputOf(need[0], rest[2]);
+      if (!output || "value" in output) return output;
+      const name2 = `${key(need[0])} \u203A outputs.${output.name}`;
+      return Object.hasOwn(assume, name2) ? { value: assume[name2] } : lack(name2);
+    }
+    if (context !== "github" || rest.length === 0) return void 0;
+    const field = rest[0].toLowerCase();
+    if (field === "repository" || field === "repository_owner") {
+      const got = repo.repository === void 0 ? lack("repo.repository") : { value: repo.repository };
+      if (!("value" in got) || field === "repository") return got;
+      return { value: String(got.value).split("/")[0] };
+    }
+    if (field === "actor" || field === "triggering_actor")
+      return event.actor === "dependabot" ? { value: "dependabot[bot]" } : event.login === void 0 ? lack("event.login") : { value: event.login };
+    if (FROM_EVENT.has(field)) return void 0;
+    if (field !== "event") return lack(`github.${rest[0]}`);
+    if (rest.length === 1) return void 0;
+    const star = rest.indexOf("*");
+    const walk2 = rest.slice(1, star < 0 ? void 0 : star);
+    let at = github.event;
+    for (const seg of walk2) {
+      if (!isObj(at)) return { value: null };
+      const found = ownKey(at, seg);
+      if (found === void 0) {
+        if (ABSENT[event.name]?.includes(walk2[0].toLowerCase()))
+          return { value: null };
+        if (at === github.event && seg.toLowerCase() === "action")
+          return walk2.length > 1 ? { value: null } : lack("event.type");
+        if (walk2.join(".").toLowerCase() === "pull_request.head.repo.full_name")
+          return lack("repo.repository");
+        return lack(`github.event.${rest.slice(1).join(".")}`);
+      }
+      at = at[found];
+    }
+    return star < 0 ? { value: at } : void 0;
+  };
+  const candidatesOf = (name2, compared) => {
+    if (name2.includes(".*.")) return [...compared.map((c) => [c]), [], [OTHER]];
+    if (name2 === "event.type") return activityTypes;
+    const nonEmpty = name2 === "repo.repository" || name2 === "event.login";
+    return [
+      .../* @__PURE__ */ new Set([
+        ...compared,
+        // Either side of a number an expression compares with.
+        ...compared.flatMap(
+          (c) => typeof c === "number" ? [c - 1, c + 1] : []
+        ),
+        ...nonEmpty ? [] : [""],
+        OTHER
+      ])
+    ];
+  };
+  let grown;
+  const note = (name2, compared, id) => {
+    const known = unsettled.get(name2);
+    if (!known) {
+      unsettled.set(name2, {
+        rule: "WN-4",
+        span: spans(id).if ?? spans(id).id,
+        job: id,
+        settle: settleable(name2),
+        compared,
+        candidates: candidatesOf(name2, compared)
+      });
+      return;
+    }
+    const fresh = compared.filter((c) => !known.compared.includes(c));
+    if (known.rule !== "WN-4" || fresh.length === 0) return;
+    known.compared = [...known.compared, ...fresh];
+    known.candidates = candidatesOf(name2, known.compared);
+    grown = true;
+  };
+  const ask = (name2, u, assigned) => {
+    if (!assigned.has(name2)) {
+      unsettled.set(name2, u);
+      throw new RuntimeValueNeeded(name2);
+    }
+    return assigned.get(name2) === true;
+  };
+  const refused = (id, needs, assigned, reads) => {
+    if (event.name !== "pull_request_target" || event.actor !== "fork")
+      return void 0;
+    const found = [];
+    for (const [i, step] of spans(id).checkouts?.entries() ?? []) {
+      if (step.optOut || !step.ref && !step.repository) continue;
+      const target = headOf(id, i, step, needs, assigned, reads);
+      if (!target) continue;
+      const version = covered(step.version);
+      if (version === false) continue;
+      const pinned = [];
+      if (version === void 0) {
+        const name2 = `CO-3 ${id} ${i}`;
+        const yes = ask(
+          name2,
+          {
+            rule: "CO-3",
+            span: step.uses,
+            job: id,
+            settle: false,
+            compared: [],
+            candidates: [false, true],
+            after: [cause2("CO-1", step.uses)]
+          },
+          assigned
+        );
+        reads.push(name2);
+        if (!yes) continue;
+        pinned.push(cause2("CO-3", step.uses));
+      }
+      const co1 = {
+        rule: "CO-1",
+        spans: [step.uses, target],
+        inputs: [{ path: "event.actor", value: event.actor }]
+      };
+      if (!step.continueOnError)
+        return { fails: true, parts: [co1, ...pinned, ...found] };
+      found.push(cause2("CO-6", step.continueOnError), co1, ...pinned);
+    }
+    return found.length > 0 ? { fails: false, parts: found } : void 0;
+  };
+  const headOf = (id, i, step, needs, assigned, reads) => {
+    const base = resolver(id, needs, assigned, reads);
+    const context = {
+      ...contexts,
+      needs: Object.fromEntries(
+        needs.map(([n, o]) => [n, { result: o.conclusion, outputs: {} }])
+      ),
+      ...Object.fromEntries([...RUN_TIME].map((c) => [c, {}]))
+    };
+    const pr = github.event.pull_request;
+    const heads = [pr.head.sha, pr.merge_commit_sha];
+    const value = (input) => {
+      try {
+        return evaluateTemplate(
+          input.text,
+          context,
+          (path, compared) => RUN_TIME.has(path[0].toLowerCase()) ? { needed: path.join(".") } : base(path, compared)
+        );
+      } catch (e) {
+        if (!(e instanceof RuntimeValueNeeded)) throw e;
+        const name2 = `CO-5 ${id} ${i}`;
+        const yes = ask(
+          name2,
+          {
+            rule: "WN-4",
+            span: input.span,
+            job: id,
+            settle: settleable(e.needed),
+            compared: [],
+            candidates: [false, true],
+            path: e.needed,
+            after: [cause2("CO-5", input.span), cause2("CO-1", step.uses)]
+          },
+          assigned
+        );
+        reads.push(name2);
+        return yes ? void 0 : null;
+      }
+    };
+    for (const [input, matches] of [
+      [
+        step.repository,
+        (v) => v.toLowerCase() === pr.head.repo.full_name?.toLowerCase()
+      ],
+      [step.ref, (v) => PR_REF.test(v) || heads.includes(v)]
+    ]) {
+      if (!input) continue;
+      const v = value(input);
+      if (v === void 0 || v !== null && matches(v)) return input.span;
+    }
+    return void 0;
+  };
+  const evaluate3 = (assigned) => {
+    const memo = /* @__PURE__ */ new Map();
+    const outcome = (id) => {
+      const known = memo.get(id);
+      if (known) return known;
+      const job = jobs.get(id);
+      const at = spans(id);
+      const needs = (job.needs ?? []).map((n) => [
+        n.value,
+        outcome(n.value)
+      ]);
+      const results = (all2) => Object.fromEntries(
+        needs.map(([n, o]) => [
+          n,
+          { result: all2 ?? o.conclusion, outputs: {} }
+        ])
+      );
+      const failed = needs.some(([, o]) => o.failed);
+      const blocker = needs.find(([, o]) => o.conclusion !== "success")?.[0];
+      const reads = [];
+      let runs;
+      try {
+        runs = evaluateCondition(
+          job.if.expression,
+          { ...contexts, needs: results() },
+          { success: !blocker, failure: failed },
+          resolver(id, needs, assigned, reads)
+        );
+      } catch (e) {
+        if (e instanceof RuntimeValueNeeded) note(e.needed, e.compared, id);
+        throw e;
+      }
+      let result;
+      if (runs && fails(id)) {
+        let succeeds = false;
+        if (at.continueOnError) {
+          const name2 = `JG-11 ${id}`;
+          if (!assigned.has(name2)) {
+            unsettled.set(name2, {
+              rule: "JG-11",
+              span: at.continueOnError,
+              job: id,
+              settle: false,
+              compared: [],
+              candidates: [false, true]
+            });
+            throw new RuntimeValueNeeded(name2);
+          }
+          reads.push(name2);
+          succeeds = assigned.get(name2) === true;
+        }
+        result = {
+          value: "fails",
+          parts: [cause2("WN-1", at.id, [{ path: key(id), value: "fails" }])],
+          conclusion: succeeds ? "success" : "failure",
+          failed: failed || !succeeds
+        };
+      } else if (runs) {
+        const refusal = refused(id, needs, assigned, reads);
+        result = refusal?.fails ? {
+          value: "fails",
+          parts: refusal.parts,
+          conclusion: "failure",
+          failed: true
+        } : {
+          value: "runs",
+          parts: [
+            // A dependent that runs past a failed or skipped need does so by its status function.
+            ...blocker ? [cause2("JG-1", at.if ?? at.id), { from: blocker }] : [],
+            ...refusal?.parts ?? [],
+            cause2("WN-2", at.id)
+          ],
+          conclusion: "success",
+          failed
+        };
+      } else {
+        let byNeeds = false;
+        if (blocker)
+          try {
+            byNeeds = evaluateCondition(
+              job.if.expression,
+              { ...contexts, needs: results("success") },
+              { success: true, failure: false },
+              resolver(id, needs, assigned, [])
+            );
+          } catch (e) {
+            if (!(e instanceof RuntimeValueNeeded)) throw e;
+            byNeeds = true;
+          }
+        const implicit = at.if && job.if.expression.startsWith("success() && (");
+        result = {
+          value: "skipped",
+          parts: byNeeds ? [
+            { from: blocker },
+            cause2("JG-1", at.needs ?? at.id),
+            ...implicit ? [cause2("JG-2", at.if)] : []
+          ] : [cause2("JG-3", at.if ?? at.id)],
+          conclusion: "skipped",
+          failed
+        };
+      }
+      const all = [...needs.flatMap(([, o]) => o.reads), ...reads];
+      const done = { ...result, reads: [...new Set(all)] };
+      memo.set(id, done);
+      return done;
+    };
+    return new Map(ids.map((id) => [id, outcome(id)]));
+  };
+  let branches = [];
+  const explore = (assigned) => {
+    try {
+      branches.push(evaluate3(assigned));
+    } catch (e) {
+      if (!(e instanceof RuntimeValueNeeded)) throw e;
+      for (const value of unsettled.get(e.needed).candidates)
+        explore(new Map(assigned).set(e.needed, value));
+    }
+  };
+  do {
+    grown = false;
+    branches = [];
+    explore(/* @__PURE__ */ new Map());
+  } while (grown);
+  const finals = /* @__PURE__ */ new Map();
+  const final = (id) => {
+    const done = finals.get(id);
+    if (done) return done;
+    const results = branches.map((b) => b.get(id));
+    const values = [...new Set(results.map((r) => r.value))];
+    let verdict;
+    if (values.length === 1) {
+      const linked = (r) => r.parts.some((p) => "from" in p);
+      const chosen = linked(results[0]) ? results[0] : results.find(linked) ?? results[0];
+      verdict = {
+        key: key(id),
+        value: values[0],
+        causes: chosen.parts.flatMap(
+          (p) => "from" in p ? final(p.from).causes : [p]
+        )
+      };
+    } else {
+      const reads = [...new Set(results.flatMap((r) => r.reads))].map(
+        (name2) => [name2, unsettled.get(name2)]
+      );
+      const causes = reads.flatMap(([, u]) => [
+        cause2(u.rule, u.span),
+        ...u.after ?? []
+      ]);
+      if (reads[0][1].job !== id && spans(id).needs)
+        causes.push(cause2("JG-1", spans(id).needs));
+      const settle = reads.filter(([, u]) => u.settle);
+      verdict = {
+        key: key(id),
+        value: "uncertain",
+        causes,
+        ...values.length <= 3 && { possible: values.sort() },
+        settle: settle.map(([name2, u]) => u.path ?? name2),
+        ...settle.length > 0 && {
+          hints: settle.map(([name2, u]) => ({
+            path: u.path ?? name2,
+            text: hint(u.path ?? name2),
+            // The activity types the run may have, not the ones that would skip it.
+            candidates: name2 === "event.type" ? activityTypes : u.compared
+          }))
+        }
+      };
+    }
+    finals.set(id, verdict);
+    return verdict;
+  };
+  const hint = (path) => {
+    const output = path.startsWith(prefix) ? /^(.+) › outputs\.(.+)$/.exec(path.slice(prefix.length)) : null;
+    if (output) {
+      const [, id, name2] = output;
+      const step = /\bsteps\.([\w-]+)\.outputs\b/i.exec(
+        outputOf(id, name2).expression ?? ""
+      )?.[1];
+      const job = jobs.get(id);
+      const uses = step && job?.type === "job" ? job.steps.find((s) => s.id === step && "uses" in s) : void 0;
+      const action = uses && "uses" in uses ? uses.uses.value.replace(/@.*$/, "") : "";
+      return action ? `output \`${name2}\` of \`${action}\` in job \`${id}\`` : `output \`${name2}\` of job \`${id}\``;
+    }
+    if (path.startsWith("vars."))
+      return `repository variable \`${path.slice(5)}\``;
+    if (path === "repo.repository")
+      return "the `owner/repo` Repo fact, which `github.repository` reads";
+    if (path === "event.login")
+      return "the actor login on the Event, which `github.actor` reads";
+    if (path === "event.type")
+      return "the activity type on the Event, which `github.event.action` reads";
+    return `\`${path}\` on the Event`;
+  };
+  return ids.map(final);
+}
+var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+function ownKey(obj, name2) {
+  if (Object.hasOwn(obj, name2)) return name2;
+  const lower = name2.toLowerCase();
+  return Object.keys(obj).find((k) => k.toLowerCase() === lower);
+}
+function merge(base, over) {
+  const out = Object.assign(
+    /* @__PURE__ */ Object.create(null),
+    isObj(base) ? base : {}
+  );
+  for (const [k, v] of Object.entries(over))
+    out[k] = isObj(v) ? merge(out[k], v) : v;
+  return out;
+}
+function githubContext({ event, repo }) {
+  const pr = event.name === "pull_request" || event.name === "pull_request_target";
+  const given = event.ref ?? repo.defaultBranch;
+  const ref = given.startsWith("refs/") ? given : `refs/heads/${given}`;
+  const short = (r) => r.replace(/^refs\/(heads|tags)\//, "");
+  const fork = event.actor === "fork";
+  const computed = pr ? {
+    pull_request: {
+      head: {
+        sha: "<head_sha>",
+        ref: short(ref),
+        repo: {
+          fork,
+          // Left out while unknown, so reading it needs the owner/repo fact.
+          ...(fork || repo.repository !== void 0) && {
+            full_name: fork ? "<fork>" : repo.repository
+          }
+        }
+      },
+      merge_commit_sha: "<merge_commit_sha>"
+    }
+  } : { head_commit: { message: event.message } };
+  if (event.type !== void 0) computed.action = event.type;
+  const merged = event.name === "pull_request";
+  return {
+    event_name: event.name,
+    event: merge(event.payload, computed),
+    ref: merged ? "refs/pull/<number>/merge" : pr ? `refs/heads/${repo.defaultBranch}` : ref,
+    ref_name: merged ? "<number>/merge" : pr ? repo.defaultBranch : short(ref),
+    ...pr && {
+      head_ref: short(ref),
+      base_ref: event.base ?? repo.defaultBranch
+    },
+    sha: merged ? "<merge_commit_sha>" : "<sha>",
+    run_id: "<run_id>"
   };
 }
 
@@ -16849,7 +17037,7 @@ function evaluate2(parsed, scenario) {
       const prefix = `${key} \u203A ${job.id.value}/`;
       const caller = jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`);
       verdicts.push(
-        ...jobVerdicts(prefix, callee, caller, scenario),
+        ...jobVerdicts(prefix, callee, caller, scenario, inputsOf(job, callee)),
         ...accessVerdicts(prefix, callee, scenario, { parsed: file, job })
       );
     }
@@ -17039,9 +17227,7 @@ function show(args, stdin) {
     text: readFileSync(join2(dir, e.name), "utf8")
   }));
   const { verdicts, diagnostics } = simulate(files, scenario);
-  const shown = flow === "access" ? verdicts.filter(
-    (v) => v.key === "event" || / › (token\.[a-z-]+|secrets)$/.test(v.key)
-  ) : verdicts;
+  const shown = flow === "access" ? verdicts.filter((v) => v.key === "event" || isAccess(v.key)) : verdicts;
   const lines = [
     ...shown.map((v) => {
       const root = v.causes[0];
