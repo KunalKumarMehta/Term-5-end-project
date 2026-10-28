@@ -3,6 +3,7 @@
 With no backend, a share link carries its whole state after the `#`. GitHub Pages never sees that part. The state is compressed with deflate-raw and written as `#v1.<unpadded base64url>.0`. The trailing `.0` stops GitHub's autolinker from dropping a last character that is punctuation. It also lets a link that lost its tail report that it was cut off.
 
 What the link holds depends on the Workflow set:
+
 - **An unedited import** travels as `{owner, repo, ref, sha}` and is imported again when the link is opened.
 - **Anything else** travels as its files.
 

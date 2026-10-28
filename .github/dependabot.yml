@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      # Bumped together; each bump gets a hand review (#13 §11).
+      parser:
+        patterns:
+          - "@actions/workflow-parser"
+          - "@actions/expressions"
+      dev:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@actions/workflow-parser"
+          - "@actions/expressions"

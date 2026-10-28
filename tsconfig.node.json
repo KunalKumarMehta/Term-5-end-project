@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": [
+    "*.config.ts",
+    "playground/vite.config.ts",
+    "playground/e2e",
+    "src"
+  ]
+}

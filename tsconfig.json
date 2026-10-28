@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "src/core" },
+    { "path": "src/cli" },
+    { "path": "playground" },
+    { "path": "tsconfig.node.json" }
+  ]
+}

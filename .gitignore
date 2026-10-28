@@ -8,3 +8,7 @@ END_TERM_PROJECT_GUIDELINES.md
 !.env.example
 node_modules/
 .DS_Store
+playground/dist/
+test-results/
+playwright-report/
+*.tsbuildinfo
