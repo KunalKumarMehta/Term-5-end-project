@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 
 const workflow = readFileSync(
@@ -102,4 +103,18 @@ test("the notes are exactly the tagged version's CHANGELOG section", () => {
 test("an empty or missing CHANGELOG section fails verify", () => {
   expect(extractNotes("v0.3.0").status).toBe(1);
   expect(extractNotes("v0.4.0").status).toBe(1);
+});
+
+test("the real CHANGELOG has notes for package.json's version", () => {
+  const { version } = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+  const dir = mkdtempSync(join(tmpdir(), "whynorun-release-"));
+  const result = runStep(
+    "Extract the release notes",
+    { GITHUB_REF_NAME: `v${version}`, RUNNER_TEMP: dir },
+    fileURLToPath(new URL("..", import.meta.url)),
+  );
+  expect(result.status, result.stdout).toBe(0);
+  expect(readFileSync(join(dir, "notes.md"), "utf8")).toContain("### Added");
 });
