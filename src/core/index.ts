@@ -1,8 +1,8 @@
 import { accessVerdicts } from "./access";
 import { checkVerdicts, type Producer } from "./checks";
 import { jobVerdicts } from "./jobs";
+import { namesOf } from "./names";
 import {
-  checkName,
   parseWorkflowFile,
   type Diagnostic,
   type ParsedWorkflow,
@@ -248,6 +248,16 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts: Verdict[] = [];
   const producers: Producer[] = [];
+  // With the merge queue on, a pull request's merge group runs a synthesised merge_group
+  // Event, sharing the main Event's entries (#6, #8 §5).
+  const queue: Scenario | undefined =
+    repo.mergeQueue && event.name !== "push"
+      ? {
+          ...scenario,
+          event: { ...event, name: "merge_group", type: "checks_requested" },
+        }
+      : undefined;
+  const queued: Producer[] = [];
   for (const { key, bytes, ...file } of parsed) {
     // A file GitHub would reject gets no Verdicts; a callee's jobs appear under its callers.
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
@@ -270,32 +280,67 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
               files,
             ),
           };
-    const jobs = jobVerdicts(`${key} › `, file, workflow, scenario);
-    for (const job of file.jobs)
-      producers.push({
-        name: checkName(job),
-        job: jobs.find((v) => v.key === `${key} › ${job.id.value}`)!,
+    // The file's jobs, then a local callee's, one level deep, under the caller job that ran
+    // them (#6).
+    const stage = (workflow: Verdict, scenario: Scenario) => {
+      const jobs = jobVerdicts(`${key} › `, file, workflow, scenario);
+      for (const { job, path } of calls(file)) {
+        const callee =
+          path === undefined ? undefined : files.get(calleeKey(path)!);
+        if (!callee) continue;
+        const caller = jobs.find((v) => v.key === `${key} › ${job.id.value}`)!;
+        jobs.push(
+          ...jobVerdicts(
+            `${key} › ${job.id.value}/`,
+            callee,
+            caller,
+            scenario,
+            inputsOf(job, callee),
+          ),
+        );
+      }
+      return jobs;
+    };
+    const producing = (jobs: Verdict[], workflow: Verdict): Producer[] =>
+      namesOf(file, files).map((named) => ({
+        ...named,
+        job: jobs.find((v) => v.key === `${key} › ${named.id}`)!,
         workflow,
-      });
+      }));
+    const jobs = stage(workflow, scenario);
+    producers.push(...producing(jobs, workflow));
+    if (queue) {
+      const grouped: Verdict =
+        bytes > MAX_BYTES
+          ? workflow
+          : {
+              key,
+              ...called(
+                trigger(file, queue.event, repo.defaultBranch!),
+                file,
+                files,
+              ),
+            };
+      queued.push(...producing(stage(grouped, queue), grouped));
+    }
     verdicts.push(
       workflow,
       ...jobs,
       ...accessVerdicts(`${key} › `, file, scenario),
     );
-    // A local callee's jobs, one level deep, under the caller job that ran them (#6).
     for (const { job, path } of calls(file)) {
       const callee =
         path === undefined ? undefined : files.get(calleeKey(path)!);
       if (!callee) continue;
-      const prefix = `${key} › ${job.id.value}/`;
-      const caller = jobs.find((v) => v.key === `${key} › ${job.id.value}`)!;
       verdicts.push(
-        ...jobVerdicts(prefix, callee, caller, scenario, inputsOf(job, callee)),
-        ...accessVerdicts(prefix, callee, scenario, { parsed: file, job }),
+        ...accessVerdicts(`${key} › ${job.id.value}/`, callee, scenario, {
+          parsed: file,
+          job,
+        }),
       );
     }
   }
-  verdicts.push(...checkVerdicts(producers, scenario));
+  verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;
 }
 

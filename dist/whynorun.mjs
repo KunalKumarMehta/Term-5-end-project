@@ -775,8 +775,8 @@ var require_createNode = __commonJS({
     var defaultTagPrefix = "tag:yaml.org,2002:";
     function findTagObject(value, tagName, tags) {
       if (tagName) {
-        const match = tags.filter((t) => t.tag === tagName);
-        const tagObj = match.find((t) => !t.format) ?? match[0];
+        const match2 = tags.filter((t) => t.tag === tagName);
+        const tagObj = match2.find((t) => !t.format) ?? match2[0];
         if (!tagObj)
           throw new Error(`Tag ${tagName} not found`);
         return tagObj;
@@ -1471,21 +1471,21 @@ var require_stringify = __commonJS({
     }
     function getTagObject(tags, item) {
       if (item.tag) {
-        const match = tags.filter((t) => t.tag === item.tag);
-        if (match.length > 0)
-          return match.find((t) => t.format === item.format) ?? match[0];
+        const match2 = tags.filter((t) => t.tag === item.tag);
+        if (match2.length > 0)
+          return match2.find((t) => t.format === item.format) ?? match2[0];
       }
       let tagObj = void 0;
       let obj;
       if (identity.isScalar(item)) {
         obj = item.value;
-        let match = tags.filter((t) => t.identify?.(obj));
-        if (match.length > 1) {
-          const testMatch = match.filter((t) => t.test);
+        let match2 = tags.filter((t) => t.identify?.(obj));
+        if (match2.length > 1) {
+          const testMatch = match2.filter((t) => t.test);
           if (testMatch.length > 0)
-            match = testMatch;
+            match2 = testMatch;
         }
-        tagObj = match.find((t) => t.format === item.format) ?? match.find((t) => !t.format);
+        tagObj = match2.find((t) => t.format === item.format) ?? match2.find((t) => !t.format);
       } else {
         obj = item;
         tagObj = tags.find((t) => t.nodeClass && obj instanceof t.nodeClass);
@@ -3127,13 +3127,13 @@ var require_timestamp = __commonJS({
       // assumed to be 00:00:00Z (start of day, UTC).
       test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
       resolve(str) {
-        const match = str.match(timestamp.test);
-        if (!match)
+        const match2 = str.match(timestamp.test);
+        if (!match2)
           throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
-        const [, year, month, day, hour, minute, second] = match.map(Number);
-        const millisec = match[7] ? Number((match[7] + "00").substr(1, 3)) : 0;
+        const [, year, month, day, hour, minute, second] = match2.map(Number);
+        const millisec = match2[7] ? Number((match2[7] + "00").substr(1, 3)) : 0;
         let date = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
-        const tz = match[8];
+        const tz = match2[8];
         if (tz && tz !== "Z") {
           let d = parseSexagesimal(tz, false);
           if (Math.abs(d) < 30)
@@ -4706,8 +4706,8 @@ var require_resolve_flow_scalar = __commonJS({
     }
     function unfoldLines(source) {
       const line = /(.*?)\r?\n/sy;
-      let match = line.exec(source);
-      if (!match)
+      let match2 = line.exec(source);
+      if (!match2)
         return source;
       let trimEnd, trimBoth;
       try {
@@ -4717,11 +4717,11 @@ var require_resolve_flow_scalar = __commonJS({
         trimEnd = /[ \t]+$/;
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
-      let res = match[1].replace(trimEnd, "");
+      let res = match2[1].replace(trimEnd, "");
       let sep = " ";
       let pos = line.lastIndex;
-      while (match = line.exec(source)) {
-        const lm = match[1].replace(trimBoth, "");
+      while (match2 = line.exec(source)) {
+        const lm = match2[1].replace(trimBoth, "");
         if (lm === "") {
           if (sep === "\n")
             res += sep;
@@ -4735,8 +4735,8 @@ var require_resolve_flow_scalar = __commonJS({
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
-      match = last.exec(source);
-      return res + sep + (match?.[1] ?? "");
+      match2 = last.exec(source);
+      return res + sep + (match2?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -7791,10 +7791,10 @@ var require_cronstrue = __commonJS({
                     });
                     var evaluationIndex = 0;
                     var description = this.getSegmentDescription(expression, this.i18n.everyHour(), function(s) {
-                      var match = rangeEndValues.find(function(r) {
+                      var match2 = rangeEndValues.find(function(r) {
                         return r.value === s && r.index === evaluationIndex;
                       });
-                      var isRangeEndWithNonZeroMinute = match && _this.expressionParts[1] !== "0";
+                      var isRangeEndWithNonZeroMinute = match2 && _this.expressionParts[1] !== "0";
                       evaluationIndex++;
                       return isRangeEndWithNonZeroMinute ? _this.formatTime(s, "59", "") : _this.formatTime(s, "0", "");
                     }, function(s) {
@@ -8957,7 +8957,7 @@ function trigger(parsed, event, defaultBranch) {
   if (decided.value === "skipped") return decided;
   const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
   const message = event.message;
-  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
+  if (result.value === "skipped" || event.name === "pull_request_target" || event.name === "merge_group" || message === void 0 || !SKIP.test(message))
     return result;
   const entry = parsed.onEntries.get(event.name);
   return {
@@ -8993,6 +8993,7 @@ function shaLike(result, event, defaultBranch) {
 }
 function byPaths(parsed, event, decided) {
   const name2 = event.name;
+  if (name2 === "merge_group") return decided;
   const settings = settingsOf(parsed, name2);
   const has = (key2) => Object.hasOwn(settings, key2);
   const key = has("paths") ? "paths" : "paths-ignore";
@@ -9066,7 +9067,7 @@ function byRef(parsed, event, defaultBranch) {
     const span = parsed.onEntries.get(key2);
     return span ? [span] : [];
   };
-  const named = { path: "event.name", value: name2 };
+  const named2 = { path: "event.name", value: name2 };
   if (!Object.hasOwn(parsed.events, name2))
     return {
       value: "skipped",
@@ -9074,19 +9075,20 @@ function byRef(parsed, event, defaultBranch) {
         {
           rule: "EV-0",
           spans: parsed.onSpan ? [parsed.onSpan] : [],
-          inputs: [named]
+          inputs: [named2]
         }
       ]
     };
   const settings = settingsOf(parsed, name2);
   const has = (key2) => Object.hasOwn(settings, key2);
-  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
+  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named2] };
   const after = [];
   if (name2 !== "push") {
-    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
-    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
+    const defaults = name2 === "merge_group" ? ["checks_requested"] : PR_DEFAULT_TYPES;
+    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : defaults;
+    const wanted = event.type === void 0 ? defaults : [event.type];
     const typed = {
-      rule: "EV-1",
+      rule: name2 === "merge_group" ? "EV-6" : "EV-1",
       spans: spans(has("types") ? `${name2}.types` : name2),
       inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
     };
@@ -9097,7 +9099,8 @@ function byRef(parsed, event, defaultBranch) {
       after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
   }
   const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
-  after.push({ rule: copy, spans: [], inputs: [named] });
+  if (name2 !== "merge_group")
+    after.push({ rule: copy, spans: [], inputs: [named2] });
   const given = name2 === "push" ? event.ref : event.base;
   const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
   const ref = given ?? `refs/heads/${defaultBranch}`;
@@ -9123,7 +9126,7 @@ function byRef(parsed, event, defaultBranch) {
   const base = decide(patterns);
   const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
   const matched = {
-    rule: name2 === "push" ? "BR-3" : "BR-2",
+    rule: name2 === "push" ? "BR-3" : name2 === "merge_group" ? "BR-10" : "BR-2",
     spans: spans(`${name2}.${key}`),
     inputs: [input]
   };
@@ -9163,7 +9166,14 @@ var cause2 = (rule, inputs = []) => ({
   spans: [],
   inputs
 });
-function checkVerdicts(producers, { event, repo }) {
+var BLOCKING = [
+  "fails and blocks merge",
+  "pending and blocks merge",
+  "uncertain",
+  "may not block",
+  "passes"
+];
+function checkVerdicts(producers, { event, repo }, queued) {
   const names = [...new Set(repo.required)];
   if (event.name !== "push" && event.type !== void 0 && !PR_DEFAULT_TYPES.includes(event.type))
     return names.map((name2) => ({
@@ -9172,17 +9182,60 @@ function checkVerdicts(producers, { event, repo }) {
       causes: [cause2("WN-3", [{ path: "event.type", value: event.type }])]
     }));
   const notes = repo.strict ? [cause2("RQ-10", [{ path: "repo.strict", value: true }])] : [];
-  return names.map((name2) => ({
-    key: `check \u203A ${name2}`,
-    ...badge(name2, producers, notes)
-  }));
+  const unqueued = cause2("RQ-6", [{ path: "repo.mergeQueue", value: true }]);
+  return names.map((name2) => {
+    const pr = named(name2, producers, notes, cause2("RQ-1"));
+    const queue = queued && named(name2, queued, notes, unqueued);
+    return {
+      key: `check \u203A ${name2}`,
+      ...queue && BLOCKING.indexOf(queue.value) < BLOCKING.indexOf(pr.value) ? queue : pr
+    };
+  });
 }
-function badge(name2, producers, notes) {
+function match(producers, name2) {
+  const known = producers.filter((p) => p.name !== void 0);
+  return known.find((p) => p.name === name2 && p.via !== "remote") ?? known.find(
+    (p) => p.via === "remote" ? name2.startsWith(`${p.name} / `) : p.via === "matrix" && name2.startsWith(`${p.name} (`)
+  );
+}
+function named(name2, producers, notes, skipped) {
+  const computed = badge(name2, producers, notes, skipped);
+  const producer = match(producers, name2);
+  if (producer?.via === "remote" && producer.job.value === "runs")
+    return {
+      value: "uncertain",
+      causes: [
+        { rule: "WN-6", spans: [producer.uses], inputs: [] },
+        ...producer.job.causes,
+        ...notes
+      ],
+      settle: []
+    };
+  if (producer?.via === "callee")
+    return {
+      ...computed,
+      causes: [computed.causes[0], cause2("RQ-9"), ...computed.causes.slice(1)]
+    };
+  if (producer?.via === "matrix")
+    return {
+      value: "uncertain",
+      causes: [
+        cause2("RQ-9", [{ path: "repo.required", value: name2 }]),
+        ...computed.causes
+      ],
+      possible: [
+        .../* @__PURE__ */ new Set([computed.value, "pending and blocks merge"])
+      ].sort(),
+      settle: []
+    };
+  return computed;
+}
+function badge(name2, producers, notes, skipped) {
   const pending = (...causes) => ({
     value: "pending and blocks merge",
     causes: [...causes, cause2("RQ-8"), ...notes]
   });
-  const producer = producers.find((p) => p.name === name2);
+  const producer = match(producers, name2);
   if (!producer)
     return pending(cause2("RQ-0", [{ path: "repo.required", value: name2 }]));
   const { job, workflow } = producer;
@@ -9197,7 +9250,7 @@ function badge(name2, producers, notes) {
       causes: [cause2("RQ-2"), ...job.causes, ...notes]
     };
   if (job.value === "no-run" && workflow.value === "skipped")
-    return pending(cause2("RQ-1"), ...job.causes);
+    return pending(skipped, ...job.causes);
   return {
     value: "uncertain",
     causes: [...job.causes, ...notes],
@@ -11501,11 +11554,11 @@ function splitAllowedContext(allowedContext) {
   const functions = [];
   if (allowedContext.length > 0) {
     for (const contextItem of allowedContext) {
-      const match = contextItem.match(FUNCTION_REGEXP);
-      if (match) {
-        const functionName = match[1];
-        const minParameters = Number.parseInt(match[2]);
-        const maxParametersRaw = match[3];
+      const match2 = contextItem.match(FUNCTION_REGEXP);
+      if (match2) {
+        const functionName = match2[1];
+        const minParameters = Number.parseInt(match2[2]);
+        const maxParametersRaw = match2[3];
         const maxParameters = maxParametersRaw === MAX_CONSTANT ? Number.MAX_SAFE_INTEGER : Number.parseInt(maxParametersRaw);
         functions.push({
           name: functionName,
@@ -16518,6 +16571,29 @@ function githubContext({ event, repo }) {
   };
 }
 
+// src/core/names.ts
+var isMatrix = (job) => job.strategy !== void 0 && (!isMapping(job.strategy) || job.strategy.find("matrix") !== void 0);
+function namesOf(file, files) {
+  const called2 = new Map(calls(file).map((c) => [c.job.id.value, c]));
+  return file.jobs.flatMap((job) => {
+    const id = job.id.value;
+    const name2 = checkName(job);
+    const call = called2.get(id);
+    if (!call) return [{ id, name: name2, ...isMatrix(job) && { via: "matrix" } }];
+    if (call.path === void 0)
+      return [{ id, name: name2, via: "remote", uses: call.span }];
+    const callee = files.get(calleeKey(call.path) ?? "");
+    return (callee?.jobs ?? []).map((inner) => {
+      const own = checkName(inner);
+      return {
+        id: `${id}/${inner.id.value}`,
+        name: name2 === void 0 || own === void 0 ? void 0 : `${name2} / ${own}`,
+        via: isMatrix(inner) ? "matrix" : "callee"
+      };
+    });
+  });
+}
+
 // src/core/baseline.ts
 var PLATFORM_BASELINE = [
   "Actions are enabled for the repo, org and enterprise, and the GitHub workflow isn't disabled (PL-1, PL-2).",
@@ -16550,6 +16626,12 @@ var rows = [
     text: "The parser accepts a `stacked` activity type for `pull_request`, but GitHub's docs don't list it: valid syntax with undocumented meaning.",
     url: "https://github.com/actions/languageservices/blob/4043eda/workflow-parser/src/workflow-v1.0.json",
     confidence: "Med"
+  },
+  {
+    id: "EV-6",
+    text: "`merge_group` has one activity type, `checks_requested`: a merge queue asks for its required checks on the merge group's commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High"
   },
   {
     id: "BR-1",
@@ -16598,6 +16680,12 @@ var rows = [
     text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
     confidence: "Med"
+  },
+  {
+    id: "BR-10",
+    text: "For `merge_group`, `branches` and `branches-ignore` match the merge group's target branch. `merge_group` has no path filters.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High"
   },
   {
     id: "GL-1",
@@ -16936,8 +17024,20 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "RQ-6",
+    text: "With a merge queue, a required check must also be reported for the merge group: a GitHub workflow without a `merge_group` trigger never reports it there, so the merge waits and fails.",
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
     id: "RQ-8",
     text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-9",
+    text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
     url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
     confidence: "High"
   },
@@ -17095,6 +17195,11 @@ function evaluate2(parsed, scenario) {
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts = [];
   const producers = [];
+  const queue = repo.mergeQueue && event.name !== "push" ? {
+    ...scenario,
+    event: { ...event, name: "merge_group", type: "checks_requested" }
+  } : void 0;
+  const queued = [];
   for (const { key, bytes, ...file } of parsed) {
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
     const workflow = bytes > MAX_BYTES ? {
@@ -17112,13 +17217,42 @@ function evaluate2(parsed, scenario) {
         files
       )
     };
-    const jobs = jobVerdicts(`${key} \u203A `, file, workflow, scenario);
-    for (const job of file.jobs)
-      producers.push({
-        name: checkName(job),
-        job: jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`),
-        workflow
-      });
+    const stage = (workflow2, scenario2) => {
+      const jobs2 = jobVerdicts(`${key} \u203A `, file, workflow2, scenario2);
+      for (const { job, path } of calls(file)) {
+        const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
+        if (!callee) continue;
+        const caller = jobs2.find((v) => v.key === `${key} \u203A ${job.id.value}`);
+        jobs2.push(
+          ...jobVerdicts(
+            `${key} \u203A ${job.id.value}/`,
+            callee,
+            caller,
+            scenario2,
+            inputsOf(job, callee)
+          )
+        );
+      }
+      return jobs2;
+    };
+    const producing = (jobs2, workflow2) => namesOf(file, files).map((named2) => ({
+      ...named2,
+      job: jobs2.find((v) => v.key === `${key} \u203A ${named2.id}`),
+      workflow: workflow2
+    }));
+    const jobs = stage(workflow, scenario);
+    producers.push(...producing(jobs, workflow));
+    if (queue) {
+      const grouped = bytes > MAX_BYTES ? workflow : {
+        key,
+        ...called(
+          trigger(file, queue.event, repo.defaultBranch),
+          file,
+          files
+        )
+      };
+      queued.push(...producing(stage(grouped, queue), grouped));
+    }
     verdicts.push(
       workflow,
       ...jobs,
@@ -17127,15 +17261,15 @@ function evaluate2(parsed, scenario) {
     for (const { job, path } of calls(file)) {
       const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
       if (!callee) continue;
-      const prefix = `${key} \u203A ${job.id.value}/`;
-      const caller = jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`);
       verdicts.push(
-        ...jobVerdicts(prefix, callee, caller, scenario, inputsOf(job, callee)),
-        ...accessVerdicts(prefix, callee, scenario, { parsed: file, job })
+        ...accessVerdicts(`${key} \u203A ${job.id.value}/`, callee, scenario, {
+          parsed: file,
+          job
+        })
       );
     }
   }
-  verdicts.push(...checkVerdicts(producers, scenario));
+  verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;
 }
 function called(verdict, file, files) {

@@ -3073,6 +3073,178 @@ test("a check › <name> key is never a candidate for an Assumption on a job", (
   ]);
 });
 
+// Merge queue (#73): a synthesised merge_group stage joins the PR stage.
+
+const queued = { repo: { date, required: ["build"], mergeQueue: true } };
+
+test("with the merge queue on and no GitHub workflow triggered by merge_group, a check that passes on the PR is Pending and blocks merge, root RQ-6, quoting RQ-8", () => {
+  const check = byKey(
+    simulate(example, { ...actorPr("member"), ...queued }).verdicts,
+    "check › build",
+  )!;
+  expect(check.value).toBe("pending and blocks merge");
+  const rules = check.causes.map((c) => c.rule);
+  expect(rules.slice(0, 2)).toEqual(["RQ-6", "EV-0"]);
+  expect(rules).toContain("RQ-8");
+  expect(check.causes[0]!.inputs).toEqual([
+    { path: "repo.mergeQueue", value: true },
+  ]);
+  // With the merge queue off, only the PR stage counts.
+  expect(
+    byKey(
+      simulate(example, { ...actorPr("member"), ...required }).verdicts,
+      "check › build",
+    )!.value,
+  ).toBe("passes");
+});
+
+// on: pull_request with a paths: filter, and merge_group with the given settings.
+const queue = (settings: string) =>
+  wf(
+    "ci.yml",
+    `on:\n  pull_request:\n    paths: ["src/**"]\n  merge_group:\n${settings}jobs:\n${job("build")}`,
+  );
+
+test("merge_group matches its branch filter against the merge group's target branch and has no path filters (BR-10)", () => {
+  const files = [queue("    branches: [main]\n")];
+  const check = (extra: object) =>
+    checksOf(files, { ...actorPr("member", extra), ...queued }).build!;
+  expect(check({})).toEqual(["passes", "RQ-4", "WN-2"]);
+  // Target branch release: the merge_group stage is skipped by its branch filter.
+  const release = check({ base: "release" });
+  expect(release.slice(0, 3)).toEqual([
+    "pending and blocks merge",
+    "RQ-6",
+    "BR-4",
+  ]);
+  expect(release).toContain("BR-10");
+  expect(release).toContain("RQ-8");
+});
+
+test("the merge-queue stage's activity type is checks_requested, merge_group's only one (EV-6), whatever the PR's; GitHub rejects a file listing another", () => {
+  const files = [
+    queue("    types: [checks_requested]\n    branches: [main]\n"),
+  ];
+  const release = checksOf(files, {
+    ...actorPr("member", { type: "synchronize", base: "release" }),
+    ...queued,
+  }).build!;
+  expect(release.slice(0, 5)).toEqual([
+    "pending and blocks merge",
+    "RQ-6",
+    "BR-4",
+    "BR-10",
+    "EV-6",
+  ]);
+  expect(
+    simulate([queue("    types: [destroyed]\n")], {
+      ...actorPr("member"),
+      ...queued,
+    }).diagnostics.map((d) => [d.line, d.message]),
+  ).toEqual([[5, "Unexpected value 'destroyed'"]]);
+});
+
+test("the badge is the more blocking of the PR and merge-queue stages: a docs-only PR is Pending on its paths: filter (RQ-1) though the queue stage, with no path filters, passes", () => {
+  expect(
+    checksOf([queue("")], {
+      ...actorPr("member", { changed: ["docs/README.md"] }),
+      ...queued,
+    }).build!.slice(0, 3),
+  ).toEqual(["pending and blocks merge", "RQ-1", "PA-2"]);
+  // A push has no merge-queue stage.
+  expect(
+    checksOf([chain], {
+      ...push,
+      repo: { date, required: ["test"], mergeQueue: true },
+    }).test,
+  ).toEqual(["passes", "RQ-4", "WN-2"]);
+});
+
+// Reusable and matrix check names (#73): RQ-9 revised, #8 §10.
+
+const library = wf(
+  "lib.yml",
+  "on: workflow_call\njobs:\n" +
+    job("test") +
+    job("e2e", "    if: github.event_name == 'push'\n"),
+);
+const callerOf = (call: string, on = "pull_request") =>
+  wf("ci.yml", `on: ${on}\njobs:\n  call:\n${call}`);
+
+test("a local reusable job's check is <caller job name> / <callee job name> and gets its computed badge, citing RQ-9; the caller job reports no check of its own", () => {
+  const files = [callerOf("    uses: ./.github/workflows/lib.yml\n"), library];
+  const pr = { ...actorPr("member") };
+  expect(
+    checksOf(files, {
+      ...pr,
+      repo: { date, required: ["call / test", "call / e2e", "call"] },
+    }),
+  ).toEqual({
+    "call / test": ["passes", "RQ-4", "RQ-9", "WN-2"],
+    "call / e2e": ["passes", "RQ-2", "RQ-9", "JG-3"],
+    call: ["pending and blocks merge", "RQ-0", "RQ-8"],
+  });
+  // The caller's name: names the check; a skipped caller file leaves it Pending (RQ-1).
+  const named = [
+    callerOf("    name: CI\n    uses: ./.github/workflows/lib.yml\n", "push"),
+    library,
+  ];
+  expect(
+    checksOf(named, {
+      ...pr,
+      repo: { date, required: ["CI / test"] },
+    })["CI / test"]!.slice(0, 4),
+  ).toEqual(["pending and blocks merge", "RQ-1", "RQ-9", "EV-0"]);
+});
+
+test("a required check matched only through a remote caller's <caller job name> / … is Uncertain, root WN-6 at its uses:, while the caller runs; a skipped caller keeps the existing rules", () => {
+  const remote = "    uses: octo/lib/.github/workflows/ci.yml@v1\n";
+  const check = (call: string) =>
+    byKey(
+      simulate([callerOf(call)], {
+        ...actorPr("member"),
+        repo: { date, required: ["call / test"] },
+      }).verdicts,
+      "check › call / test",
+    )!;
+  const runs = check(remote);
+  expect(runs).toMatchObject({ value: "uncertain", settle: [] });
+  expect(runs.causes[0]).toMatchObject({
+    rule: "WN-6",
+    spans: [{ path: ".github/workflows/ci.yml", line: 4 }],
+  });
+  expect(
+    check("    if: github.event_name == 'push'\n" + remote).causes.map(
+      (c) => c.rule,
+    ),
+  ).toEqual(["RQ-2", "JG-3"]);
+});
+
+test("a required name matched only through a matrix job's derived prefix is Uncertain [passes, pending and blocks merge], root RQ-9, with nothing to settle it", () => {
+  const files = [
+    wf(
+      "ci.yml",
+      "on: pull_request\njobs:\n" +
+        job("test", "    strategy:\n      matrix:\n        node: [20, 22]\n"),
+    ),
+  ];
+  for (const name of ["test (20)", "test"]) {
+    const check = byKey(
+      simulate(files, {
+        ...actorPr("member"),
+        repo: { date, required: [name] },
+      }).verdicts,
+      `check › ${name}`,
+    )!;
+    expect(check).toMatchObject({
+      value: "uncertain",
+      possible: ["passes", "pending and blocks merge"],
+      settle: [],
+    });
+    expect(check.causes.map((c) => c.rule)).toEqual(["RQ-9", "RQ-4", "WN-2"]);
+  }
+});
+
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {
     expect(rule.text).not.toBe("");
