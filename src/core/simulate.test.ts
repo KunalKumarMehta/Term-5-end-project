@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import {
   RULES,
+  producedChecks,
   settleValue,
   simulate as coreSimulate,
   withDefaults,
@@ -3243,6 +3244,30 @@ test("a required name matched only through a matrix job's derived prefix is Unce
     });
     expect(check.causes.map((c) => c.rule)).toEqual(["RQ-9", "RQ-4", "WN-2"]);
   }
+});
+
+test("producedChecks lists every check name the Workflow set produces, whatever the Event, and counts the matrix jobs, remote callers and name: expressions it leaves out", () => {
+  expect(producedChecks(example)).toEqual({
+    names: ["changes", "build", "test", "e2e", "deploy", "triage"],
+    left: { matrix: 0, remote: 0, expression: 0 },
+  });
+  const files = [
+    wf(
+      "ci.yml",
+      "on: push\njobs:\n" +
+        job("lint", "    name: Lint\n") +
+        job("test", "    strategy:\n      matrix:\n        node: [20, 22]\n") +
+        job("os", "    name: ${{ vars.OS }}\n") +
+        "  call:\n    uses: ./.github/workflows/lib.yml\n" +
+        "  remote:\n    uses: octo/lib/.github/workflows/ci.yml@v1\n",
+    ),
+    library,
+    { path: "docs/notes.yml", text: "jobs: {}\n" },
+  ];
+  expect(producedChecks(files)).toEqual({
+    names: ["Lint", "call / test", "call / e2e"],
+    left: { matrix: 1, remote: 1, expression: 1 },
+  });
 });
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {

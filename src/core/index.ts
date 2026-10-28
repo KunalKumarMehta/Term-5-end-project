@@ -218,6 +218,46 @@ export function simulate(
   };
 }
 
+export interface ProducedChecks {
+  /** Every check name the Workflow set's jobs report (RQ-0, RQ-9), once, in file and job order. */
+  names: string[];
+  /** The names it can't know, by kind (#9 §4). */
+  left: {
+    /** Matrix jobs: only a derived prefix (RQ-9). */
+    matrix: number;
+    /** Remote reusable callers: their callees' checks (WN-6). */
+    remote: number;
+    /** Jobs whose `name:` is an expression (WN-4). */
+    expression: number;
+  };
+}
+
+/**
+ * "Require every produced check" (#9 §4): the check names every job of every GitHub workflow
+ * produces, whatever the Event.
+ */
+export function producedChecks(files: WorkflowFile[]): ProducedChecks {
+  const parsed = new Map(
+    files.flatMap((file) => {
+      const key = loaded.exec(file.path)?.[1];
+      return key === undefined
+        ? []
+        : [[key, parseWorkflowFile(file.path, file.text)] as const];
+    }),
+  );
+  const names = new Set<string>();
+  const left = { matrix: 0, remote: 0, expression: 0 };
+  for (const file of parsed.values()) {
+    if (calleeOnly(file)) continue;
+    for (const { name, via } of namesOf(file, parsed))
+      // shortcut: every `name:` expression is left out until #72 evaluates them (WN-4).
+      if (via === "remote" || via === "matrix") left[via]++;
+      else if (name === undefined) left.expression++;
+      else names.add(name);
+  }
+  return { names: [...names], left };
+}
+
 // An Assumption names a job key ("fails") or one of its outputs (`<job key> › outputs.<name>`).
 function unmatched(
   scenario: Scenario,
