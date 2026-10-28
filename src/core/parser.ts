@@ -101,6 +101,10 @@ export interface JobSpans {
   permissions?: Permissions;
   /** The `environment` key. */
   environment?: Span;
+  /** A caller's `uses:` value. */
+  uses?: Span;
+  /** A caller's `secrets:` value. */
+  secrets?: Span;
 }
 
 const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
@@ -280,6 +284,8 @@ function indexOn(
         isScalar(coeValue) && coeValue.value === true ? coe!.span : undefined,
       permissions: permissions(field("permissions")?.pair, own),
       environment: env && (own ?? span(env.pair.key as Node)),
+      uses: field("uses")?.span,
+      secrets: field("secrets")?.span,
     });
   }
 

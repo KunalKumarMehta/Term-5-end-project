@@ -8446,8 +8446,77 @@ var require_cronstrue = __commonJS({
 
 // src/cli/main.ts
 import { readdirSync, readFileSync } from "node:fs";
-import { join as join2, resolve as resolve2 } from "node:path";
+import { join as join2, resolve as resolve3 } from "node:path";
 import { parseArgs } from "node:util";
+
+// src/core/reusable.ts
+var DIR = ".github/workflows/";
+var isLocal = (ref) => ref.startsWith("./") || ref.startsWith("$/");
+function calls(parsed) {
+  return parsed.jobs.flatMap((job) => {
+    if (job.type !== "reusableWorkflowJob") return [];
+    const ref = job.ref.value;
+    const local = isLocal(ref);
+    const span = parsed.jobSpans.get(job.id.value)?.uses;
+    if (!span) return [];
+    return [{ job, span, ...local && { path: ref.slice(2) } }];
+  });
+}
+var calleeKey = (path) => path.startsWith(DIR) && !path.slice(DIR.length).includes("/") ? path.slice(DIR.length) : void 0;
+function callDiagnostics(parsed, present) {
+  return calls(parsed).flatMap(({ span, path }) => {
+    if (path === void 0) return [];
+    const key = calleeKey(path);
+    if (key === void 0)
+      return [
+        {
+          ...span,
+          rule: "PL-0",
+          message: `\`${path}\` isn't directly in \`.github/workflows/\`, the only place GitHub reads a called workflow from.`
+        }
+      ];
+    if (present.has(key)) return [];
+    return [
+      {
+        ...span,
+        rule: "RU-4",
+        message: `\`${path}\` isn't in the Workflow set. Paste or upload it.`
+      }
+    ];
+  });
+}
+function brokenCalleeDiagnostics(parsed, broken) {
+  return calls(parsed).flatMap(({ span, path }) => {
+    const key = path === void 0 ? void 0 : calleeKey(path);
+    return key !== void 0 && broken.has(key) ? [
+      {
+        ...span,
+        rule: "RU-4",
+        message: `Called workflow \`${path}\` has Diagnostics; fix them to simulate this file.`
+      }
+    ] : [];
+  });
+}
+var calleeOnly = (parsed) => Object.keys(parsed.events).join() === "workflow_call";
+function contractError(parsed, files) {
+  for (const { job, span, path } of calls(parsed)) {
+    const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
+    if (!callee || job["inherit-secrets"]) continue;
+    const declared = new Map(
+      Object.entries(callee.events.workflow_call?.secrets ?? {}).map(
+        ([name2, config]) => [name2.toLowerCase(), config]
+      )
+    );
+    const values = job["secret-values"];
+    const passed2 = Array.from(
+      { length: values?.count ?? 0 },
+      (_, i) => values.get(i).key.toString().toLowerCase()
+    );
+    if (passed2.some((name2) => !declared.has(name2)) || [...declared].some(([name2, c]) => c.required && !passed2.includes(name2)))
+      return span;
+  }
+  return void 0;
+}
 
 // src/core/access.ts
 var SCOPES = [
@@ -8537,44 +8606,131 @@ function byActor(name2, access, blocked, actor) {
     ]
   };
 }
-function accessVerdicts(file, parsed, scenario) {
+var ORDER = { none: 0, read: 1, write: 2 };
+function resolve(parsed, id, tokenDefault) {
+  const own = parsed.jobSpans.get(id)?.permissions;
+  const replaced = own && parsed.permissions ? [cause("PERM-4", parsed.permissions.span)] : [];
+  const block = own ?? parsed.permissions;
+  const level = (name2) => {
+    const access = scope(name2, block, tokenDefault);
+    return { ...access, causes: [...access.causes, ...replaced] };
+  };
+  return { block, level };
+}
+function capped(access, cap, span) {
+  const perm7 = cause("PERM-7", span);
+  if (!access || cap.value === "uncertain" && access.value !== "none")
+    return { ...cap, causes: [...cap.causes, perm7] };
+  if (ORDER[access.value] > ORDER[cap.value])
+    return { ...cap, causes: [perm7, ...cap.causes, ...access.causes] };
+  return access;
+}
+function runSecrets(actor, environment) {
+  const inputs = [{ path: "event.actor", value: actor }];
+  if (actor === "fork")
+    return { value: "empty", causes: [cause("FK-2", void 0, inputs)] };
+  if (actor === "dependabot")
+    return {
+      value: "dependabot-only",
+      causes: [cause("FK-8", void 0, inputs)]
+    };
+  return {
+    value: "available",
+    causes: [
+      cause("FK-0", void 0, inputs),
+      ...environment ? [cause("PL-16", environment)] : []
+    ]
+  };
+}
+function passed(caller, passes2, run, actor) {
+  if (!passes2) return { value: "empty", causes: [cause("RU-1", caller.uses)] };
+  const ru1 = cause("RU-1", caller.secrets);
+  if (actor === "member") return { ...run, causes: [ru1, ...run.causes] };
+  const ru1a = cause("RU-1a", void 0, [
+    { path: "event.actor", value: actor }
+  ]);
+  return { ...run, causes: [ru1a, ...run.causes, ru1] };
+}
+var passes = (job) => job["inherit-secrets"] === true || job["secret-values"] !== void 0;
+function accessVerdicts(prefix, parsed, scenario, caller) {
   const tokenDefault = scenario.repo.tokenDefault;
   const actor = scenario.event.actor;
+  const cap = caller && resolve(caller.parsed, caller.job.id.value, tokenDefault);
+  const callerSpans = caller && caller.parsed.jobSpans.get(caller.job.id.value);
   return parsed.jobs.flatMap((job) => {
-    if (job.type !== "job") return [];
-    const key = `${file} \u203A ${job.id.value}`;
+    const key = `${prefix}${job.id.value}`;
     const spans = parsed.jobSpans.get(job.id.value);
-    const own = spans?.permissions;
-    const replaced = own && parsed.permissions ? [cause("PERM-4", parsed.permissions.span)] : [];
-    const block = own ?? parsed.permissions;
+    if (job.type !== "job")
+      return caller || isLocal(job.ref.value) || !spans ? [] : remote(
+        key,
+        job,
+        spans,
+        scenario,
+        resolve(parsed, job.id.value, tokenDefault)
+      );
+    const { block, level } = resolve(parsed, job.id.value, tokenDefault);
     const tokens = SCOPES.map((name2) => {
-      const access = scope(name2, block, tokenDefault);
+      const access = cap ? capped(
+        block && level(name2),
+        cap.level(name2),
+        cap.block?.span ?? callerSpans.uses
+      ) : level(name2);
       return {
         key: `${key} \u203A token.${name2}`,
-        ...byActor(
-          name2,
-          { ...access, causes: [...access.causes, ...replaced] },
-          block !== void 0,
-          actor
-        )
+        ...byActor(name2, access, (block ?? cap?.block) !== void 0, actor)
       };
     });
-    const actorInput = [{ path: "event.actor", value: actor }];
+    const run = runSecrets(actor, spans?.environment);
     const secrets = {
       key: `${key} \u203A secrets`,
-      ...actor === "fork" ? { value: "empty", causes: [cause("FK-2", void 0, actorInput)] } : actor === "dependabot" ? {
-        value: "dependabot-only",
-        causes: [cause("FK-8", void 0, actorInput)]
-      } : {
-        value: "available",
-        causes: [
-          cause("FK-0", void 0, actorInput),
-          ...spans?.environment ? [cause("PL-16", spans.environment)] : []
-        ]
-      }
+      ...caller ? passed(callerSpans, passes(caller.job), run, actor) : run
     };
     return [...tokens, secrets];
   });
+}
+var holds = (name2) => WRITE_OR_NONE.has(name2) ? ["none", "write"] : READ_OR_NONE.has(name2) ? ["none", "read"] : ["none", "read", "write"];
+function remote(key, job, spans, scenario, { block, level }) {
+  const actor = scenario.event.actor;
+  const wn6 = cause("WN-6", spans.uses);
+  const perm7 = cause("PERM-7", block?.span ?? spans.uses);
+  const tokens = SCOPES.map((name2) => {
+    const cap = byActor(name2, level(name2), block !== void 0, actor);
+    const max = cap.value === "uncertain" ? "write" : cap.value;
+    const possible = holds(name2).filter((l) => ORDER[l] <= ORDER[max]);
+    return {
+      key: `${key} \u203A token.${name2}`,
+      ...possible.length === 1 ? { value: possible[0], causes: [...cap.causes, perm7, wn6] } : {
+        value: "uncertain",
+        causes: [wn6, perm7, ...cap.causes],
+        possible,
+        settle: []
+      }
+    };
+  });
+  const run = runSecrets(actor, void 0);
+  let secrets = passed(spans, passes(job), run, actor);
+  if (job["inherit-secrets"] === true && run.value !== "empty") {
+    const owner = scenario.repo.repository?.split("/")[0]?.toLowerCase();
+    if (owner !== job.ref.value.split("/")[0].toLowerCase())
+      secrets = {
+        value: "uncertain",
+        causes: [wn6, ...secrets.causes],
+        possible: [run.value, "empty"].sort(),
+        settle: []
+      };
+    else
+      secrets.causes = secrets.causes.map(
+        (c) => c.rule === "RU-1" ? {
+          ...c,
+          inputs: [
+            { path: "repo.repository", value: scenario.repo.repository }
+          ]
+        } : c
+      );
+  }
+  if (secrets.value !== "uncertain")
+    secrets = { ...secrets, causes: [...secrets.causes, wn6] };
+  return [...tokens, { key: `${key} \u203A secrets`, ...secrets }];
 }
 
 // node_modules/@actions/expressions/dist/ast.js
@@ -14168,7 +14324,7 @@ function indexOn(doc, span) {
   const permissions = (pair2, own2) => {
     if (!pair2) return void 0;
     const via = own2 ?? ((0, import_yaml2.isAlias)(pair2.value) ? span(pair2.value) : void 0);
-    const value2 = resolve(doc, pair2.value);
+    const value2 = resolve2(doc, pair2.value);
     const scopes = /* @__PURE__ */ new Map();
     for (const p of (0, import_yaml2.isMap)(value2) ? value2.items : []) {
       const scope2 = name(doc, p.key);
@@ -14194,10 +14350,10 @@ function indexOn(doc, span) {
     (p) => name(doc, p.key) === "permissions"
   );
   const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
-  const jobs = resolve(doc, jobsPair?.value);
+  const jobs = resolve2(doc, jobsPair?.value);
   for (const item of (0, import_yaml2.isMap)(jobs) ? jobs.items : []) {
     const id = name(doc, item.key);
-    const body = resolve(doc, item.value);
+    const body = resolve2(doc, item.value);
     if (id === void 0 || !(0, import_yaml2.isMap)(body)) continue;
     const own2 = (0, import_yaml2.isAlias)(item.value) ? span(item.value) : void 0;
     const field = (key) => {
@@ -14205,7 +14361,7 @@ function indexOn(doc, span) {
       return p && { pair: p, span: own2 ?? span(p.value ?? p.key) };
     };
     const coe = field("continue-on-error");
-    const coeValue = resolve(doc, coe?.pair.value);
+    const coeValue = resolve2(doc, coe?.pair.value);
     const env = field("environment");
     jobSpans.set(id, {
       id: span(item.key),
@@ -14213,7 +14369,9 @@ function indexOn(doc, span) {
       needs: field("needs")?.span,
       continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0,
       permissions: permissions(field("permissions")?.pair, own2),
-      environment: env && (own2 ?? span(env.pair.key))
+      environment: env && (own2 ?? span(env.pair.key)),
+      uses: field("uses")?.span,
+      secrets: field("secrets")?.span
     });
   }
   const workflow = { jobSpans, permissions: permissions(root, void 0) };
@@ -14221,7 +14379,7 @@ function indexOn(doc, span) {
   if (!pair || !(0, import_yaml2.isScalar)(pair.key))
     return { ...workflow, onSpan: void 0, onEntries };
   const own = (0, import_yaml2.isAlias)(pair.value) ? span(pair.value) : void 0;
-  const value = resolve(doc, pair.value);
+  const value = resolve2(doc, pair.value);
   const entries = (0, import_yaml2.isSeq)(value) ? value.items : (0, import_yaml2.isMap)(value) ? value.items.map((p) => p.key) : [value];
   for (const entry of entries) {
     const event = name(doc, entry);
@@ -14232,14 +14390,14 @@ function indexOn(doc, span) {
     const event = name(doc, pair2.key);
     if (event === void 0) continue;
     const viaEvent = own ?? ((0, import_yaml2.isAlias)(pair2.value) ? span(pair2.value) : void 0);
-    const settings = resolve(doc, pair2.value);
+    const settings = resolve2(doc, pair2.value);
     for (const setting of (0, import_yaml2.isMap)(settings) ? settings.items : []) {
       const key = name(doc, setting.key);
       if (key === void 0 || !(0, import_yaml2.isScalar)(setting.key)) continue;
       const at = `${event}.${key}`;
       if (!onEntries.has(at)) onEntries.set(at, viaEvent ?? span(setting.key));
       const via = viaEvent ?? ((0, import_yaml2.isAlias)(setting.value) ? span(setting.value) : void 0);
-      const list = resolve(doc, setting.value);
+      const list = resolve2(doc, setting.value);
       const items = (0, import_yaml2.isSeq)(list) ? list.items : [list];
       items.forEach((item, i) => {
         if ((0, import_yaml2.isAlias)(item) || (0, import_yaml2.isScalar)(item))
@@ -14249,11 +14407,11 @@ function indexOn(doc, span) {
   }
   return { ...workflow, onSpan: span(pair.key), onEntries };
 }
-function resolve(doc, node) {
+function resolve2(doc, node) {
   return (0, import_yaml2.isAlias)(node) ? node.resolve(doc) : node;
 }
 function name(doc, node) {
-  const target = resolve(doc, node);
+  const target = resolve2(doc, node);
   return (0, import_yaml2.isScalar)(target) && typeof target.value === "string" ? target.value : void 0;
 }
 var RuntimeValueNeeded = class extends Error {
@@ -14305,10 +14463,10 @@ var toData = (value) => JSON.parse(
   data_exports.reviver
 );
 var Reader = class extends Evaluator {
-  constructor(root, context, functions, resolve3) {
+  constructor(root, context, functions, resolve4) {
     super(root, context, functions);
     this.root = root;
-    this.resolve = resolve3;
+    this.resolve = resolve4;
   }
   root;
   resolve;
@@ -14337,7 +14495,7 @@ var stubs = (status) => [
 function stub(name2, minArgs, call) {
   return { name: name2, minArgs, maxArgs: Number.MAX_SAFE_INTEGER, call };
 }
-function evaluateCondition(source, contexts, status, resolve3 = () => void 0) {
+function evaluateCondition(source, contexts, status, resolve4 = () => void 0) {
   const funcs = stubs(status);
   const { tokens } = new Lexer(source).lex();
   const expr = new Parser(tokens, Object.keys(contexts), funcs).parse();
@@ -14351,7 +14509,7 @@ function evaluateCondition(source, contexts, status, resolve3 = () => void 0) {
       dict,
       // The Evaluator looks functions up by lower-cased name.
       new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
-      resolve3
+      resolve4
     ).evaluate()
   );
 }
@@ -14372,8 +14530,8 @@ var ABSENT = {
   push: ["pull_request"],
   pull_request: ["head_commit"]
 };
-function jobVerdicts(file, parsed, workflow, scenario) {
-  const key = (id) => `${file} \u203A ${id}`;
+function jobVerdicts(prefix, parsed, workflow, scenario) {
+  const key = (id) => prefix + id;
   const ids = parsed.jobs.map((j) => j.id.value);
   if (workflow.value === "uncertain")
     return ids.map((id) => ({
@@ -14656,7 +14814,7 @@ function jobVerdicts(file, parsed, workflow, scenario) {
     return verdict;
   };
   const hint = (path) => {
-    const output = /^.+ › (.+) › outputs\.(.+)$/.exec(path);
+    const output = path.startsWith(prefix) ? /^(.+) › outputs\.(.+)$/.exec(path.slice(prefix.length)) : null;
     if (output) {
       const [, id, name2] = output;
       const step = /\bsteps\.([\w-]+)\.outputs\b/i.exec(
@@ -16120,6 +16278,12 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "PERM-7",
+    text: "A called workflow's `GITHUB_TOKEN` can only keep or lower its caller's permissions: with no `permissions:` of its own it gets the caller's, and if the caller job sets none, the caller's workflow-level block or the token default.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+    confidence: "High"
+  },
+  {
     id: "PERM-8",
     text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
@@ -16147,6 +16311,36 @@ var rows = [
     id: "FK-8",
     text: "A run `dependabot[bot]` triggers on `push` or `pull_request` gets a read-only `GITHUB_TOKEN` by default and only Dependabot secrets, not Actions secrets; unlike a fork's, its `permissions:` can raise the token's access.",
     url: "https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions",
+    confidence: "High"
+  },
+  {
+    id: "RU-1",
+    text: "A called workflow gets only the secrets its caller job passes: with no `secrets:`, nothing but `GITHUB_TOKEN`; with a mapping, only the mapped names; with `secrets: inherit`, all of the caller's. Secrets go only to the directly called workflow.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
+    confidence: "High"
+  },
+  {
+    id: "RU-1a",
+    text: "A called workflow can only get what its caller's run has: a fork contributor's caller passes nothing but `GITHUB_TOKEN`, and a Dependabot caller only Dependabot secrets. GitHub's docs don't say this directly; it follows from RU-1, FK-2 and FK-8.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
+    confidence: "Med"
+  },
+  {
+    id: "RU-2",
+    text: "Passing a secret the called workflow doesn't declare in `on.workflow_call.secrets`, or leaving out one it declares `required: true`, fails the run. GitHub's docs don't say whether this shows as a startup failure with no jobs or as an error on the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_callsecrets",
+    confidence: "High"
+  },
+  {
+    id: "RU-4",
+    text: "A local `uses:` whose called workflow is missing at the caller's commit, or can't be parsed, makes GitHub reject the caller file each time a run is created (\"Invalid workflow file \u2026 error parsing called workflow\"): the run fails with 0 jobs, even jobs that don't call it. GitHub's docs don't say this; it was observed.",
+    url: "https://github.com/aspect-build/rules_buildx/actions/runs/23382324747",
+    confidence: "High"
+  },
+  {
+    id: "PL-0",
+    text: "GitHub reads workflow files only directly in `.github/workflows/`: a called workflow can't be in a subfolder, so a local `uses:` into one fails.",
+    url: "https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows",
     confidence: "High"
   },
   {
@@ -16193,7 +16387,7 @@ var rows = [
   },
   {
     id: "WN-2",
-    text: "Assumed to succeed: the job runs and WhyNoRun doesn't simulate its steps.",
+    text: "Assumed to succeed, or assumed GitHub accepts the call: the job runs and WhyNoRun doesn't simulate its steps, nor check a remote reusable workflow's secrets contract (RU-2).",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
     confidence: "High"
   },
@@ -16212,6 +16406,12 @@ var rows = [
   {
     id: "WN-5",
     text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High"
+  },
+  {
+    id: "WN-6",
+    text: "Called workflow not loaded: WhyNoRun never fetches a reusable workflow from another repository, so it can't see the callee's jobs, `permissions:` or declared secrets.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
     confidence: "High"
   }
@@ -16247,8 +16447,16 @@ function simulate(files, input) {
       }
     ];
   });
+  const present = new Set(parsed.map((p) => p.key));
   for (const p of parsed)
-    if (p.diagnostics.length === 0) p.diagnostics = filterDiagnostics(p);
+    if (p.diagnostics.length === 0)
+      p.diagnostics = [...filterDiagnostics(p), ...callDiagnostics(p, present)];
+  const broken = new Set(
+    parsed.filter((p) => p.diagnostics.length > 0).map((p) => p.key)
+  );
+  for (const p of parsed)
+    if (p.diagnostics.length === 0)
+      p.diagnostics = brokenCalleeDiagnostics(p, broken);
   const diagnostics = parsed.flatMap((p) => p.diagnostics).sort(
     (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col
   );
@@ -16316,24 +16524,60 @@ function unmatched(scenario, verdicts) {
 }
 function evaluate(parsed, scenario) {
   const { event, repo } = scenario;
+  const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts = [];
   for (const { key, bytes, ...file } of parsed) {
-    if (file.diagnostics.length > 0) continue;
+    if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
     const workflow = bytes > MAX_BYTES ? {
       key,
       value: "skipped",
       causes: [{ rule: "PL-9", spans: [], inputs: [] }]
     } : {
       key,
-      ...awaiting(trigger(file, event, repo.defaultBranch), event)
+      ...called(
+        awaiting(trigger(file, event, repo.defaultBranch), event),
+        file,
+        files
+      )
     };
+    const jobs = jobVerdicts(`${key} \u203A `, file, workflow, scenario);
     verdicts.push(
       workflow,
-      ...jobVerdicts(key, file, workflow, scenario),
-      ...accessVerdicts(key, file, scenario)
+      ...jobs,
+      ...accessVerdicts(`${key} \u203A `, file, scenario)
     );
+    for (const { job, path } of calls(file)) {
+      const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
+      if (!callee) continue;
+      const prefix = `${key} \u203A ${job.id.value}/`;
+      const caller = jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`);
+      verdicts.push(
+        ...jobVerdicts(prefix, callee, caller, scenario),
+        ...accessVerdicts(prefix, callee, scenario, { parsed: file, job })
+      );
+    }
   }
   return verdicts;
+}
+function called(verdict, file, files) {
+  if (verdict.value !== "runs") return verdict;
+  const contract = contractError(file, files);
+  if (contract)
+    return {
+      value: "fails",
+      causes: [
+        { rule: "RU-2", spans: [contract], inputs: [] },
+        ...verdict.causes
+      ]
+    };
+  const remote2 = calls(file).filter((c) => c.path === void 0);
+  return {
+    ...verdict,
+    causes: [
+      ...verdict.causes,
+      ...remote2.map((c) => ({ rule: "WN-2", spans: [c.span], inputs: [] }))
+    ]
+  };
 }
 function awaiting(verdict, event) {
   if (event.actor !== "fork" || event.approval !== "awaiting") return verdict;
@@ -16424,12 +16668,12 @@ function show(args, stdin) {
   }
   if (validateScenario(scenario).length > 0)
     return misuse(`--event or --date is invalid: --date must be YYYY-MM-DD`);
-  const dir = join2(resolve2(repo), ".github", "workflows");
+  const dir = join2(resolve3(repo), ".github", "workflows");
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
-    return misuse(`no .github/workflows/ folder in ${resolve2(repo)}`);
+    return misuse(`no .github/workflows/ folder in ${resolve3(repo)}`);
   }
   const files = entries.filter((e) => e.isFile()).map((e) => ({
     path: `.github/workflows/${e.name}`,

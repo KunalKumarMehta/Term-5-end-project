@@ -1,6 +1,19 @@
 import { accessVerdicts } from "./access";
 import { jobVerdicts } from "./jobs";
-import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
+import {
+  parseWorkflowFile,
+  type Diagnostic,
+  type ParsedWorkflow,
+  type Span,
+} from "./parser";
+import {
+  brokenCalleeDiagnostics,
+  callDiagnostics,
+  calleeKey,
+  calleeOnly,
+  calls,
+  contractError,
+} from "./reusable";
 import {
   ASSUMED,
   validateScenario,
@@ -115,9 +128,18 @@ export function simulate(
           },
         ];
   });
-  // Branch and tag filter checks need a file the parser accepted.
+  // Branch and tag filter and call checks need a file the parser accepted.
+  const present = new Set(parsed.map((p) => p.key));
   for (const p of parsed)
-    if (p.diagnostics.length === 0) p.diagnostics = filterDiagnostics(p);
+    if (p.diagnostics.length === 0)
+      p.diagnostics = [...filterDiagnostics(p), ...callDiagnostics(p, present)];
+  // RU-4: a caller of a callee with its own Diagnostics, one level only (#12 addendum A).
+  const broken = new Set(
+    parsed.filter((p) => p.diagnostics.length > 0).map((p) => p.key),
+  );
+  for (const p of parsed)
+    if (p.diagnostics.length === 0)
+      p.diagnostics = brokenCalleeDiagnostics(p, broken);
   const diagnostics = parsed
     .flatMap((p) => p.diagnostics)
     .sort(
@@ -218,10 +240,11 @@ type Parsed = ReturnType<typeof parseWorkflowFile> & {
 /** The Verdicts of the files GitHub would accept, unsorted. */
 function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
   const { event, repo } = scenario;
+  const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts: Verdict[] = [];
   for (const { key, bytes, ...file } of parsed) {
-    // A file GitHub would reject gets no Verdicts.
-    if (file.diagnostics.length > 0) continue;
+    // A file GitHub would reject gets no Verdicts; a callee's jobs appear under its callers.
+    if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
     // PL-9: GitHub starts no runs from it, but it isn't a Diagnostic, so its keys stay (ADR 0001).
     const workflow: Verdict =
       bytes > MAX_BYTES
@@ -232,15 +255,61 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
           }
         : {
             key,
-            ...awaiting(trigger(file, event, repo.defaultBranch!), event),
+            ...called(
+              awaiting(trigger(file, event, repo.defaultBranch!), event),
+              file,
+              files,
+            ),
           };
+    const jobs = jobVerdicts(`${key} › `, file, workflow, scenario);
     verdicts.push(
       workflow,
-      ...jobVerdicts(key, file, workflow, scenario),
-      ...accessVerdicts(key, file, scenario),
+      ...jobs,
+      ...accessVerdicts(`${key} › `, file, scenario),
     );
+    // A local callee's jobs, one level deep, under the caller job that ran them (#6).
+    for (const { job, path } of calls(file)) {
+      const callee =
+        path === undefined ? undefined : files.get(calleeKey(path)!);
+      if (!callee) continue;
+      const prefix = `${key} › ${job.id.value}/`;
+      const caller = jobs.find((v) => v.key === `${key} › ${job.id.value}`)!;
+      verdicts.push(
+        ...jobVerdicts(prefix, callee, caller, scenario),
+        ...accessVerdicts(prefix, callee, scenario, { parsed: file, job }),
+      );
+    }
   }
   return verdicts;
+}
+
+/**
+ * A run GitHub would create fails on a secret contract error (root RU-2). One with a remote
+ * call is assumed to be accepted, as an unseen RU-2 would fail it (WN-2, #8 §10).
+ */
+function called(
+  verdict: Omit<Verdict, "key">,
+  file: ParsedWorkflow,
+  files: Map<string, ParsedWorkflow>,
+): Omit<Verdict, "key"> {
+  if (verdict.value !== "runs") return verdict;
+  const contract = contractError(file, files);
+  if (contract)
+    return {
+      value: "fails",
+      causes: [
+        { rule: "RU-2", spans: [contract], inputs: [] },
+        ...verdict.causes,
+      ],
+    };
+  const remote = calls(file).filter((c) => c.path === undefined);
+  return {
+    ...verdict,
+    causes: [
+      ...verdict.causes,
+      ...remote.map((c) => ({ rule: "WN-2", spans: [c.span], inputs: [] })),
+    ],
+  };
 }
 
 /**
