@@ -1,0 +1,605 @@
+<!doctype html>
+<!--
+  PROTOTYPE: throwaway. Answers "What should the playground look and behave like?"
+  (Wayfinder ticket: Playground UI prototype). Three structurally different variants
+  on one page, switched with ?variant=A|B|C or the bar at the bottom (or the ← → keys).
+  Every Verdict is STUB data from the tiny fake sim() below, not the real rules.
+  Open the file in a browser. Nothing is saved.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhyNoRun playground prototype</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
+<style>
+:root{--bg:#fafaf9;--panel:#fff;--ink:#1c1917;--mute:#78716c;--line:#e7e5e4;--acc:#2563eb;--diff:#fef3c7;--diffb:#f59e0b;--hl:#dbeafe;
+  --ok:#15803d;--okb:#dcfce7;--bad:#b91c1c;--badb:#fee2e2;--unc:#7c3aed;--uncb:#ede9fe;--neu:#57534e;--neub:#f5f5f4;--pend:#b45309;--pendb:#ffedd5}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg)}
+button,select,input,textarea{font:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 9px}
+button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.link{border:0;background:none;color:var(--acc);padding:0}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+h2,h3,h4{margin:0}
+.mute{color:var(--mute)} .small{font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:1px 8px;background:#fff;font-size:12px}
+.rule{font-family:ui-monospace,monospace;font-size:11px;padding:0 5px;border-radius:4px;background:#e0e7ff;color:#3730a3}
+.rule.wn{background:#f5f5f4;color:var(--mute)}
+.v{display:inline-block;font-size:12px;font-weight:600;padding:1px 7px;border-radius:5px;white-space:nowrap}
+.v-ok{color:var(--ok);background:var(--okb)} .v-bad{color:var(--bad);background:var(--badb)} .v-neu{color:var(--neu);background:var(--neub)}
+.v-pend{color:var(--pend);background:var(--pendb)} .v-unc{color:var(--unc);background:var(--uncb);border:1px dashed var(--unc)}
+.v-strong{color:#fff;background:#44403c} .v-mid{color:#44403c;background:#d6d3d1} .v-faint{color:#a8a29e;background:transparent;border:1px solid var(--line)}
+.diffrow{background:var(--diff)!important;box-shadow:inset 3px 0 var(--diffb)}
+.src-imported{border-bottom:2px solid #93c5fd} .src-assumed{border-bottom:2px dotted var(--mute);font-style:italic} .src-set{border-bottom:2px solid transparent}
+.srctag{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
+.srctag.imported{color:#2563eb} .srctag.assumed{font-style:italic}
+.field{display:grid;grid-template-columns:130px 1fr;gap:6px;align-items:center;margin:4px 0}
+.field label{color:var(--mute);font-size:12.5px}
+.field select,.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:5px;padding:3px 6px;background:#fff}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:0 0 10px;padding:6px 10px 8px}
+legend{font-weight:600;font-size:12.5px;padding:0 4px}
+.causes{margin:6px 0 0;padding-left:20px} .causes li{margin:3px 0}
+.causes li.root::marker{content:"◆ ";color:var(--acc)}
+.settle{margin-top:8px;padding:8px;border:1px dashed var(--unc);border-radius:6px;background:#faf5ff}
+.pinbtn{border:0;background:none;padding:0 2px;color:#a8a29e;font-size:14px} .pinbtn.on{color:var(--acc)}
+.hl-line{background:var(--hl)!important}
+.CodeMirror{height:100%;font-size:12.5px}
+.baseline{border-top:1px solid var(--line);padding:8px 14px;font-size:12.5px;color:var(--mute);background:#fff}
+.baseline ul{margin:6px 0;columns:2;padding-left:18px}
+#toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#1c1917;color:#fff;padding:8px 14px;border-radius:8px;max-width:560px;font-size:13px;display:none;z-index:50}
+.modal{position:fixed;inset:0;background:#0006;display:grid;place-items:center;z-index:40}
+.modal>div{background:#fff;border-radius:10px;padding:16px;width:min(680px,92vw);max-height:80vh;overflow:auto}
+.modal pre{background:#f5f5f4;padding:10px;border-radius:6px;font-size:12px;overflow:auto}
+/* switcher: deliberately not part of the design */
+#switcher{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:#111;color:#fff;border-radius:999px;padding:6px 10px;box-shadow:0 6px 24px #0005;z-index:60;font-size:13px}
+#switcher button{background:#333;color:#fff;border:0;border-radius:999px;width:28px;height:28px;padding:0}
+/* --- Variant A: workbench --- */
+.A{display:grid;grid-template-columns:minmax(0,38fr) minmax(0,24fr) minmax(0,38fr);grid-template-rows:auto 1fr auto;height:100vh}
+.A>header{grid-column:1/-1;display:flex;gap:12px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#fff}
+.A .pane{overflow:auto;border-right:1px solid var(--line);min-height:0}
+.A .editorpane{display:flex;flex-direction:column}
+.A .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:6px 8px 0;background:#fff}
+.A .tabs button{border-radius:6px 6px 0 0;border-bottom:0} .A .tabs button.on{background:var(--bg);font-weight:600}
+.A .cmwrap{flex:1;min-height:0}
+.A .form{padding:10px}
+.A .results{padding:0 0 70px}
+.A .results .body{padding:10px}
+.A .jobcard{border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:10px}
+.A .jobcard h4{padding:6px 10px;border-bottom:1px solid var(--line);font-size:13px}
+.A table{width:100%;border-collapse:collapse} .A td,.A th{padding:4px 8px;border-bottom:1px solid #f5f5f4;text-align:left;font-size:13px}
+.A tr.vrow{cursor:pointer} .A tr.vrow:hover{background:#f8fafc} .A tr.sel{outline:2px solid var(--acc);outline-offset:-2px}
+.A .explain{border:1px solid var(--acc);border-radius:8px;background:#fff;padding:10px;margin-top:10px;position:sticky;bottom:60px}
+.A .baseline{grid-column:1/-1;padding-bottom:60px}
+.A .tray{position:fixed;right:14px;bottom:64px;background:#fff;border:1px solid var(--acc);border-radius:8px;padding:6px 10px;box-shadow:0 4px 16px #0002}
+/* --- Variant B: story report --- */
+.B{max-width:860px;margin:0 auto;padding:22px 18px 110px}
+.B .srcline{font-size:13px;color:var(--mute);margin-bottom:14px}
+.B .story{font-size:19px;line-height:2.1;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin-bottom:10px}
+.B .story select,.B .story input{font-size:17px;border:0;border-bottom:2px solid var(--acc);background:#eff6ff;border-radius:4px 4px 0 0;padding:0 4px}
+.B .story .src-assumed{border-bottom:2px dotted var(--mute);background:#f5f5f4}
+.B .story .src-imported{border-bottom-color:#93c5fd}
+.B .story.alt{border-color:var(--diffb);background:#fffdf5}
+.B .story .tag{font-size:12px;font-weight:700;color:var(--mute);margin-right:6px}
+.B section{margin-top:26px}
+.B section h2{font-size:18px;display:flex;justify-content:space-between;align-items:baseline}
+.B .line{border-bottom:1px solid var(--line);padding:8px 2px;cursor:pointer}
+.B .line:hover{background:#fff}
+.B .line .sentence{font-size:15px}
+.B .excerpt{font-family:ui-monospace,monospace;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:6px;margin:4px 0 6px;overflow:auto}
+.B .excerpt div{padding:0 8px;white-space:pre} .B .excerpt div.on{background:var(--hl)}
+.B .excerpt .n{color:#a8a29e;display:inline-block;width:28px}
+.B .drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,95vw);background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 24px #0002;display:flex;flex-direction:column;z-index:30}
+.B .drawer .cmwrap{flex:1;min-height:0}
+.B .moreform{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px}
+/* --- Variant C: grid --- */
+.C{display:grid;grid-template-columns:minmax(0,1fr) 420px;grid-template-rows:auto 1fr;height:100vh}
+.C>header{grid-column:1/-1;display:flex;gap:12px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#fff}
+.C .gridwrap{overflow:auto;padding-bottom:70px}
+.C table{border-collapse:separate;border-spacing:0;width:100%}
+.C th,.C td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;font-size:13px;background:#fff}
+.C thead th{position:sticky;top:0;z-index:2;vertical-align:top;background:#f5f5f4;cursor:pointer}
+.C thead th.on{box-shadow:inset 0 -3px var(--acc)}
+.C td.key{font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;position:sticky;left:0;z-index:1}
+.C td.cell{cursor:pointer} .C td.cell.on{outline:2px solid var(--acc);outline-offset:-2px}
+.C tr.group td{background:#f5f5f4;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
+.C .gut{width:16px;color:var(--diffb);font-weight:900;padding:0 0 0 6px}
+.C .insp{border-left:1px solid var(--line);background:#fff;overflow:auto;padding:12px 12px 80px;min-height:0}
+.C .minicm{height:220px;border:1px solid var(--line);border-radius:6px;margin-top:8px}
+.C .ind{padding-left:22px!important}
+.C .ind2{padding-left:40px!important}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal"></div>
+<div id="switcher"><button id="prev" title="Previous variant (←)">‹</button><span id="vlabel"></span><button id="next" title="Next variant (→)">›</button></div>
+<script>
+// ---------------------------------------------------------------- fixture
+const CI = `name: CI
+on:
+  pull_request:
+    paths: ['src/**', 'package.json']
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-\${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: \${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            src: ['src/**']
+  test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: npm test
+        env:
+          NPM_TOKEN: \${{ secrets.NPM_TOKEN }}
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - run: npm run lint
+`;
+const LAB = `name: Label PR
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - uses: actions/labeler@v5
+        with:
+          repo-token: \${{ secrets.GITHUB_TOKEN }}
+`;
+const BASELINE = [
+  'Actions are enabled for the repo, org and enterprise, and no GitHub workflow is disabled (PL-1, PL-2)',
+  'The event was created: ≤3 tags or ≤5,000 branches pushed at once; no rate limit hit (PL-7, PL-8)',
+  'The event was not caused by GITHUB_TOKEN (PL-6)',
+  'No execution-protection actor rule, no other event rule, no Require-lockfile policy (PL-10, PRT-6, PRT-7)',
+  'Allowed-actions and SHA-pinning policies permit every uses: (PL-11)',
+  'The PR has no merge conflict (PL-12, DB-5)',
+  'Environment protection rules and branch policies pass (PL-16)',
+  '"Allow GitHub Actions to create and approve pull requests" is on (PERM-10)',
+  'No queue, run or job time limit, billing or storage stop (PL-15, PL-17)',
+];
+
+// ---------------------------------------------------------------- state (in memory only)
+const fact = (v, src) => ({v, src});
+const baseFacts = () => ({
+  visibility: fact('public', 'imported'), predates: fact('yes', 'imported'), defaultBranch: fact('main', 'imported'),
+  ownerRepo: fact('octo-org/widget', 'imported'), tokenDefault: fact('restricted', 'assumed'), eventPolicy: fact('none', 'assumed'),
+  date: fact('2026-11-15', 'set'), required: ['test', 'lint'], strict: 'strict', mergeQueue: 'off',
+});
+const mkScen = (id, label, actor, head) => ({
+  id, label, actor, event: 'pull_request', type: 'synchronize', head, base: 'main',
+  changed: 'src/app.ts\ndocs/intro.md', msg: 'Fix login redirect', approval: fact('approved', 'assumed'), actorLogin: '',
+  facts: baseFacts(), assume: {}, fails: [], eventVals: {},
+  follow: {on: true, kind: 'same', head, aState: 'in progress'},
+});
+const S = {
+  variant: new URLSearchParams(location.search).get('variant') || 'A',
+  files: {'ci.yml': CI, 'labeler.yml': LAB}, active: 'ci.yml', hl: null,
+  source: {repo: 'octo-org/widget', sha: '3f9a2c1', ref: 'main', edited: false},
+  scen: [mkScen('A', 'Same-repo PR', 'member', 'feature/login'), mkScen('B', 'Fork PR', 'fork', 'main')],
+  cur: 0, compare: true, sel: null, pins: [], tab: 'access', open: {}, onlyDiff: false, drawer: false, more: false, insp: null,
+};
+S.scen[1].follow.kind = 'other-fork';
+
+// ---------------------------------------------------------------- stub simulate(): a handful of fake rules, NOT the real engine
+const lineOf = (f, needle, nth = 0) => { const ls = S.files[f].split('\n'); let k = -1; for (let i = 0; i < ls.length; i++) if (ls[i].includes(needle) && ++k === nth) return i + 1; return 1; };
+const C = (r, t, f, needle, span = 1, extra = {}) => ({r, t, f, a: f && lineOf(f, needle), b: f && lineOf(f, needle) + span - 1, ...extra});
+const W5 = (t, field) => ({r: 'WN-5', t, wn5: true, field});
+const after2Dec = F => F.date.v >= '2026-12-02';
+function sim(sc) {
+  const out = [], F = sc.facts, fork = sc.actor === 'fork', dep = sc.actor === 'dependabot';
+  const add = (key, flow, value, causes, x = {}) => out.push({key, flow, value, causes, ...x});
+  const files = sc.changed.split('\n').map(s => s.trim()).filter(Boolean);
+  const hit = files.filter(f => f.startsWith('src/') || f === 'package.json');
+  const awaiting = fork && sc.approval.v === 'awaiting';
+  // ci.yml
+  let ci;
+  if (awaiting) ci = ['pending', [C('FK-4', "A fork contributor's pull_request run waits for approval", 'ci.yml', 'pull_request:'), C('PL-5', 'Approval required for this contributor (repo setting)')]];
+  else if (!hit.length) ci = ['skipped', [C('PA-2', `No changed file matches paths: (${files.join(', ') || 'no files'})`, 'ci.yml', 'paths:')]];
+  else ci = ['runs', [C('EV-1', `pull_request (${sc.type}) triggers this file`, 'ci.yml', 'pull_request:'), C('PA-2', `${hit[0]} matches 'src/**'`, 'ci.yml', 'paths:')]];
+  if (fork && !awaiting && sc.approval.src === 'assumed') ci[1].push(W5('Approval = approved (assumed default)', 'approval'));
+  add('ci.yml', 'run', ...ci);
+  const ciRuns = ci[0] === 'runs';
+  const job = (id, fn) => ciRuns ? add(`ci.yml › ${id}`, 'run', ...fn()) : add(`ci.yml › ${id}`, 'run', 'no-run', ci[1], {inherited: true});
+  const failsA = id => sc.fails.includes(id) ? ['fails', [C('WN-1', `Assumption: job ${id} fails`, 'ci.yml', `  ${id}:`)]] : null;
+  job('changes', () => failsA('changes') || ['runs', [C('WN-2', 'Assumed to succeed', 'ci.yml', '  changes:')]]);
+  const outKey = 'ci.yml › changes › outputs.src';
+  job('test', () => {
+    if (sc.fails.includes('changes')) return ['skipped', [C('JG-2', 'needs: changes, which fails', 'ci.yml', 'needs: changes'), C('WN-1', 'Assumption: job changes fails', 'ci.yml', '  changes:')]];
+    const a = sc.assume[outKey];
+    if (a === undefined) return ['uncertain', [C('WN-4', "if: reads needs.changes.outputs.src, which only exists at run time", 'ci.yml', "if: needs.changes"), C('JG-1', 'Runs only if the expression is true', 'ci.yml', "if: needs.changes")],
+      {possible: ['runs', 'skipped'], settle: [{path: outKey, hint: 'output src of dorny/paths-filter in job changes', values: ["'true'", "'false'"]}]}];
+    return failsA('test') || (a === "'true'"
+      ? ['runs', [C('JG-1', `if: is true (outputs.src = ${a})`, 'ci.yml', "if: needs.changes"), {r: 'WN-1', t: `Assumption: ${outKey} = ${a}`, wn: true}]]
+      : ['skipped', [C('JG-1', `if: is false (outputs.src = ${a})`, 'ci.yml', "if: needs.changes"), {r: 'WN-1', t: `Assumption: ${outKey} = ${a}`, wn: true}]]);
+  });
+  job('lint', () => failsA('lint') || ['runs', [C('WN-2', 'Assumed to succeed', 'ci.yml', '  lint:')]]);
+  // labeler.yml (pull_request_target)
+  let lab; const P = F.eventPolicy;
+  const polW5 = P.src === 'assumed' ? [W5('Event policy = none (assumed default)', 'eventPolicy')] : [];
+  if (after2Dec(F) && F.visibility.v === 'public' && P.v === 'none' && F.predates.v === 'yes') lab = ['fails', [C('PRT-2', 'From 2 Dec 2026, GitHub fails pull_request_target runs in public repos created before 17 Sep 2026 that have no event policy', 'labeler.yml', 'pull_request_target:'), ...polW5]];
+  else if (after2Dec(F) && F.visibility.v === 'public' && P.v === 'none') lab = ['uncertain', [C('PRT-4', "GitHub's docs don't say whether the block applies to repos created after 17 Sep 2026", 'labeler.yml', 'pull_request_target:'), ...polW5], {possible: ['runs', 'fails'], settle: [{path: 'Repo facts › event policy', values: ['allows', 'blocks'], fact: 'eventPolicy'}]}];
+  else if (P.v === 'blocks') lab = ['fails', [C('PRT-3', 'The event policy blocks pull_request_target', 'labeler.yml', 'pull_request_target:')]];
+  else lab = ['runs', [C('EV-1', `pull_request_target (${sc.type}) triggers this file`, 'labeler.yml', 'pull_request_target:'), ...(after2Dec(F) ? [] : [C('PRT-2', 'Before 2 Dec 2026: evaluate mode, the run is created')]), ...(fork ? [C('FK-6', 'Runs whatever the approval state')] : [])]];
+  add('labeler.yml', 'run', ...lab);
+  if (lab[0] !== 'runs') add('labeler.yml › label', 'run', lab[0] === 'uncertain' ? 'uncertain' : 'no-run', lab[1], {possible: lab[0] === 'uncertain' ? ['runs', 'fails', 'no-run'] : undefined, settle: lab[2]?.settle, inherited: true});
+  else if (fork) add('labeler.yml › label', 'run', 'fails', [C('CO-1', 'actions/checkout refuses to check out the fork\'s head commit under pull_request_target (GitHub\'s error)', 'labeler.yml', 'ref: ${{', 1), C('CO-3', 'actions/checkout@v5 is a floating major tag ≥ v2', 'labeler.yml', 'actions/checkout')]);
+  else add('labeler.yml › label', 'run', 'runs', [C('WN-2', 'Assumed to succeed', 'labeler.yml', '  label:')]);
+  // access (computed as if each job runs)
+  const sec = (k, f, needle) => fork && f === 'ci.yml' ? add(k, 'access', 'empty', [C('FK-2', 'Fork pull_request runs get no secrets except GITHUB_TOKEN', f, needle)])
+    : dep ? add(k, 'access', 'dependabot-only', [C('FK-8', 'Dependabot runs get only Dependabot secrets', f, needle)])
+    : add(k, 'access', 'available', [C(f === 'ci.yml' ? 'FK-0' : 'FK-6', f === 'ci.yml' ? 'Same-repo run: repository secrets are available' : 'pull_request_target runs in the base repo: secrets are available', f, needle)]);
+  for (const j of ['changes', 'test', 'lint']) {
+    const k = `ci.yml › ${j}`;
+    add(`${k} › token.contents`, 'access', 'read', [C('PERM-3', 'permissions: contents: read', 'ci.yml', j === 'lint' ? '      contents: read' : 'contents: read', 1)]);
+    if (j === 'lint') add(`${k} › token.pull-requests`, 'access', fork || dep ? 'read' : 'write', fork ? [C('PERM-2', 'Fork pull_request: write scopes are downgraded to read', 'ci.yml', 'pull-requests: write'), C('PERM-3', 'Job asks for pull-requests: write', 'ci.yml', 'pull-requests: write')] : dep ? [C('FK-8', 'Dependabot token is read-only', 'ci.yml', 'pull-requests: write')] : [C('PERM-3', 'Job asks for pull-requests: write', 'ci.yml', 'pull-requests: write')]);
+    else add(`${k} › token.pull-requests`, 'access', 'none', [C('PERM-3', 'A permissions: block sets every unlisted scope to none', 'ci.yml', 'permissions:')]);
+    sec(`${k} › secrets`, 'ci.yml', j === 'test' ? 'secrets.NPM_TOKEN' : `  ${j}:`);
+  }
+  add('labeler.yml › label › token.contents', 'access', 'read', [C('PERM-3', 'permissions: contents: read', 'labeler.yml', 'contents: read')]);
+  add('labeler.yml › label › token.pull-requests', 'access', dep ? 'read' : 'write', dep ? [C('FK-8', 'Dependabot token is read-only', 'labeler.yml', 'pull-requests: write')] : [C('PERM-3', 'permissions: pull-requests: write', 'labeler.yml', 'pull-requests: write'), ...(fork ? [C('FK-6', 'pull_request_target uses the base repo token, even for forks')] : [])]);
+  sec('labeler.yml › label › secrets', 'labeler.yml', 'secrets.GITHUB_TOKEN');
+  // required checks
+  const prod = {changes: 'ci.yml › changes', test: 'ci.yml › test', lint: 'ci.yml › lint', label: 'labeler.yml › label'};
+  const rank = ['Passes', 'May not block', 'Uncertain', 'Pending and blocks merge', 'Fails and blocks merge'];
+  for (const name of F.required) {
+    const jv = out.find(v => v.key === prod[name]); let b;
+    if (!jv) b = ['Pending and blocks merge', [{r: 'RQ-0', t: `No job in the Workflow set produces a check named "${name}"`}]];
+    else if (jv.value === 'runs') b = ['Passes', [C('RQ-2', `${prod[name]} runs and reports "${name}"`, jv.causes[0]?.f, `  ${name}:`)]];
+    else if (jv.value === 'fails') b = ['Fails and blocks merge', [C('RQ-4', `${prod[name]} fails`, jv.causes[0]?.f, `  ${name}:`), ...jv.causes]];
+    else if (jv.value === 'skipped' && jv.causes[0].r === 'JG-2') b = ['May not block', [C('RQ-3', 'Skipped because a needs: job failed', jv.causes[0].f, 'needs:'), ...jv.causes]];
+    else if (jv.value === 'skipped') b = ['Passes', [C('RQ-2', 'A job skipped by its own if: reports Success', 'ci.yml', 'if: needs.changes'), ...jv.causes]];
+    else if (jv.value === 'uncertain') b = ['Uncertain', [{r: 'RQ-2', t: `Depends on ${prod[name]}, which is Uncertain`}, ...jv.causes], {settle: jv.settle, possible: ['Passes', 'Pending and blocks merge']}];
+    else b = ['Pending and blocks merge', [{r: 'RQ-1', t: `Nothing reports "${name}": ${jv.inherited ? 'its GitHub workflow did not run' : 'its job did not run'}`}, ...jv.causes, {r: 'RQ-8', t: "GitHub's docs: a check skipped by a path filter stays Pending (quoted verbatim in the real tool)"}]];
+    if (F.mergeQueue === 'on' && jv && rank.indexOf(b[0]) < 3) b = ['Pending and blocks merge', [C('RQ-6', `Merge queue stage: ${jv.key.split(' › ')[0]} has no merge_group trigger, so "${name}" never reports there`, jv.key.split(' › ')[0], 'on:'), ...b[1]]];
+    if (F.strict === 'strict') b[1].push({r: 'RQ-10', t: 'Strict mode: the branch must be up to date before merging (note only)'});
+    add(`check › ${name}`, 'check', b[0], b[1], b[2] || {});
+  }
+  // concurrency A-then-B
+  const gA = `ci-${sc.head}`.toLowerCase();
+  add('ci.yml › concurrency.A', 'conc', ciRuns ? 'runs' : 'no-run', ciRuns ? [C('CC-1', `Group resolves to "${gA}"`, 'ci.yml', 'group:')] : ci[1], {group: gA});
+  if (sc.follow.on) {
+    const hB = sc.follow.kind === 'same' ? sc.head : sc.follow.head, gB = `ci-${hB}`.toLowerCase();
+    const same = gA === gB && ciRuns;
+    if (same) { out.at(-1).value = 'cancelled'; out.at(-1).causes = [C('CC-2', `B joins group "${gA}" and cancel-in-progress is true`, 'ci.yml', 'cancel-in-progress', 1), C('CC-5', 'github.head_ref is the head branch name, so two PRs from branches with the same name share a group', 'ci.yml', 'group:')]; }
+    add('ci.yml › concurrency.B', 'conc', 'runs', [C('CC-1', same ? `Takes over group "${gB}"` : `Group "${gB}" is free`, 'ci.yml', 'group:')], {group: gB, continuing: same ? 'B' : 'A, B'});
+  }
+  return out.sort((a, b) => a.key < b.key ? -1 : 1);
+}
+
+// ---------------------------------------------------------------- shared little widgets
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const vClass = v => ({runs: 'ok', Passes: 'ok', fails: 'bad', cancelled: 'bad', 'Fails and blocks merge': 'bad', 'Pending and blocks merge': 'pend', pending: 'pend', 'May not block': 'pend',
+  uncertain: 'unc', Uncertain: 'unc', write: 'strong', available: 'strong', 'dependabot-only': 'mid', read: 'mid', none: 'faint', empty: 'faint'}[v] || 'neu');
+const V = (v, possible) => `<span class="v v-${vClass(v)}">${esc(v)}${possible ? ` <span style="font-weight:400">[${possible.join(' · ')}]</span>` : ''}</span>`;
+const results = () => S.scen.map(sim);
+const find = (rs, key) => rs.find(v => v.key === key);
+const allKeys = rs => [...new Set(rs.flatMap(r => r.map(v => v.key)))].sort();
+const differs = (rs, key) => new Set(rs.map(r => JSON.stringify([find(r, key)?.value, find(r, key)?.possible]))).size > 1;
+const isPinned = (s, key) => S.pins.some(p => p.s === s && p.key === key);
+const pinBtn = (s, key) => `<button class="pinbtn ${isPinned(s, key) ? 'on' : ''}" data-act="pin" data-s="${s}" data-k="${esc(key)}" title="Pin as expected in a Behaviour test">${isPinned(s, key) ? '📌' : '📍'}</button>`;
+const lineRef = c => c.f ? `<button class="link mono small" data-act="hl" data-f="${c.f}" data-a="${c.a}" data-b="${c.b}">${c.f}:${c.a}${c.b > c.a ? '–' + c.b : ''}</button>` : '';
+function causesHTML(v, {excerpts = false} = {}) {
+  return `<ol class="causes">${v.causes.map((c, i) => `<li class="${i === 0 ? 'root' : ''}">
+    <span class="rule ${c.wn5 || c.wn ? 'wn' : ''}">${c.r}</span> ${c.wn5 ? `<i class="mute">${esc(c.t)}</i> <button class="link small" data-act="focusfact" data-field="${c.field}">set it</button>` : esc(c.t)} ${lineRef(c)}
+    ${i === 0 ? '<span class="srctag">root</span>' : ''}
+    ${excerpts && c.f ? excerpt(c.f, c.a, c.b) : ''}</li>`).join('')}</ol>
+    ${v.group ? `<div class="small">Resolved group: <code>${esc(v.group)}</code> ← <code>ci-\${{ github.head_ref || github.run_id }}</code>${v.continuing ? ` · continuing: ${v.continuing}` : ''}</div>` : ''}
+    ${settleHTML(v)}`;
+}
+function settleHTML(v) {
+  if (!v.settle) return v.value === 'uncertain' || v.value === 'Uncertain' ? `<div class="settle small">Nothing you can enter decides this (GitHub's docs leave it open, or the value exists only at run time).</div>` : '';
+  return `<div class="settle"><b class="small">Settle it</b> <span class="small mute">· one click adds the value to this Scenario</span>${v.settle.map(s => `
+    <div class="row small" style="margin-top:4px"><code>${esc(s.path)}</code>${s.hint ? `<span class="mute">(${esc(s.hint)})</span>` : ''} =
+    ${s.values.map(x => `<button data-act="settle" data-path="${esc(s.path)}" data-val="${esc(x)}" data-fact="${s.fact || ''}">${esc(x)}</button>`).join('')}
+    <input placeholder="other value…" style="width:110px" data-act-enter="settle" data-path="${esc(s.path)}"></div>`).join('')}</div>`;
+}
+function excerpt(f, a, b) {
+  const ls = S.files[f].split('\n'), lo = Math.max(1, a - 1), hi = Math.min(ls.length, b + 1);
+  let h = ''; for (let i = lo; i <= hi; i++) h += `<div class="${i >= a && i <= b ? 'on' : ''}"><span class="n">${i}</span>${esc(ls[i - 1])}</div>`;
+  return `<div class="excerpt">${h}</div>`;
+}
+const srcTag = fct => fct.src === 'imported' ? `<span class="srctag imported" title="From ${S.source.repo} @ ${S.source.sha}">⤓ imported</span>` : fct.src === 'assumed' ? `<span class="srctag assumed" title="WN-5: default used because you haven't set it">assumed</span>` : `<span class="srctag">set</span>`;
+const sel = (path, val, opts, cls = '') => `<select class="${cls}" data-bind="${path}">${opts.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+function factField(i, k, label, opts) {
+  const f = S.scen[i].facts[k];
+  const input = opts ? sel(`scen.${i}.facts.${k}.v`, f.v, opts, 'src-' + f.src) : `<input class="src-${f.src}" value="${esc(f.v)}" data-bind="scen.${i}.facts.${k}.v" ${k === 'date' ? 'type="date"' : ''}>`;
+  return `<div class="field" id="fact-${i}-${k}"><label>${label} ${srcTag(f)}</label>${input}</div>`;
+}
+function checksHTML(i) {
+  const F = S.scen[i].facts;
+  return `<div class="row">${F.required.map(n => `<span class="chip">${esc(n)} <button class="link" data-act="rmcheck" data-i="${i}" data-n="${esc(n)}">×</button></span>`).join('')}
+    <input placeholder="add check name ⏎" style="width:130px" data-act-enter="addcheck" data-i="${i}"></div>
+    <div class="row small" style="margin-top:4px">${sel(`scen.${i}.facts.strict`, F.strict, ['strict', 'loose'])} merge queue ${sel(`scen.${i}.facts.mergeQueue`, F.mergeQueue, ['off', 'on'])}
+    <button class="link" data-act="allchecks" data-i="${i}" title="Preset: every check this Workflow set produces">require every produced check</button></div>`;
+}
+function scenarioForm(i) {
+  const sc = S.scen[i], p = `scen.${i}`;
+  return `<fieldset><legend>Event</legend>
+    <div class="field"><label>Event</label>${sel(p + '.event', sc.event, ['pull_request', 'pull_request_target', 'push'])}</div>
+    <div class="field"><label>Activity type</label>${sel(p + '.type', sc.type, ['opened', 'synchronize', 'reopened'])}</div>
+    <div class="field"><label>Actor kind</label>${sel(p + '.actor', sc.actor, ['member', 'fork', 'dependabot'])}</div>
+    ${sc.actor === 'fork' ? `<div class="field" id="fact-${i}-approval"><label>Approval ${srcTag(sc.approval)}</label>${sel(p + '.approval.v', sc.approval.v, ['approved', 'awaiting'], 'src-' + sc.approval.src)}</div>` : ''}
+    <div class="field"><label>Actor login <span class="srctag">optional</span></label><input value="${esc(sc.actorLogin)}" placeholder="only if an if: compares github.actor" data-bind="${p}.actorLogin"></div>
+    <div class="field"><label>Head → base</label><div class="row" style="flex-wrap:nowrap"><input value="${esc(sc.head)}" data-bind="${p}.head"> → <input value="${esc(sc.base)}" data-bind="${p}.base"></div></div>
+    <div class="field"><label>Changed files</label><textarea rows="3" class="mono" data-bind="${p}.changed">${esc(sc.changed)}</textarea></div>
+    <div class="field"><label>Commit message</label><input value="${esc(sc.msg)}" data-bind="${p}.msg"></div>
+  </fieldset>
+  <fieldset><legend>Follow-up event (concurrency)</legend>
+    <div class="field"><label>B arrives</label>${sel(p + '.follow.on', sc.follow.on ? 'yes' : 'no', ['yes', 'no'])}</div>
+    ${sc.follow.on ? `<div class="field"><label>B is</label>${sel(p + '.follow.kind', sc.follow.kind, ['same', 'other-fork'])}</div>
+    ${sc.follow.kind !== 'same' ? `<div class="field"><label>B head branch</label><input value="${esc(sc.follow.head)}" data-bind="${p}.follow.head"></div>` : ''}
+    <div class="field"><label>A when B arrives</label>${sel(p + '.follow.aState', sc.follow.aState, ['in progress', 'pending'])}</div>` : ''}
+  </fieldset>
+  <fieldset><legend>Repo facts</legend>
+    ${factField(i, 'date', 'Simulation date')}${factField(i, 'visibility', 'Visibility', ['public', 'private', 'internal'])}
+    ${factField(i, 'predates', 'Before 2026-09-17', ['yes', 'no'])}${factField(i, 'defaultBranch', 'Default branch')}
+    ${factField(i, 'tokenDefault', 'Token default', ['restricted', 'permissive'])}${factField(i, 'eventPolicy', 'Event policy (PRT)', ['none', 'allows', 'blocks'])}
+    ${factField(i, 'ownerRepo', 'owner/repo')}
+    <div style="margin-top:6px"><span class="small mute">Required checks</span>${checksHTML(i)}</div>
+  </fieldset>
+  <fieldset><legend>Assumptions</legend>${assumptionsHTML(i)}</fieldset>`;
+}
+function assumptionsHTML(i) {
+  const sc = S.scen[i];
+  return `${Object.entries(sc.assume).map(([k, v]) => `<div class="row small"><code>${esc(k)} = ${esc(v)}</code><button class="link" data-act="rmassume" data-i="${i}" data-k="${esc(k)}">×</button></div>`).join('')}
+    ${sc.fails.map(j => `<div class="row small">job <code>${j}</code> fails <button class="link" data-act="rmfail" data-i="${i}" data-j="${j}">×</button></div>`).join('')}
+    <div class="row small">assume job ${sel(`_failpick`, '', ['—', 'changes', 'test', 'lint'])} fails <button data-act="addfail" data-i="${i}">add</button></div>
+    ${!Object.keys(sc.assume).length && !sc.fails.length ? '<div class="small mute">None. Uncertain Verdicts offer one-click values here.</div>' : ''}`;
+}
+function sourceBar() {
+  return `<span class="chip mono" title="Workflow set">⤓ ${S.source.repo} @ ${S.source.sha} (${S.source.ref})</span>
+    <span class="chip edited-flag" style="${S.source.edited ? '' : 'display:none'};border-color:var(--diffb);background:var(--diff)">edited since import <button class="link" data-act="resetimport">reset</button></span>
+    <button data-act="reimport">Re-import…</button><button data-act="stub" data-msg="Paste: opens an empty untitled.yml tab (name editable).">Paste</button><button data-act="stub" data-msg="Upload / folder drop: replaces the Workflow set, after a confirm if it was edited.">Upload</button>`;
+}
+const baselineHTML = () => `<div class="baseline"><details><summary><b>What WhyNoRun always assumes</b> (Platform baseline: never shown as a cause)</summary><ul>${BASELINE.map(b => `<li>${b}</li>`).join('')}</ul></details></div>`;
+const trayHTML = () => S.pins.length ? `<span class="small"><b>${S.pins.length}</b> pinned</span> <button class="pri" data-act="export">Save as Behaviour test…</button> <button class="link small" data-act="clearpins">clear</button>` : '';
+const scenName = i => `${S.scen[i].id} · ${S.scen[i].label}`;
+
+// ---------------------------------------------------------------- Variant A: three-pane workbench
+const FLOWS = [['access', 'Access'], ['checks', 'Merge readiness'], ['conc', 'Concurrency'], ['all', 'All Verdicts']];
+function VariantA() {
+  const rs = results(), idx = S.compare ? [0, 1] : [S.cur];
+  const row = (key, label = key) => {
+    const d = S.compare && differs(rs, key), on = S.sel === key;
+    return `<tr class="vrow ${d ? 'diffrow' : ''} ${on ? 'sel' : ''}" data-act="select" data-k="${esc(key)}"><td class="mono small">${esc(label)}</td>
+      ${idx.map(i => { const v = find(rs[i], key); return `<td>${v ? V(v.value, v.possible) : '<span class="mute">—</span>'} ${v ? pinBtn(S.scen[i].id, key) : ''}</td>`; }).join('')}</tr>`;
+  };
+  const head = `<tr><th></th>${idx.map(i => `<th class="small">${scenName(i)}</th>`).join('')}</tr>`;
+  let body = '';
+  if (S.tab === 'access') {
+    for (const j of ['ci.yml › changes', 'ci.yml › test', 'ci.yml › lint', 'labeler.yml › label']) {
+      const runV = idx.map(i => find(rs[i], j));
+      body += `<div class="jobcard"><h4 class="row"><span class="mono">${j}</span>${runV.map(v => V(v.value)).join(' ')} <span class="small mute" style="font-weight:400">· access computed as if it runs</span></h4>
+        <table>${head}${row(j + ' › token.contents', 'contents')}${row(j + ' › token.pull-requests', 'pull-requests')}${row(j + ' › secrets', 'secrets')}
+        <tr><td colspan="3" class="small mute">15 other scopes: none (PERM-3) <button class="link small" data-act="stub" data-msg="Would expand the other 15 token scopes, each its own Verdict key.">show</button></td></tr></table></div>`;
+    }
+  } else if (S.tab === 'checks') {
+    body = `<div class="jobcard" style="padding:8px 10px"><b class="small">Required checks</b> <span class="small mute">(Repo facts of ${scenName(S.cur)})</span>${checksHTML(S.cur)}</div>
+      <table class="jobcard">${head}${allKeys(rs).filter(k => k.startsWith('check ›')).map(k => row(k)).join('')}</table>`;
+  } else if (S.tab === 'conc') {
+    body = idx.map(i => { const a = find(rs[i], 'ci.yml › concurrency.A'), b = find(rs[i], 'ci.yml › concurrency.B'); const sc = S.scen[i];
+      return `<div class="jobcard" style="padding:10px"><b>${scenName(i)}</b>
+        <div class="row" style="margin-top:6px"><span class="chip">A: ${esc(sc.head)}</span>${a ? V(a.value) : ''}<code class="small">${esc(a?.group)}</code> ${a ? pinBtn(sc.id, a.key) : ''}</div>
+        <div style="margin:2px 0 2px 18px" class="mute small">↓ then, while A is ${sc.follow.aState}…</div>
+        ${b ? `<div class="row"><span class="chip">B: ${esc(sc.follow.kind === 'same' ? sc.head : sc.follow.head)}</span>${V(b.value)}<code class="small">${esc(b.group)}</code> ${pinBtn(sc.id, b.key)}</div>` : '<div class="small mute">No Follow-up event.</div>'}
+        <button class="link small" data-act="select" data-k="ci.yml › concurrency.A">why?</button></div>`; }).join('');
+  } else body = `<table class="jobcard">${head}${allKeys(rs).map(k => row(k)).join('')}</table>`;
+  const sv = S.sel && idx.map(i => [i, find(rs[i], S.sel)]).filter(x => x[1]);
+  return `<div class="A"><header><b>WhyNoRun</b> ${sourceBar()}<span style="flex:1"></span>
+      <label class="small"><input type="checkbox" data-act="togglecompare" ${S.compare ? 'checked' : ''}> Compare A ↔ B</label></header>
+    <div class="pane editorpane"><div class="tabs">${Object.keys(S.files).map(f => `<button class="${f === S.active ? 'on' : ''}" data-act="file" data-f="${f}">${f}</button>`).join('')}<button data-act="stub" data-msg="New file tab: .github/workflows/untitled.yml">+</button></div><div class="cmwrap cm-host" data-file="${S.active}"></div></div>
+    <div class="pane form"><div class="row" style="margin-bottom:8px">${S.scen.map((s, i) => `<button class="${i === S.cur ? 'pri' : ''}" data-act="cur" data-i="${i}">${s.id} · ${esc(s.label)}</button>`).join('')}</div>${scenarioForm(S.cur)}</div>
+    <div class="pane results"><div class="tabs">${FLOWS.map(([k, l]) => `<button class="${S.tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${l}</button>`).join('')}</div>
+      <div class="body">${S.compare ? '<div class="small mute" style="margin-bottom:6px">Highlighted rows differ between A and B.</div>' : ''}${body}
+      ${sv && sv.length ? `<div class="explain"><div class="row"><b class="mono small">${esc(S.sel)}</b><button class="link small" data-act="select" data-k="">close</button></div>
+        ${sv.map(([i, v]) => `<div style="margin-top:6px"><span class="small"><b>${scenName(i)}</b></span> ${V(v.value, v.possible)}${causesHTML(v)}</div>`).join('')}</div>` : ''}</div></div>
+    ${baselineHTML()}<div class="tray" style="${S.pins.length ? '' : 'display:none'}">${trayHTML()}</div></div>`;
+}
+
+// ---------------------------------------------------------------- Variant B: story report (one column, sentences, inline YAML excerpts)
+function story(i) {
+  const sc = S.scen[i], p = `scen.${i}`, F = sc.facts;
+  const inp = (path, val, w) => `<input value="${esc(val)}" data-bind="${path}" style="width:${w}px">`;
+  return `<div class="story ${i ? 'alt' : ''}"><span class="tag">${i ? 'WHAT IF INSTEAD' : 'SCENARIO A'}</span>
+    On <input type="date" class="src-${F.date.src}" value="${F.date.v}" data-bind="${p}.facts.date.v">,
+    a ${sel(p + '.actor', sc.actor, ['member', 'fork', 'dependabot'])}
+    ${sc.actor === 'fork' ? `(run ${sel(p + '.approval.v', sc.approval.v, ['approved', 'awaiting'], 'src-' + sc.approval.src)})` : ''}
+    updates a ${sel(p + '.event', sc.event, ['pull_request', 'pull_request_target'])}
+    from ${inp(p + '.head', sc.head, 120)} into ${inp(p + '.base', sc.base, 70)}
+    changing <input value="${esc(sc.changed.split('\n').join(', '))}" data-bind="${p}.changed" data-split="1" style="width:260px">.
+    ${sc.follow.on ? `Then ${sel(p + '.follow.kind', sc.follow.kind, ['same', 'other-fork'])} PR${sc.follow.kind === 'same' ? '' : ` from ${inp(p + '.follow.head', sc.follow.head, 80)}`} pushes while it's ${sel(p + '.follow.aState', sc.follow.aState, ['in progress', 'pending'])}.` : ''}
+    <div class="small mute" style="line-height:1.5">In a ${sel(p + '.facts.visibility.v', F.visibility.v, ['public', 'private'], 'src-' + F.visibility.src)} repo ${srcTag(F.visibility)},
+      event policy ${sel(p + '.facts.eventPolicy.v', F.eventPolicy.v, ['none', 'allows', 'blocks'], 'src-' + F.eventPolicy.src)} ${srcTag(F.eventPolicy)},
+      requiring ${F.required.map(n => `<code>${esc(n)}</code>`).join(', ') || 'no checks'}${F.mergeQueue === 'on' ? ' through a merge queue' : ''}.
+      <button class="link small" data-act="more">${S.more ? 'hide' : 'all'} inputs</button>${i === 0 && !S.compare ? ' · <button class="link small" data-act="togglecompare">+ what if…</button>' : ''}
+      ${i === 1 ? ' · <button class="link small" data-act="togglecompare">remove</button>' : ''}</div></div>
+    ${S.more ? `<div class="moreform">${scenarioForm(i)}</div>` : ''}`;
+}
+function sentence(v, sc) {
+  const [f, j, x] = v.key.split(' › ');
+  if (v.flow === 'access') return x === 'secrets' ? `<code>${j}</code> in ${f} gets secrets ${V(v.value)}` : `<code>${j}</code> in ${f} gets <code>${x.replace('token.', '')}</code> ${V(v.value)}`;
+  if (v.flow === 'check') return `Required check <code>${j}</code>: ${V(v.value, v.possible)}`;
+  if (v.flow === 'conc') return `Run ${v.key.endsWith('A') ? 'A' : 'B'} (${esc(v.key.endsWith('A') ? sc.head : (sc.follow.kind === 'same' ? sc.head : sc.follow.head))}) in group <code>${esc(v.group)}</code>: ${V(v.value)}`;
+  return j ? `Job <code>${j}</code> in ${f}: ${V(v.value, v.possible)}` : `<code>${f}</code>: ${V(v.value, v.possible)}`;
+}
+function VariantB() {
+  const rs = results(), idx = S.compare ? [0, 1] : [0];
+  const SECTIONS = [['access', 'Who gets write access and secrets?'], ['check', 'Can this PR merge?'], ['conc', 'What gets cancelled?'], ['run', 'What runs?']];
+  const sec = ([flow, title]) => {
+    let keys = allKeys(rs).filter(k => (find(rs[0], k) || find(rs[1], k)).flow === flow);
+    if (flow === 'access') keys = keys.filter(k => !k.endsWith('token.contents'));
+    if (S.compare && S.onlyDiff) keys = keys.filter(k => differs(rs, k));
+    return `<section><h2>${title}<button class="link small" data-act="pinsection" data-flow="${flow}">save these as a Behaviour test</button></h2>
+      ${keys.map(k => { const d = S.compare && differs(rs, k), op = S.open[k];
+        return `<div class="line ${d ? 'diffrow' : ''}" data-act="open" data-k="${esc(k)}">
+          ${idx.map(i => { const v = find(rs[i], k); return v ? `<div class="sentence">${S.compare ? `<span class="tag small mute">${S.scen[i].id}</span> ` : ''}${sentence(v, S.scen[i])} ${pinBtn(S.scen[i].id, k)}</div>` : ''; }).join('')}
+          ${op ? idx.map(i => { const v = find(rs[i], k); return v ? `<div class="why" style="margin:4px 0 6px 10px;cursor:auto">${S.compare ? `<b class="small">Why, in ${scenName(i)}:</b>` : '<b class="small">Why:</b>'}${causesHTML(v, {excerpts: true})}</div>` : ''; }).join('') : ''}</div>`; }).join('') || '<div class="mute small">No differences here.</div>'}</section>`;
+  };
+  return `<div class="B"><div class="srcline row">${sourceBar()}<button data-act="drawer">${S.drawer ? 'Close' : 'Edit'} YAML</button></div>
+    ${idx.map(story).join('')}
+    ${S.compare ? `<label class="small"><input type="checkbox" data-act="onlydiff" ${S.onlyDiff ? 'checked' : ''}> show only what changes between A and B</label>` : ''}
+    ${SECTIONS.map(sec).join('')}
+    <div style="margin-top:30px">${baselineHTML()}</div>
+    ${S.pins.length ? `<div style="position:fixed;right:16px;bottom:64px;background:#fff;border:1px solid var(--acc);border-radius:8px;padding:6px 10px">${trayHTML()}</div>` : ''}
+    ${S.drawer ? `<div class="drawer"><div class="row" style="padding:8px;border-bottom:1px solid var(--line)">${Object.keys(S.files).map(f => `<button class="${f === S.active ? 'pri' : ''}" data-act="file" data-f="${f}">${f}</button>`).join('')}<span style="flex:1"></span><button data-act="drawer">×</button></div><div class="cmwrap cm-host" data-file="${S.active}"></div></div>` : ''}</div>`;
+}
+
+// ---------------------------------------------------------------- Variant C: Verdict grid (rows = subject keys, columns = Scenarios)
+function VariantC() {
+  const rs = results(), keys = allKeys(rs);
+  const groups = [['run', 'Runs'], ['access', 'Access'], ['check', 'Required checks'], ['conc', 'Concurrency (A then B)']];
+  const flowOf = k => (rs.map(r => find(r, k)).find(Boolean)).flow;
+  let rows = '';
+  for (const [g, title] of groups) {
+    let ks = keys.filter(k => flowOf(k) === g); if (S.onlyDiff) ks = ks.filter(k => differs(rs, k));
+    if (!ks.length) continue;
+    rows += `<tr class="group"><td></td><td colspan="${S.scen.length + 1}">${title}</td></tr>`;
+    for (const k of ks) {
+      const parts = k.split(' › '), depth = parts.length - 1;
+      rows += `<tr><td class="gut">${differs(rs, k) ? '◆' : ''}</td><td class="key ${depth ? 'ind' : ''}" title="${esc(k)}">${depth ? `<span class="mute">${esc(parts[0])} ›</span> ${esc(parts.slice(1).join(' › '))}` : esc(k)}</td>
+        ${rs.map((r, i) => { const v = find(r, k), on = S.insp?.k === k && S.insp?.i === i;
+          return `<td class="cell ${on ? 'on' : ''}" data-act="cell" data-i="${i}" data-k="${esc(k)}">${v ? V(v.value, v.possible) : '—'}${v?.group ? `<div class="mono small mute">${esc(v.group)}</div>` : ''} ${v && isPinned(S.scen[i].id, k) ? '📌' : ''}</td>`; }).join('')}</tr>`;
+    }
+  }
+  let insp = '<div class="mute">Click a cell for its Explanation, or a column header to edit that Scenario.</div>';
+  if (S.insp?.scen !== undefined) insp = `<div class="row"><h3>${scenName(S.insp.scen)}</h3><input value="${esc(S.scen[S.insp.scen].label)}" data-bind="scen.${S.insp.scen}.label" style="width:140px"></div>${scenarioForm(S.insp.scen)}`;
+  else if (S.insp) { const v = find(rs[S.insp.i], S.insp.k), sc = S.scen[S.insp.i];
+    if (v) insp = `<div class="small mute">${scenName(S.insp.i)}</div><h3 class="mono" style="font-size:13px">${esc(v.key)}</h3>
+      <div class="row" style="margin:6px 0">${V(v.value, v.possible)} <button data-act="pin" data-s="${sc.id}" data-k="${esc(v.key)}">${isPinned(sc.id, v.key) ? '📌 pinned' : '📍 pin as expected'}</button></div>
+      ${causesHTML(v)}<div class="minicm cm-host" data-file="${S.active}"></div>`; }
+  return `<div class="C"><header><b>WhyNoRun</b> ${sourceBar()}<button data-act="stub" data-msg="Opens the YAML in a full editor overlay; the inspector shows a read-only slice.">Edit YAML</button><span style="flex:1"></span>
+      <label class="small"><input type="checkbox" data-act="onlydiff" ${S.onlyDiff ? 'checked' : ''}> ◆ differences only</label>${trayHTML()}</header>
+    <div class="gridwrap"><table><thead><tr><th style="width:16px"></th><th>Subject key</th>
+      ${S.scen.map((s, i) => `<th class="${S.insp?.scen === i ? 'on' : ''}" data-act="scenhead" data-i="${i}"><div>${s.id} · ${esc(s.label)}</div><div class="small mute" style="font-weight:400">${s.actor} · ${s.event} · ${esc(s.head)} · ${s.facts.date.v}</div></th>`).join('')}
+      <th>${S.scen.length < 4 ? '<button data-act="addscen">+ Scenario</button>' : ''}</th></tr></thead><tbody>${rows}</tbody></table>${baselineHTML()}</div>
+    <div class="insp">${insp}</div></div>`;
+}
+
+// ---------------------------------------------------------------- wiring
+const VARIANTS = {A: ['Workbench', VariantA], B: ['Story report', VariantB], C: ['Verdict grid', VariantC]};
+const KEYS = Object.keys(VARIANTS);
+let cms = [];
+function render() {
+  if (!VARIANTS[S.variant]) S.variant = 'A';
+  document.getElementById('app').innerHTML = VARIANTS[S.variant][1]();
+  document.getElementById('vlabel').textContent = `${S.variant} (${VARIANTS[S.variant][0]})`;
+  cms = [...document.querySelectorAll('.cm-host')].map(host => {
+    const f = host.dataset.file, cm = CodeMirror(host, {value: S.files[f], mode: 'yaml', lineNumbers: true});
+    if (S.hl && S.hl.f === f) { for (let l = S.hl.a; l <= S.hl.b; l++) cm.addLineClass(l - 1, 'background', 'hl-line'); setTimeout(() => cm.scrollIntoView({line: S.hl.a - 1, ch: 0}, 80)); }
+    cm.on('change', () => { S.files[f] = cm.getValue(); S.source.edited = true; document.querySelectorAll('.edited-flag').forEach(e => e.style.display = ''); });
+    return cm;
+  });
+}
+const setPath = (path, val) => { const ks = path.split('.'); let o = S; for (const k of ks.slice(0, -1)) o = o[k]; o[ks.at(-1)] = val; };
+const getPath = path => path.split('.').reduce((o, k) => o?.[k], S);
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 4200); }
+function modal(html) { document.getElementById('modal').innerHTML = html ? `<div class="modal" data-act="closemodal"><div>${html}</div></div>` : ''; }
+function settle(path, val, factK) {
+  const i = S.variant === 'C' && S.insp?.i !== undefined ? S.insp.i : S.variant === 'A' && !S.compare ? S.cur : null;
+  const targets = i === null ? S.scen.map((_, n) => n) : [i];
+  for (const n of targets) factK ? (S.scen[n].facts[factK] = fact(val, 'set')) : (S.scen[n].assume[path] = val);
+  toast(`Added ${path} = ${val} to ${targets.map(n => S.scen[n].id).join(' and ')}.`);
+}
+const ACT = {
+  stub: d => toast(d.msg),
+  file: d => { S.active = d.f; render(); },
+  hl: d => { S.hl = {f: d.f, a: +d.a, b: +d.b}; S.active = d.f; if (S.variant === 'B') S.drawer = true; render(); },
+  tab: d => { S.tab = d.t; render(); },
+  cur: d => { S.cur = +d.i; render(); },
+  select: d => { S.sel = d.k || null; render(); },
+  open: d => { S.open[d.k] = !S.open[d.k]; render(); },
+  cell: d => { S.insp = {i: +d.i, k: d.k}; const v = find(sim(S.scen[+d.i]), d.k), c = v?.causes.find(c => c.f); S.hl = c ? {f: c.f, a: c.a, b: c.b} : null; if (c) S.active = c.f; render(); },
+  scenhead: d => { S.insp = {scen: +d.i}; render(); },
+  addscen: () => { const c = structuredClone(S.scen.at(-1)); c.id = String.fromCharCode(65 + S.scen.length); c.label = 'Copy of ' + S.scen.at(-1).id; S.scen.push(c); S.insp = {scen: S.scen.length - 1}; render(); },
+  togglecompare: () => { S.compare = !S.compare; render(); },
+  onlydiff: () => { S.onlyDiff = !S.onlyDiff; render(); },
+  more: () => { S.more = !S.more; render(); },
+  drawer: () => { S.drawer = !S.drawer; render(); },
+  pin: d => { const k = S.pins.findIndex(p => p.s === d.s && p.key === d.k); k >= 0 ? S.pins.splice(k, 1) : S.pins.push({s: d.s, key: d.k}); render(); },
+  pinsection: d => { const rs = results(); (S.compare ? [0, 1] : [0]).forEach(i => rs[i].filter(v => v.flow === d.flow).forEach(v => isPinned(S.scen[i].id, v.key) || S.pins.push({s: S.scen[i].id, key: v.key}))); render(); },
+  clearpins: () => { S.pins = []; render(); },
+  settle: d => { settle(d.path, d.val, d.fact); render(); },
+  focusfact: d => { const el = document.querySelector(`[id$="-${d.field}"]`); if (el) { el.scrollIntoView({block: 'center'}); el.querySelector('select,input')?.focus(); } else toast('Open the Scenario form (all inputs) to set it.'); },
+  rmcheck: d => { const F = S.scen[+d.i].facts; F.required = F.required.filter(n => n !== d.n); render(); },
+  allchecks: d => { S.scen[+d.i].facts.required = ['changes', 'test', 'lint', 'label']; toast('Preset: every check this Workflow set produces is now required.'); render(); },
+  rmassume: d => { delete S.scen[+d.i].assume[d.k]; render(); },
+  addfail: (d, e) => { const j = e.target.parentElement.querySelector('select').value; if (j !== '—' && !S.scen[+d.i].fails.includes(j)) S.scen[+d.i].fails.push(j); render(); },
+  rmfail: d => { const sc = S.scen[+d.i]; sc.fails = sc.fails.filter(j => j !== d.j); render(); },
+  reimport: () => modal(`<h3>Re-import ${S.source.repo}</h3><div class="field"><label>Ref</label><input value="${S.source.ref}"></div>
+    <p class="small">Replaces the whole Workflow set with the files at the new commit.${S.source.edited ? ' <b>Your edits since the last import are lost.</b>' : ''}<br>
+    Imported Repo facts are refreshed. Facts you set, assumed facts, Scenarios, Assumptions and pins stay. Pins whose key no longer exists show as "pinned subject not found".</p>
+    <div class="row"><button class="pri" data-act="doreimport">Re-import</button><button data-act="closemodal">Cancel</button></div>`),
+  doreimport: () => { S.files = {'ci.yml': CI, 'labeler.yml': LAB}; S.source.edited = false; S.source.sha = 'b81e004'; modal(''); toast('Re-imported at b81e004 (stub: same files).'); render(); },
+  resetimport: () => { S.files = {'ci.yml': CI, 'labeler.yml': LAB}; S.source.edited = false; render(); },
+  closemodal: () => modal(''),
+  export: () => {
+    const rs = Object.fromEntries(S.scen.map((s, i) => [s.id, sim(s)]));
+    const by = S.scen.filter(s => S.pins.some(p => p.s === s.id));
+    const yaml = by.map(s => { const F = s.facts;
+      return `- scenario: ${s.label}\n  event: { name: ${s.event}, type: ${s.type}, actor: ${s.actor}${s.actor === 'fork' ? `, approval: ${s.approval.v}` : ''}, head: ${s.head}, base: ${s.base} }\n  changed: [${s.changed.split('\n').join(', ')}]\n  repo: { date: ${F.date.v}, visibility: ${F.visibility.v}, predates: ${F.predates.v}, tokenDefault: ${F.tokenDefault.v}, eventPolicy: ${F.eventPolicy.v}, required: [${F.required}], mode: ${F.strict}, mergeQueue: ${F.mergeQueue} }   # defaults written out\n${Object.keys(s.assume).length ? `  assume: { ${Object.entries(s.assume).map(([k, v]) => `"${k}": ${v}`).join(', ')} }\n` : ''}  expect:\n` +
+        S.pins.filter(p => p.s === s.id).map(p => { const v = find(rs[s.id], p.key); return `    "${p.key}": { value: ${v?.value}${v?.possible ? `, possible: [${v.possible}]` : ''}, root: ${v?.causes[0]?.r} }`; }).join('\n'); }).join('\n');
+    modal(`<h3>Save as Behaviour test</h3><p class="small mute">Draft shape only. The real format is decided in <i>Behaviour test format and the CLI/Action contract</i>.</p>
+      <div class="field"><label>File</label><input class="mono" value=".github/whynorun/fork-safety.test.yml"></div><pre>${esc(yaml)}</pre>
+      <div class="row"><button class="pri" data-act="stub" data-msg="Would download the file (no persistence in the prototype).">Download</button><button data-act="closemodal">Close</button></div>`);
+  },
+};
+document.addEventListener('click', e => { const a = e.target.closest('[data-act]'); if (!a || a.tagName === 'INPUT' && a.type !== 'checkbox') return; if (a.classList.contains('modal') && e.target !== a) return; if (a.dataset.act === 'open' && e.target.closest('.why')) return; ACT[a.dataset.act]?.(a.dataset, e); });
+document.addEventListener('change', e => {
+  const b = e.target.dataset.bind; if (!b || b.startsWith('_')) return;
+  let val = e.target.value; if (e.target.dataset.split) val = val.split(',').map(s => s.trim()).join('\n');
+  if (b.endsWith('follow.on')) val = val === 'yes';
+  setPath(b, val);
+  const parent = b.replace(/\.v$/, ''); if (b.endsWith('.v') && getPath(parent)?.src) getPath(parent).src = 'set';
+  render();
+});
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.key === 'Enter' && t.dataset.actEnter && t.value.trim()) {
+    if (t.dataset.actEnter === 'addcheck') S.scen[+t.dataset.i].facts.required.push(t.value.trim());
+    else settle(t.dataset.path, t.value.trim());
+    return render();
+  }
+  if (t.closest('input,textarea,select,[contenteditable],.CodeMirror')) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') go(e.key === 'ArrowLeft' ? -1 : 1);
+});
+function go(step) { S.variant = KEYS[(KEYS.indexOf(S.variant) + step + KEYS.length) % KEYS.length]; const u = new URL(location); u.searchParams.set('variant', S.variant); history.replaceState(null, '', u); render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+render();
+</script>
+</body>
+</html>
