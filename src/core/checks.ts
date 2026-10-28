@@ -15,10 +15,8 @@ import { settleable, type Scenario } from "./scenario";
 import { PR_DEFAULT_TYPES } from "./triggers";
 import type { Named } from "./names";
 
-/** A job that reports a check on the head SHA, with its GitHub workflow's Verdict. */
+/** A job that may report a check on the head SHA, with its GitHub workflow's Verdict. */
 export interface Producer extends Named {
-  /** What its `name:` expression needs (WN-4). */
-  needed?: string;
   job: Verdict;
   workflow: Verdict;
   /** The job's positions, for the causes that point at it. */
@@ -47,7 +45,7 @@ const cause = (rule: string, inputs: Cause["inputs"] = []): Cause => ({
 export function nameOf(
   job: WorkflowJob,
   scenario: Scenario,
-): Pick<Producer, "name" | "needed"> {
+): Pick<Named, "name" | "needed"> {
   if (!job.name || !isBasicExpression(job.name))
     return { name: checkName(job) };
   const vars = scenario.repo.vars ?? {};
@@ -145,17 +143,32 @@ export function checkVerdicts(
   const notes = repo.strict
     ? [cause("RQ-10", [{ path: "repo.strict", value: true }])]
     : [];
+  // RQ-1 covers a filter or commit-message skip only; any other skip (EV-0, PL-9) stays the root.
+  const filtered = (workflow: Verdict) =>
+    /^(BR|PA|SK)-/.test(workflow.causes[0]?.rule ?? "") ? [cause("RQ-1")] : [];
   // RQ-6: a merge group no GitHub workflow runs for reports nothing.
-  const unqueued = cause("RQ-6", [{ path: "repo.mergeQueue", value: true }]);
+  const unqueued = () => [
+    cause("RQ-6", [{ path: "repo.mergeQueue", value: true }]),
+  ];
   return names.map((name) => {
-    const pr = named(name, producers, cause("RQ-1"));
-    const queue = queued && named(name, queued, unqueued);
+    const pr = derivedBadge(name, producers, filtered);
+    const queue = queued && derivedBadge(name, queued, unqueued);
     // The badge is the more blocking of the PR and merge-queue stages (#6).
     const { causes, ...rest } =
       queue && RANK.indexOf(queue.value) < RANK.indexOf(pr.value) ? queue : pr;
     return { key: `check › ${name}`, ...rest, causes: [...causes, ...notes] };
   });
 }
+
+/** Why a skipped GitHub workflow's job reports nothing, ahead of its own chain. */
+type Skipped = (workflow: Verdict) => Cause[];
+
+/** Whether a check key is `check › <name>`, never a job's `<file> › <jobId>`: no file is named check. */
+export const isCheck = (key: string): boolean => key.startsWith("check › ");
+
+/** Producers are jobs on the head SHA (#71): one whose GitHub workflow is skipped reports nothing. */
+const reports = (p: Producer) =>
+  !(p.job.value === "no-run" && p.workflow.value === "skipped");
 
 /** A name derived from a matrix job (`<name> (…)`) or a remote caller (`<caller> / …`), RQ-9. */
 const prefixed = (p: Producer, name: string) =>
@@ -172,21 +185,42 @@ function match(producers: Producer[], name: string): Producer | undefined {
   );
 }
 
+/** A badge that may instead never be reported: Uncertain [the badge, Pending and blocks merge]. */
+const orUnreported = (
+  v: Omit<Verdict, "key">,
+  root: Cause,
+): Omit<Verdict, "key"> => ({
+  value: "uncertain",
+  causes: [root, ...v.causes],
+  possible: [
+    ...new Set([...(v.possible ?? [v.value]), "pending and blocks merge"]),
+  ].sort(),
+  settle: [],
+});
+
 /** The badge with how the name was derived (RQ-9, #8 §10) applied. */
-function named(
+function derivedBadge(
   name: string,
   producers: Producer[],
-  skipped: Cause,
+  skipped: Skipped,
 ): Omit<Verdict, "key"> {
   const computed = badge(name, producers, skipped);
   const producer = match(producers, name);
-  // A remote callee's checks are never seen: when its caller runs, what it reports is unknown.
-  if (producer?.via === "remote" && producer.job.value === "runs")
+  // A remote callee's checks are never seen: when its caller runs, on any Event, what it
+  // reports is unknown.
+  const caller =
+    producer?.via === "remote"
+      ? producers.find(
+          (p) =>
+            p.via === "remote" && prefixed(p, name) && p.job.value === "runs",
+        )
+      : undefined;
+  if (caller)
     return {
       value: "uncertain",
       causes: [
-        { rule: "WN-6", spans: [producer.uses!], inputs: [] },
-        ...producer.job.causes,
+        { rule: "WN-6", spans: [caller.uses!], inputs: [] },
+        ...caller.job.causes,
       ],
       settle: [],
     };
@@ -198,27 +232,17 @@ function named(
     };
   // A matrix job's check names are undocumented (RQ-9): its badge, or never reported.
   if (producer?.via === "matrix")
-    return {
-      value: "uncertain",
-      causes: [
-        cause("RQ-9", [{ path: "repo.required", value: name }]),
-        ...computed.causes,
-      ],
-      possible: [
-        ...new Set([
-          ...(computed.possible ?? [computed.value]),
-          "pending and blocks merge",
-        ]),
-      ].sort(),
-      settle: [],
-    };
+    return orUnreported(
+      computed,
+      cause("RQ-9", [{ path: "repo.required", value: name }]),
+    );
   return computed;
 }
 
 function badge(
   name: string,
   producers: Producer[],
-  skipped: Cause,
+  skipped: Skipped,
 ): Omit<Verdict, "key"> {
   // Nothing reports the check, which GitHub's guidance (RQ-8) answers.
   const pending = (...causes: Cause[]) => ({
@@ -238,34 +262,43 @@ function badge(
         ? cased
         : producers.filter((p) => prefixed(p, name));
   // One job may report on more than one Event: the PR's and its implied push.
-  const jobs = new Map<string, Producer[]>();
-  for (const p of matched)
-    jobs.set(p.job.key, [...(jobs.get(p.job.key) ?? []), p]);
-  if (jobs.size === 0) {
-    const unknown = producers.find((p) => p.needed !== undefined);
-    if (!unknown) return pending(cause("RQ-0", [typed]));
-    // A `name:` the Scenario can't evaluate may be this check (#8 §5).
+  const byJob = (ps: Producer[]) => {
+    const jobs = new Map<string, Producer[]>();
+    for (const p of ps)
+      jobs.set(p.job.key, [...(jobs.get(p.job.key) ?? []), p]);
+    return [...jobs.values()];
+  };
+  const jobs = byJob(matched);
+  if (jobs.length === 0) {
+    // A `name:` the Scenario can't evaluate may be this check (#8 §5), if its job reports.
+    const unknown = byJob(
+      producers.filter((p) => p.needed !== undefined && reports(p)),
+    ).map((stages) => stages[0]!);
+    if (unknown.length === 0) return pending(cause("RQ-0", [typed]));
     return {
       value: "uncertain",
       causes: [
         {
           rule: "WN-4",
-          spans: unknown.spans?.name ? [unknown.spans.name] : [],
+          spans: unknown.flatMap((p) => (p.spans?.name ? [p.spans.name] : [])),
           inputs: [],
         },
         cause("RQ-0", [typed]),
       ],
-      settle: settleable(unknown.needed!) ? [unknown.needed!] : [],
+      settle: [...new Set(unknown.map((p) => p.needed!))].filter(settleable),
     };
   }
-  const badges = [...jobs.values()].map((stages) => {
-    const all = stages.map((p) => stage(p, pending, skipped));
-    // A stage whose GitHub workflow is filtered out reports nothing; the others all count.
-    const reported = all.filter((b) => b.causes[0]?.rule !== skipped.rule);
-    return (reported.length > 0 ? reported : all).reduce((a, b) =>
-      RANK.indexOf(b.value) < RANK.indexOf(a.value) ? b : a,
-    );
-  });
+  // A duplicate name counts only from the jobs that report it.
+  const live = jobs
+    .map((stages) => stages.filter(reports))
+    .filter((stages) => stages.length > 0);
+  const badges = (live.length > 0 ? live : jobs.slice(0, 1)).map((stages) =>
+    stages
+      .map((p) => producerBadge(p, pending, skipped))
+      .reduce((a, b) =>
+        RANK.indexOf(b.value) < RANK.indexOf(a.value) ? b : a,
+      ),
+  );
   const ids = (ps: Producer[]) =>
     ps.flatMap((p) => (p.spans ? [p.spans.id] : []));
   const values = [...new Set(badges.map((b) => b.value))].sort();
@@ -276,7 +309,7 @@ function badge(
       causes: [
         {
           rule: "RQ-0",
-          spans: [...jobs.values()].flatMap((ps) => ids(ps.slice(0, 1))),
+          spans: live.flatMap((ps) => ids(ps.slice(0, 1))),
           inputs: [typed],
         },
       ],
@@ -284,29 +317,20 @@ function badge(
       settle: [],
     };
   const result = badges[0]!;
-  // An exact or RQ-9 prefix match: `named` applies the prefix's rule.
+  // An exact or RQ-9 prefix match: `derivedBadge` applies the prefix's rule.
   if (exact.length > 0 || cased.length === 0) return result;
-  return {
-    value: "uncertain",
-    causes: [
-      { rule: "RQ-0", spans: ids(matched.slice(0, 1)), inputs: [typed] },
-      ...result.causes,
-    ],
-    possible: [
-      ...new Set([
-        ...(result.possible ?? [result.value]),
-        "pending and blocks merge",
-      ]),
-    ].sort(),
-    settle: [],
-  };
+  return orUnreported(result, {
+    rule: "RQ-0",
+    spans: ids(matched.slice(0, 1)),
+    inputs: [typed],
+  });
 }
 
 /** The badge one producer gives the check, from its job's and GitHub workflow's Verdicts. */
-function stage(
+function producerBadge(
   { job, workflow, spans }: Producer,
   pending: (...causes: Cause[]) => Omit<Verdict, "key">,
-  skipped: Cause,
+  skipped: Skipped,
 ): Omit<Verdict, "key"> {
   if (job.value === "runs")
     return { value: "passes", causes: [cause("RQ-4"), ...job.causes] };
@@ -332,8 +356,9 @@ function stage(
       ? { value: "passes", causes: [cause("RQ-2"), ...job.causes] }
       : { value: "may not block", causes: [cause("RQ-3"), ...job.causes] };
   if (job.value === "no-run") {
-    // A filter or commit-message skip (RQ-1), or no merge_group run (RQ-6), creates no check run.
-    if (workflow.value === "skipped") return pending(skipped, ...job.causes);
+    // A skipped GitHub workflow (RQ-1, RQ-6, or its own root) creates no check run.
+    if (workflow.value === "skipped")
+      return pending(...skipped(workflow), ...job.causes);
     // A run awaiting approval starts no job, so nothing reports (#8 §2).
     if (workflow.value === "pending") return pending(...job.causes);
     // The failed run's check conclusion is undocumented (PRT-5), but it blocks either way (#8 §4).

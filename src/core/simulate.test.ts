@@ -3270,7 +3270,7 @@ test("a same-repo PR counts a check from a push-triggered job on the head SHA, n
   });
   expect(
     byKey(fork.verdicts, "check › build")!.causes.map((c) => c.rule),
-  ).toEqual(["RQ-1", "EV-0", "RQ-8"]);
+  ).toEqual(["EV-0", "RQ-8"]);
 });
 
 test("a same-repo PR whose push and PR runs are both filtered out stays Pending, with the PR's own chain (RQ-1, then PA-2)", () => {
@@ -3319,10 +3319,17 @@ test("a name: expression is evaluated for the check name, and one needing a valu
     lint: ["uncertain", "WN-4", "RQ-0"],
   });
   const { verdicts } = simulate(files, { ...push, repo: { date, required } });
+  // Each unknown name: is cited; only the variable can be given.
   expect(byKey(verdicts, "check › lint")).toMatchObject({
     settle: ["vars.KIND"],
     causes: [
-      { rule: "WN-4", spans: [expect.objectContaining({ line: 9 })] },
+      {
+        rule: "WN-4",
+        spans: [
+          expect.objectContaining({ line: 9 }),
+          expect.objectContaining({ line: 14 }),
+        ],
+      },
       {},
     ],
   });
@@ -3454,7 +3461,8 @@ test("a local reusable job's check is <caller job name> / <callee job name> and 
     "call / e2e": ["passes", "RQ-2", "RQ-9", "JG-3"],
     call: ["pending and blocks merge", "RQ-0", "RQ-8"],
   });
-  // The caller's name: names the check; a skipped caller file leaves it Pending (RQ-1).
+  // The caller's name: names the check; a caller file the Event doesn't trigger leaves it
+  // Pending, root EV-0.
   // A fork's PR implies no push (PA-4), so the push-only caller never runs.
   const named = [
     callerOf("    name: CI\n    uses: ./.github/workflows/lib.yml\n", "push"),
@@ -3464,8 +3472,8 @@ test("a local reusable job's check is <caller job name> / <callee job name> and 
     checksOf(named, {
       ...actorPr("fork"),
       repo: { date, required: ["CI / test"] },
-    })["CI / test"]!.slice(0, 4),
-  ).toEqual(["pending and blocks merge", "RQ-1", "RQ-9", "EV-0"]);
+    })["CI / test"]!.slice(0, 3),
+  ).toEqual(["pending and blocks merge", "EV-0", "RQ-9"]);
 });
 
 test("a required check matched only through a remote caller's <caller job name> / … is Uncertain, root WN-6 at its uses:, while the caller runs; a skipped caller keeps the existing rules", () => {
@@ -3516,8 +3524,127 @@ test("a required name matched only through a matrix job's derived prefix is Unce
   }
 });
 
+// Producers are jobs on the head SHA (#71): a job whose GitHub workflow doesn't run reports nothing.
+const tagged = (extra = "") =>
+  `on:\n  push:\n    tags: ['v*']\njobs:\n${job("test", extra)}`;
+
+test("a duplicate check name in a GitHub workflow that doesn't run for the Event isn't a second producer: the job that reports decides the badge", () => {
+  const files = [
+    wf("ci.yml", `on: pull_request\njobs:\n${job("test")}`),
+    wf("rel.yml", tagged()),
+  ];
+  const scenario = { ...actorPr("fork"), repo: { date, required: ["test"] } };
+  expect(checksOf(files, scenario).test!.slice(0, 2)).toEqual([
+    "passes",
+    "RQ-4",
+  ]);
+  // With neither running, nothing reports it: Pending, rooted in EV-0, not RQ-1's filters.
+  expect(
+    checksOf([wf("ci.yml", tagged()), wf("rel.yml", tagged())], scenario).test,
+  ).toEqual(["pending and blocks merge", "EV-0", "RQ-8"]);
+});
+
+test("a check whose GitHub workflow is over 500 KB is Pending and blocks merge, root PL-9, never RQ-1", () => {
+  const big = `on: push\njobs:\n${job("build")}${"# padding\n".repeat(52_000)}`;
+  expect(
+    checksOf([wf("big.yml", big)], {
+      ...push,
+      repo: { date, required: ["build"] },
+    }).build,
+  ).toEqual(["pending and blocks merge", "PL-9", "RQ-8"]);
+});
+
+test("a remote caller that runs only on the implied push of a same-repo PR still makes its check Uncertain, root WN-6 at its uses:", () => {
+  const files = [
+    wf(
+      "ci.yml",
+      "on: push\njobs:\n  ci:\n    uses: org/repo/.github/workflows/x.yml@v1\n",
+    ),
+  ];
+  const check = byKey(
+    simulate(files, {
+      ...actorPr("member", { ref: "feat" }),
+      repo: { date, required: ["ci / build"] },
+    }).verdicts,
+    "check › ci / build",
+  )!;
+  expect(check).toMatchObject({ value: "uncertain", settle: [] });
+  expect(check.causes[0]).toMatchObject({
+    rule: "WN-6",
+    spans: [{ path: ".github/workflows/ci.yml", line: 4 }],
+  });
+});
+
+test("a local caller's name: expression is evaluated for its <caller> / <callee> checks, and is WN-4 when the Scenario lacks the value", () => {
+  const files = [
+    callerOf(
+      "    name: ${{ vars.CI }}\n    uses: ./.github/workflows/lib.yml\n",
+    ),
+    library,
+  ];
+  const check = (vars?: Record<string, string>) =>
+    byKey(
+      simulate(files, {
+        ...actorPr("member"),
+        repo: { date, required: ["CI / test"], ...(vars && { vars }) },
+      }).verdicts,
+      "check › CI / test",
+    )!;
+  expect(check({ CI: "CI" }).causes.map((c) => c.rule)).toEqual([
+    "RQ-4",
+    "RQ-9",
+    "WN-2",
+  ]);
+  expect(check({ CI: "CI" }).value).toBe("passes");
+  expect(check()).toMatchObject({
+    value: "uncertain",
+    causes: [{ rule: "WN-4" }, { rule: "RQ-0" }],
+    settle: ["vars.CI"],
+  });
+});
+
+test("an unknown name: counts only when its job reports: a GitHub workflow that doesn't run leaves a typo Pending, and each unknown producer that runs is cited and settled", () => {
+  const scenario = { ...actorPr("member"), repo: { date, required: ["tset"] } };
+  expect(
+    checksOf(
+      [
+        wf("ci.yml", `on: pull_request\njobs:\n${job("test")}`),
+        wf("rel.yml", tagged("    name: ${{ vars.KIND }}\n")),
+      ],
+      scenario,
+    ).tset,
+  ).toEqual(["pending and blocks merge", "RQ-0", "RQ-8"]);
+  const two = [
+    wf(
+      "ci.yml",
+      "on: pull_request\njobs:\n" +
+        job("a", "    name: ${{ vars.A }}\n") +
+        job("b", "    name: ${{ vars.B }}\n"),
+    ),
+  ];
+  const check = byKey(simulate(two, scenario).verdicts, "check › tset")!;
+  expect(check).toMatchObject({
+    value: "uncertain",
+    settle: ["vars.A", "vars.B"],
+  });
+  expect(check.causes[0]!.spans.map((s) => s.line)).toEqual([4, 9]);
+});
+
+test("producedChecks evaluates a name: expression the Scenario can, and leaves out only one it can't (WN-4)", () => {
+  const files = [
+    wf("ci.yml", `on: push\njobs:\n${job("os", "    name: ${{ vars.OS }}\n")}`),
+  ];
+  expect(
+    producedChecks(files, { ...push, repo: { date, vars: { OS: "linux" } } }),
+  ).toEqual({
+    names: ["linux"],
+    left: { matrix: 0, remote: 0, expression: 0 },
+  });
+  expect(producedChecks(files, push).left.expression).toBe(1);
+});
+
 test("producedChecks lists every check name the Workflow set produces, whatever the Event, and counts the matrix jobs, remote callers and name: expressions it leaves out", () => {
-  expect(producedChecks(example)).toEqual({
+  expect(producedChecks(example, push)).toEqual({
     names: ["changes", "build", "test", "e2e", "deploy", "triage"],
     left: { matrix: 0, remote: 0, expression: 0 },
   });
@@ -3534,7 +3661,7 @@ test("producedChecks lists every check name the Workflow set produces, whatever 
     library,
     { path: "docs/notes.yml", text: "jobs: {}\n" },
   ];
-  expect(producedChecks(files)).toEqual({
+  expect(producedChecks(files, push)).toEqual({
     names: ["Lint", "call / test", "call / e2e"],
     left: { matrix: 1, remote: 1, expression: 1 },
   });
