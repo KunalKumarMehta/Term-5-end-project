@@ -2,6 +2,7 @@
 // Diff their .d.ts files on every upgrade: the API shifts between minor releases.
 import { Evaluator, Lexer, Parser, data } from "@actions/expressions";
 import type { FunctionDefinition } from "@actions/expressions/funcs/info";
+import { truthy } from "@actions/expressions/result";
 import {
   NoOperationTraceWriter,
   parseWorkflow,
@@ -10,7 +11,10 @@ import { convertConcurrency } from "@actions/workflow-parser/model/converter/con
 import { convertOn } from "@actions/workflow-parser/model/converter/events";
 import { handleTemplateTokenErrors } from "@actions/workflow-parser/model/converter/handle-errors";
 import { convertJobs } from "@actions/workflow-parser/model/converter/jobs";
-import type { EventsConfig } from "@actions/workflow-parser/model/workflow-template";
+import type {
+  EventsConfig,
+  WorkflowJob,
+} from "@actions/workflow-parser/model/workflow-template";
 import type { TemplateToken } from "@actions/workflow-parser/templates/tokens/template-token";
 import {
   isAlias,
@@ -51,6 +55,19 @@ export interface ParsedWorkflow {
    * plus each event's settings as `event.key` and their list items as `event.key.i`.
    */
   onEntries: Map<string, Span>;
+  /** The jobs as the parser converted them; `if` already carries the implicit `success() &&`. */
+  jobs: WorkflowJob[];
+  /** Each job's positions by job id. */
+  jobSpans: Map<string, JobSpans>;
+}
+
+/** A job's positions; a job reached through an alias points every field at the alias. */
+export interface JobSpans {
+  id: Span;
+  if?: Span;
+  needs?: Span;
+  /** Only when job-level `continue-on-error` is literally `true`. */
+  continueOnError?: Span;
 }
 
 const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
@@ -74,7 +91,13 @@ export function parseWorkflowFile(path: string, text: string): ParsedWorkflow {
     endLine,
     endCol,
   });
-  const none = { events: {}, onSpan: undefined, onEntries: new Map() };
+  const none = {
+    events: {},
+    jobs: [],
+    onSpan: undefined,
+    onEntries: new Map(),
+    jobSpans: new Map(),
+  };
 
   // The workflow parser expands every alias with no limit (#2 risks), so stop a bomb first.
   try {
@@ -90,7 +113,8 @@ export function parseWorkflowFile(path: string, text: string): ParsedWorkflow {
     new NoOperationTraceWriter(),
   );
   // Malformed YAML leaves no token tree; converting it would only add a junk error.
-  const events = value === undefined ? {} : convert(context, value);
+  const { events, jobs } =
+    value === undefined ? { events: {}, jobs: [] } : convert(context, value);
   const lagging = schemaLag(doc, span);
   const diagnostics: Diagnostic[] = [];
   for (const e of context.errors.getErrors()) {
@@ -109,7 +133,7 @@ export function parseWorkflowFile(path: string, text: string): ParsedWorkflow {
       .replace(/ at line \d+, column \d+:$/, "");
     diagnostics.push({ ...where, message });
   }
-  return { ...indexOn(doc, span), diagnostics, events };
+  return { ...indexOn(doc, span), diagnostics, events, jobs };
 }
 
 /** The positions of the keys in SCHEMA_LAG, as `line:col`. */
@@ -140,20 +164,22 @@ function schemaLag(doc: Document, span: (node: Node) => Span): Set<string> {
 function convert(
   context: Parameters<typeof convertOn>[0],
   root: TemplateToken,
-): EventsConfig {
+): Pick<ParsedWorkflow, "events" | "jobs"> {
   let events: EventsConfig = {};
+  let jobs: WorkflowJob[] = [];
   handleTemplateTokenErrors(root, context, undefined, () => {
     for (const item of root.assertMapping("root")) {
       const key = item.key.assertString("root key").value;
       const run = <T>(fallback: T, f: () => T) =>
         handleTemplateTokenErrors(root, context, fallback, f);
       if (key === "on") events = run({}, () => convertOn(context, item.value));
-      if (key === "jobs") run([], () => convertJobs(context, item.value));
+      if (key === "jobs")
+        jobs = run([], () => convertJobs(context, item.value));
       if (key === "concurrency")
         run({}, () => convertConcurrency(context, item.value));
     }
   });
-  return events;
+  return { events, jobs };
 }
 
 // Positions come from the yaml library's own nodes: the workflow parser gives a node reached
@@ -161,11 +187,36 @@ function convert(
 function indexOn(
   doc: Document,
   span: (node: Node) => Span,
-): Pick<ParsedWorkflow, "onSpan" | "onEntries"> {
+): Pick<ParsedWorkflow, "onSpan" | "onEntries" | "jobSpans"> {
   const onEntries = new Map<string, Span>();
-  if (!isMap(doc.contents)) return { onSpan: undefined, onEntries };
+  const jobSpans = new Map<string, JobSpans>();
+  if (!isMap(doc.contents)) return { onSpan: undefined, onEntries, jobSpans };
+
+  const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
+  const jobs = resolve(doc, jobsPair?.value);
+  for (const item of isMap(jobs) ? jobs.items : []) {
+    const id = name(doc, item.key);
+    const body = resolve(doc, item.value);
+    if (id === undefined || !isMap(body)) continue;
+    const own = isAlias(item.value) ? span(item.value) : undefined;
+    const field = (key: string) => {
+      const p = body.items.find((f) => name(doc, f.key) === key);
+      return p && { pair: p, span: own ?? span((p.value ?? p.key) as Node) };
+    };
+    const coe = field("continue-on-error");
+    const coeValue = resolve(doc, coe?.pair.value);
+    jobSpans.set(id, {
+      id: span(item.key as Node),
+      if: field("if")?.span,
+      needs: field("needs")?.span,
+      continueOnError:
+        isScalar(coeValue) && coeValue.value === true ? coe!.span : undefined,
+    });
+  }
+
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
-  if (!pair || !isScalar(pair.key)) return { onSpan: undefined, onEntries };
+  if (!pair || !isScalar(pair.key))
+    return { onSpan: undefined, onEntries, jobSpans };
 
   // `on: *events` points every entry at the alias, on the on: line.
   const own = isAlias(pair.value) ? span(pair.value) : undefined;
@@ -202,7 +253,7 @@ function indexOn(
       });
     }
   }
-  return { onSpan: span(pair.key), onEntries };
+  return { onSpan: span(pair.key), onEntries, jobSpans };
 }
 
 function resolve(doc: Document, node: unknown): unknown {
@@ -219,12 +270,20 @@ function name(doc: Document, node: unknown): string | undefined {
 /** Thrown by stubs for values that exist only at run time, such as hashFiles(). */
 export class RuntimeValueNeeded extends Error {}
 
+/** What a job's status functions return, worked out from its `needs`. */
+export interface Status {
+  success: boolean;
+  failure: boolean;
+}
+
 // GitHub's status functions are missing from @actions/expressions, and a stub must be
 // registered in both the Parser (to validate) and the Evaluator (to run).
-const stubs: FunctionDefinition[] = [
-  stub("success", 0, () => new data.BooleanData(true)),
+// shortcut: success(id) and failure(id) ignore their arguments and read every need; upgrade
+// when a Verdict needs the per-job form.
+const stubs = (status: Status): FunctionDefinition[] => [
+  stub("success", 0, () => new data.BooleanData(status.success)),
   stub("always", 0, () => new data.BooleanData(true)),
-  stub("failure", 0, () => new data.BooleanData(false)),
+  stub("failure", 0, () => new data.BooleanData(status.failure)),
   stub("cancelled", 0, () => new data.BooleanData(false)),
   stub("hashFiles", 1, () => {
     throw new RuntimeValueNeeded("hashFiles()");
@@ -239,21 +298,25 @@ function stub(
   return { name, minArgs, maxArgs: Number.MAX_SAFE_INTEGER, call };
 }
 
-/** Evaluates one expression (without `${{ }}`) against contexts given as plain JSON. */
-export function evaluateExpression(
+/** Evaluates one condition (without `${{ }}`) against contexts given as plain JSON. */
+export function evaluateCondition(
   source: string,
   contexts: Record<string, unknown>,
-): data.ExpressionData {
+  status: Status,
+): boolean {
+  const funcs = stubs(status);
   const { tokens } = new Lexer(source).lex();
-  const expr = new Parser(tokens, Object.keys(contexts), stubs).parse();
+  const expr = new Parser(tokens, Object.keys(contexts), funcs).parse();
   const dict = JSON.parse(
     JSON.stringify(contexts),
     data.reviver,
   ) as data.Dictionary;
-  return new Evaluator(
-    expr,
-    dict,
-    // The Evaluator looks functions up by lower-cased name.
-    new Map(stubs.map((f) => [f.name.toLowerCase(), f])),
-  ).evaluate();
+  return truthy(
+    new Evaluator(
+      expr,
+      dict,
+      // The Evaluator looks functions up by lower-cased name.
+      new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
+    ).evaluate(),
+  );
 }

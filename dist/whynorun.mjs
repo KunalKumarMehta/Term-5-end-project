@@ -1705,7 +1705,7 @@ var require_merge = __commonJS({
     var identity = require_identity();
     var Scalar = require_Scalar();
     var MERGE_KEY = "<<";
-    var merge = {
+    var merge2 = {
       identify: (value) => value === MERGE_KEY || typeof value === "symbol" && value.description === MERGE_KEY,
       default: "key",
       tag: "tag:yaml.org,2002:merge",
@@ -1715,7 +1715,7 @@ var require_merge = __commonJS({
       }),
       stringify: () => MERGE_KEY
     };
-    var isMergeKey = (ctx, key) => (merge.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge.tag && tag.default);
+    var isMergeKey = (ctx, key) => (merge2.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge2.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default);
     function addMergeToJSMap(ctx, map, value) {
       const source = resolveAliasValue(ctx, value);
       if (identity.isSeq(source))
@@ -1754,7 +1754,7 @@ var require_merge = __commonJS({
     }
     exports.addMergeToJSMap = addMergeToJSMap;
     exports.isMergeKey = isMergeKey;
-    exports.merge = merge;
+    exports.merge = merge2;
   }
 });
 
@@ -1763,15 +1763,15 @@ var require_addPairToJSMap = __commonJS({
   "node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports) {
     "use strict";
     var log = require_log();
-    var merge = require_merge();
+    var merge2 = require_merge();
     var stringify = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
     function addPairToJSMap(ctx, map, { key, value }) {
       if (identity.isNode(key) && key.addToJSMap)
         key.addToJSMap(ctx, map, value);
-      else if (merge.isMergeKey(ctx, key))
-        merge.addMergeToJSMap(ctx, map, value);
+      else if (merge2.isMergeKey(ctx, key))
+        merge2.addMergeToJSMap(ctx, map, value);
       else {
         const jsKey = toJS.toJS(key, "", ctx);
         if (map instanceof Map) {
@@ -3162,7 +3162,7 @@ var require_schema3 = __commonJS({
     var bool = require_bool2();
     var float = require_float2();
     var int = require_int2();
-    var merge = require_merge();
+    var merge2 = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
     var set = require_set();
@@ -3182,7 +3182,7 @@ var require_schema3 = __commonJS({
       float.floatExp,
       float.float,
       binary.binary,
-      merge.merge,
+      merge2.merge,
       omap.omap,
       pairs.pairs,
       set.set,
@@ -3208,7 +3208,7 @@ var require_tags = __commonJS({
     var schema2 = require_schema();
     var schema$1 = require_schema2();
     var binary = require_binary();
-    var merge = require_merge();
+    var merge2 = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
     var schema$2 = require_schema3();
@@ -3233,7 +3233,7 @@ var require_tags = __commonJS({
       intOct: int.intOct,
       intTime: timestamp.intTime,
       map: map.map,
-      merge: merge.merge,
+      merge: merge2.merge,
       null: _null.nullTag,
       omap: omap.omap,
       pairs: pairs.pairs,
@@ -3243,7 +3243,7 @@ var require_tags = __commonJS({
     };
     var coreKnownTags = {
       "tag:yaml.org,2002:binary": binary.binary,
-      "tag:yaml.org,2002:merge": merge.merge,
+      "tag:yaml.org,2002:merge": merge2.merge,
       "tag:yaml.org,2002:omap": omap.omap,
       "tag:yaml.org,2002:pairs": pairs.pairs,
       "tag:yaml.org,2002:set": set.set,
@@ -3252,7 +3252,7 @@ var require_tags = __commonJS({
     function getTags(customTags, schemaName, addMergeTag) {
       const schemaTags = schemas.get(schemaName);
       if (schemaTags && !customTags) {
-        return addMergeTag && !schemaTags.includes(merge.merge) ? schemaTags.concat(merge.merge) : schemaTags.slice();
+        return addMergeTag && !schemaTags.includes(merge2.merge) ? schemaTags.concat(merge2.merge) : schemaTags.slice();
       }
       let tags = schemaTags;
       if (!tags) {
@@ -3270,7 +3270,7 @@ var require_tags = __commonJS({
         tags = customTags(tags.slice());
       }
       if (addMergeTag)
-        tags = tags.concat(merge.merge);
+        tags = tags.concat(merge2.merge);
       return tags.reduce((tags2, tag) => {
         const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
         if (!tagObj) {
@@ -3299,11 +3299,11 @@ var require_Schema = __commonJS({
     var tags = require_tags();
     var sortMapEntriesByKey = (a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
     var Schema = class _Schema {
-      constructor({ compat, customTags, merge, resolveKnownTags, schema: schema2, sortMapEntries, toStringDefaults }) {
+      constructor({ compat, customTags, merge: merge2, resolveKnownTags, schema: schema2, sortMapEntries, toStringDefaults }) {
         this.compat = Array.isArray(compat) ? tags.getTags(compat, "compat") : compat ? tags.getTags(null, compat) : null;
         this.name = typeof schema2 === "string" && schema2 || "core";
         this.knownTags = resolveKnownTags ? tags.coreKnownTags : {};
-        this.tags = tags.getTags(customTags, this.name, merge);
+        this.tags = tags.getTags(customTags, this.name, merge2);
         this.toStringOptions = toStringDefaults ?? null;
         Object.defineProperty(this, identity.MAP, { value: map.map });
         Object.defineProperty(this, identity.SCALAR, { value: string.string });
@@ -8774,6 +8774,10 @@ function reviver(_key, val) {
   return val;
 }
 
+// node_modules/@actions/expressions/dist/filtered_array.js
+var FilteredArray = class extends Array2 {
+};
+
 // node_modules/@actions/expressions/dist/lexer.js
 var TokenType;
 (function(TokenType3) {
@@ -9157,6 +9161,24 @@ var caseFunc = {
 };
 
 // node_modules/@actions/expressions/dist/result.js
+function falsy(d) {
+  switch (d.kind) {
+    case Kind.Null:
+      return true;
+    case Kind.Boolean:
+      return !d.value;
+    case Kind.Number: {
+      const dv = d.value;
+      return dv === 0 || isNaN(dv);
+    }
+    case Kind.String:
+      return d.value.length === 0;
+  }
+  return false;
+}
+function truthy(d) {
+  return !falsy(d);
+}
 function coerceTypes(li, ri) {
   let lv = li;
   let rv = ri;
@@ -9226,6 +9248,70 @@ function equals(lhs, rhs) {
     case Kind.Dictionary:
     case Kind.Array:
       return lv === rv;
+  }
+  return false;
+}
+function greaterThan(lhs, rhs) {
+  const [lv, rv] = coerceTypes(lhs, rhs);
+  if (lv.kind != rv.kind) {
+    return false;
+  }
+  switch (lv.kind) {
+    // Number, Number
+    case Kind.Number: {
+      const lf = lv.value;
+      const rf = rv.value;
+      if (isNaN(lf) || isNaN(rf)) {
+        return false;
+      }
+      return lf > rf;
+    }
+    // String, String
+    case Kind.String: {
+      let ls = lv.value;
+      let rs = rv.value;
+      ls = toUpperSpecial(ls);
+      rs = toUpperSpecial(rs);
+      return ls > rs;
+    }
+    // Boolean, Boolean
+    case Kind.Boolean: {
+      const lb = lv.value;
+      const rb = rv.value;
+      return lb && !rb;
+    }
+  }
+  return false;
+}
+function lessThan(lhs, rhs) {
+  const [lv, rv] = coerceTypes(lhs, rhs);
+  if (lv.kind != rv.kind) {
+    return false;
+  }
+  switch (lv.kind) {
+    // Number, Number
+    case Kind.Number: {
+      const lf = lv.value;
+      const rf = rv.value;
+      if (isNaN(lf) || isNaN(rf)) {
+        return false;
+      }
+      return lf < rf;
+    }
+    // String, String
+    case Kind.String: {
+      let ls = lv.value;
+      let rs = rv.value;
+      ls = toUpperSpecial(ls);
+      rs = toUpperSpecial(rs);
+      return ls < rs;
+    }
+    // Boolean, Boolean
+    case Kind.Boolean: {
+      const lb = lv.value;
+      const rb = rv.value;
+      return !lb && rb;
+    }
   }
   return false;
 }
@@ -9486,6 +9572,197 @@ function validateFunction(context, identifier, argCount) {
   if (name2 === "case" && argCount % 2 === 0) {
     throw new ExpressionError(ErrorType.ErrorEvenParameters, identifier);
   }
+}
+
+// node_modules/@actions/expressions/dist/idxHelper.js
+var idxHelper = class {
+  constructor(star, idx) {
+    this.star = star;
+    if (!idx) {
+      return;
+    }
+    if (!star) {
+      if (idx.primitive) {
+        this.str = idx.coerceString();
+      }
+      let f = idx.number();
+      if (!isNaN(f) && isFinite(f) && f >= 0) {
+        f = Math.floor(f);
+        this.int = f;
+      }
+    }
+  }
+};
+
+// node_modules/@actions/expressions/dist/evaluator.js
+var Evaluator = class {
+  /**
+   * Creates a new evaluator
+   * @param n Parsed expression to evaluate
+   * @param context Context data to use
+   * @param functions Optional map of function implementations. If given, these will be preferred over the built-in functions.
+   */
+  constructor(n, context, functions) {
+    this.n = n;
+    this.context = context;
+    this.functions = functions;
+  }
+  evaluate() {
+    return this.eval(this.n);
+  }
+  eval(n) {
+    return n.accept(this);
+  }
+  visitLiteral(literal) {
+    return literal.literal;
+  }
+  visitUnary(unary) {
+    const r = this.eval(unary.expr);
+    if (unary.operator.type === TokenType.BANG) {
+      return new BooleanData(falsy(r));
+    }
+    throw new Error(`unknown unary operator: ${unary.operator.lexeme}`);
+  }
+  visitBinary(binary) {
+    const left = this.eval(binary.left);
+    const right = this.eval(binary.right);
+    switch (binary.operator.type) {
+      case TokenType.EQUAL_EQUAL:
+        return new BooleanData(equals(left, right));
+      case TokenType.BANG_EQUAL:
+        return new BooleanData(!equals(left, right));
+      case TokenType.GREATER:
+        return new BooleanData(greaterThan(left, right));
+      case TokenType.GREATER_EQUAL:
+        return new BooleanData(equals(left, right) || greaterThan(left, right));
+      case TokenType.LESS:
+        return new BooleanData(lessThan(left, right));
+      case TokenType.LESS_EQUAL:
+        return new BooleanData(equals(left, right) || lessThan(left, right));
+    }
+    throw new Error(`unknown binary operator: ${binary.operator.lexeme}`);
+  }
+  visitLogical(logical) {
+    let result;
+    for (const arg of logical.args) {
+      result = this.eval(arg);
+      if (logical.operator.type === TokenType.AND && falsy(result) || logical.operator.type === TokenType.OR && truthy(result)) {
+        break;
+      }
+    }
+    return result;
+  }
+  visitGrouping(grouping) {
+    return this.eval(grouping.group);
+  }
+  visitContextAccess(contextAccess) {
+    const r = this.context.get(contextAccess.name.lexeme);
+    return r;
+  }
+  visitIndexAccess(ia) {
+    let idx;
+    if (ia.index instanceof Star) {
+      idx = new idxHelper(true, void 0);
+    } else {
+      let idxResult;
+      try {
+        idxResult = this.eval(ia.index);
+      } catch (e) {
+        throw new Error(`could not evaluate index for index access: ${e.message}`, { cause: e });
+      }
+      idx = new idxHelper(false, idxResult);
+    }
+    const objResult = this.eval(ia.expr);
+    let result;
+    switch (objResult.kind) {
+      case Kind.Array: {
+        const tobjResult = objResult;
+        if (tobjResult instanceof FilteredArray) {
+          result = filteredArrayAccess(tobjResult, idx);
+        } else {
+          result = arrayAccess(tobjResult, idx);
+        }
+        break;
+      }
+      case Kind.Dictionary: {
+        const tobjResult = objResult;
+        result = objectAccess(tobjResult, idx);
+        break;
+      }
+      default:
+        if (idx.star) {
+          result = new FilteredArray();
+        } else {
+          result = new Null();
+        }
+    }
+    return result;
+  }
+  visitFunctionCall(functionCall) {
+    const args = functionCall.args.map((arg) => this.eval(arg));
+    const functionName = functionCall.functionName.lexeme.toLowerCase();
+    const f = this.functions?.get(functionName) || wellKnownFunctions[functionName];
+    return f.call(...args);
+  }
+};
+function filteredArrayAccess(fa, idx) {
+  const result = new FilteredArray();
+  for (const item of fa.values()) {
+    switch (item.kind) {
+      case Kind.Dictionary: {
+        const ti = item;
+        if (idx.star) {
+          for (const v of ti.values()) {
+            result.add(v);
+          }
+        } else if (idx.str !== void 0) {
+          const v = ti.get(idx.str);
+          if (v !== void 0) {
+            result.add(v);
+          }
+        }
+        break;
+      }
+      case Kind.Array: {
+        const ti = item;
+        if (idx.star) {
+          for (const v of ti.values()) {
+            result.add(v);
+          }
+        } else if (idx.int !== void 0 && idx.int < ti.values().length) {
+          result.add(ti.get(idx.int));
+        }
+        break;
+      }
+    }
+  }
+  return result;
+}
+function arrayAccess(a, idx) {
+  if (idx.star) {
+    const fa = new FilteredArray();
+    for (const item of a.values()) {
+      fa.add(item);
+    }
+    return fa;
+  }
+  if (idx.int !== void 0 && idx.int < a.values().length) {
+    return a.get(idx.int);
+  }
+  return new Null();
+}
+function objectAccess(obj, idx) {
+  if (idx.star) {
+    const fa = new FilteredArray(...obj.values());
+    return fa;
+  }
+  if (idx.str !== void 0) {
+    const r = obj.get(idx.str);
+    if (r !== void 0) {
+      return r;
+    }
+  }
+  return new Null();
 }
 
 // node_modules/@actions/expressions/dist/features.js
@@ -13687,7 +13964,13 @@ function parseWorkflowFile(path, text) {
     endLine,
     endCol
   });
-  const none = { events: {}, onSpan: void 0, onEntries: /* @__PURE__ */ new Map() };
+  const none = {
+    events: {},
+    jobs: [],
+    onSpan: void 0,
+    onEntries: /* @__PURE__ */ new Map(),
+    jobSpans: /* @__PURE__ */ new Map()
+  };
   try {
     doc.toJS({ maxAliasCount: 1e3 });
   } catch (err) {
@@ -13698,7 +13981,7 @@ function parseWorkflowFile(path, text) {
     { name: path, content: text },
     new NoOperationTraceWriter()
   );
-  const events = value === void 0 ? {} : convert(context, value);
+  const { events, jobs } = value === void 0 ? { events: {}, jobs: [] } : convert(context, value);
   const lagging = schemaLag(doc, span);
   const diagnostics = [];
   for (const e of context.errors.getErrors()) {
@@ -13712,7 +13995,7 @@ function parseWorkflowFile(path, text) {
     const message = e.rawMessage.split("\n")[0].replace(/ at line \d+, column \d+:$/, "");
     diagnostics.push({ ...where, message });
   }
-  return { ...indexOn(doc, span), diagnostics, events };
+  return { ...indexOn(doc, span), diagnostics, events, jobs };
 }
 function schemaLag(doc, span) {
   const found = /* @__PURE__ */ new Set();
@@ -13736,23 +14019,47 @@ function schemaLag(doc, span) {
 }
 function convert(context, root) {
   let events = {};
+  let jobs = [];
   handleTemplateTokenErrors(root, context, void 0, () => {
     for (const item of root.assertMapping("root")) {
       const key = item.key.assertString("root key").value;
       const run = (fallback, f) => handleTemplateTokenErrors(root, context, fallback, f);
       if (key === "on") events = run({}, () => convertOn(context, item.value));
-      if (key === "jobs") run([], () => convertJobs(context, item.value));
+      if (key === "jobs")
+        jobs = run([], () => convertJobs(context, item.value));
       if (key === "concurrency")
         run({}, () => convertConcurrency(context, item.value));
     }
   });
-  return events;
+  return { events, jobs };
 }
 function indexOn(doc, span) {
   const onEntries = /* @__PURE__ */ new Map();
-  if (!(0, import_yaml2.isMap)(doc.contents)) return { onSpan: void 0, onEntries };
+  const jobSpans = /* @__PURE__ */ new Map();
+  if (!(0, import_yaml2.isMap)(doc.contents)) return { onSpan: void 0, onEntries, jobSpans };
+  const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
+  const jobs = resolve(doc, jobsPair?.value);
+  for (const item of (0, import_yaml2.isMap)(jobs) ? jobs.items : []) {
+    const id = name(doc, item.key);
+    const body = resolve(doc, item.value);
+    if (id === void 0 || !(0, import_yaml2.isMap)(body)) continue;
+    const own2 = (0, import_yaml2.isAlias)(item.value) ? span(item.value) : void 0;
+    const field = (key) => {
+      const p = body.items.find((f) => name(doc, f.key) === key);
+      return p && { pair: p, span: own2 ?? span(p.value ?? p.key) };
+    };
+    const coe = field("continue-on-error");
+    const coeValue = resolve(doc, coe?.pair.value);
+    jobSpans.set(id, {
+      id: span(item.key),
+      if: field("if")?.span,
+      needs: field("needs")?.span,
+      continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0
+    });
+  }
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
-  if (!pair || !(0, import_yaml2.isScalar)(pair.key)) return { onSpan: void 0, onEntries };
+  if (!pair || !(0, import_yaml2.isScalar)(pair.key))
+    return { onSpan: void 0, onEntries, jobSpans };
   const own = (0, import_yaml2.isAlias)(pair.value) ? span(pair.value) : void 0;
   const value = resolve(doc, pair.value);
   const entries = (0, import_yaml2.isSeq)(value) ? value.items : (0, import_yaml2.isMap)(value) ? value.items.map((p) => p.key) : [value];
@@ -13780,7 +14087,7 @@ function indexOn(doc, span) {
       });
     }
   }
-  return { onSpan: span(pair.key), onEntries };
+  return { onSpan: span(pair.key), onEntries, jobSpans };
 }
 function resolve(doc, node) {
   return (0, import_yaml2.isAlias)(node) ? node.resolve(doc) : node;
@@ -13791,10 +14098,10 @@ function name(doc, node) {
 }
 var RuntimeValueNeeded = class extends Error {
 };
-var stubs = [
-  stub("success", 0, () => new data_exports.BooleanData(true)),
+var stubs = (status) => [
+  stub("success", 0, () => new data_exports.BooleanData(status.success)),
   stub("always", 0, () => new data_exports.BooleanData(true)),
-  stub("failure", 0, () => new data_exports.BooleanData(false)),
+  stub("failure", 0, () => new data_exports.BooleanData(status.failure)),
   stub("cancelled", 0, () => new data_exports.BooleanData(false)),
   stub("hashFiles", 1, () => {
     throw new RuntimeValueNeeded("hashFiles()");
@@ -13802,6 +14109,181 @@ var stubs = [
 ];
 function stub(name2, minArgs, call) {
   return { name: name2, minArgs, maxArgs: Number.MAX_SAFE_INTEGER, call };
+}
+function evaluateCondition(source, contexts, status) {
+  const funcs = stubs(status);
+  const { tokens } = new Lexer(source).lex();
+  const expr = new Parser(tokens, Object.keys(contexts), funcs).parse();
+  const dict = JSON.parse(
+    JSON.stringify(contexts),
+    data_exports.reviver
+  );
+  return truthy(
+    new Evaluator(
+      expr,
+      dict,
+      // The Evaluator looks functions up by lower-cased name.
+      new Map(funcs.map((f) => [f.name.toLowerCase(), f]))
+    ).evaluate()
+  );
+}
+
+// src/core/jobs.ts
+var cause = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
+function jobVerdicts(file, parsed, workflow, scenario) {
+  const key = (id) => `${file} \u203A ${id}`;
+  const ids = parsed.jobs.map((j) => j.id.value);
+  if (workflow.value === "uncertain")
+    return ids.map((id) => ({
+      key: key(id),
+      value: "uncertain",
+      causes: workflow.causes,
+      settle: workflow.settle
+    }));
+  if (workflow.value !== "runs")
+    return ids.map((id) => ({
+      key: key(id),
+      value: "no-run",
+      causes: workflow.causes
+    }));
+  const jobs = new Map(parsed.jobs.map((j) => [j.id.value, j]));
+  const spans = (id) => parsed.jobSpans.get(id) ?? {};
+  const assume = scenario.assume ?? {};
+  const fails = (id) => Object.hasOwn(assume, key(id)) && assume[key(id)] === "fails";
+  const contexts = {
+    github: githubContext(scenario),
+    vars: { ...scenario.repo.vars },
+    inputs: {}
+  };
+  const open = ids.filter((id) => fails(id) && spans(id).continueOnError);
+  const branch = (succeeds) => {
+    const memo = /* @__PURE__ */ new Map();
+    const outcome = (id) => {
+      const known = memo.get(id);
+      if (known) return known;
+      const job = jobs.get(id);
+      const at = spans(id);
+      const needs = (job.needs ?? []).map((n) => outcome(n.value));
+      const results = (all) => Object.fromEntries(
+        (job.needs ?? []).map((n, i) => [
+          n.value,
+          { result: all ?? needs[i].conclusion, outputs: {} }
+        ])
+      );
+      const failed = needs.some((n) => n.failed);
+      const blocker = needs.find((n) => n.conclusion !== "success");
+      const runs = evaluateCondition(
+        job.if.expression,
+        { ...contexts, needs: results() },
+        { success: !blocker, failure: failed }
+      );
+      let result;
+      if (runs && fails(id))
+        result = {
+          value: "fails",
+          causes: [cause("WN-1", at.id, [{ path: key(id), value: "fails" }])],
+          conclusion: succeeds.has(id) ? "success" : "failure",
+          failed: failed || !succeeds.has(id)
+        };
+      else if (runs)
+        result = {
+          value: "runs",
+          causes: [
+            // A dependent that runs past a failed or skipped need does so by its status function.
+            ...blocker ? [cause("JG-1", at.if ?? at.id), ...blocker.causes] : [],
+            cause("WN-2", at.id)
+          ],
+          conclusion: "success",
+          failed
+        };
+      else {
+        const byNeeds = blocker && evaluateCondition(
+          job.if.expression,
+          { ...contexts, needs: results("success") },
+          { success: true, failure: false }
+        );
+        const implicit = at.if && job.if.expression.startsWith("success() && (");
+        result = {
+          value: "skipped",
+          causes: byNeeds ? [
+            ...blocker.causes,
+            cause("JG-1", at.needs ?? at.id),
+            ...implicit ? [cause("JG-2", at.if)] : []
+          ] : [cause("JG-3", at.if ?? at.id)],
+          conclusion: "skipped",
+          failed
+        };
+      }
+      memo.set(id, result);
+      return result;
+    };
+    return new Map(ids.map((id) => [id, outcome(id)]));
+  };
+  const branches = Array.from(
+    { length: 2 ** open.length },
+    (_, mask) => branch(new Set(open.filter((_2, i) => mask & 1 << i)))
+  );
+  return ids.map((id) => {
+    const base = branches[0].get(id);
+    const possible = [...new Set(branches.map((b) => b.get(id).value))];
+    if (possible.length === 1)
+      return { key: key(id), value: base.value, causes: base.causes };
+    const source = open.find((o) => upstream(jobs, id).has(o));
+    return {
+      key: key(id),
+      value: "uncertain",
+      causes: [cause("JG-11", spans(source).continueOnError), ...base.causes],
+      possible: possible.sort(),
+      settle: []
+    };
+  });
+}
+function upstream(jobs, id, seen = /* @__PURE__ */ new Set()) {
+  for (const n of jobs.get(id)?.needs ?? [])
+    if (!seen.has(n.value)) upstream(jobs, n.value, seen.add(n.value));
+  return seen;
+}
+var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+function merge(base, over) {
+  const out = Object.assign(
+    /* @__PURE__ */ Object.create(null),
+    isObj(base) ? base : {}
+  );
+  for (const [k, v] of Object.entries(over))
+    out[k] = isObj(v) ? merge(out[k], v) : v;
+  return out;
+}
+function githubContext({ event, repo }) {
+  const pr = event.name === "pull_request" || event.name === "pull_request_target";
+  const given = event.ref ?? repo.defaultBranch;
+  const ref = given.startsWith("refs/") ? given : `refs/heads/${given}`;
+  const short = (r) => r.replace(/^refs\/(heads|tags)\//, "");
+  const computed = pr ? {
+    pull_request: {
+      head: {
+        sha: "<head_sha>",
+        ref: short(ref),
+        repo: {
+          fork: event.actor === "fork",
+          full_name: event.actor === "fork" ? "<fork>" : repo.repository
+        }
+      },
+      merge_commit_sha: "<merge_commit_sha>"
+    }
+  } : { head_commit: { message: event.message } };
+  if (event.type !== void 0) computed.action = event.type;
+  return {
+    event_name: event.name,
+    event: merge(event.payload, computed),
+    ref: pr ? "refs/pull/<number>/merge" : ref,
+    ref_name: pr ? "<number>/merge" : short(ref),
+    ...pr && {
+      head_ref: short(ref),
+      base_ref: event.base ?? repo.defaultBranch
+    },
+    sha: pr ? "<merge_commit_sha>" : "<sha>",
+    run_id: "<run_id>"
+  };
 }
 
 // src/core/generated/validate-scenario.ts
@@ -14998,6 +15480,42 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "JG-1",
+    text: "A failed or skipped `needs` dependency skips the dependent job, down the whole chain, unless the dependent's `if:` has a status function that lets it run (`always()`, `failure()`, `cancelled()`, `!cancelled()`).",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds",
+    confidence: "High"
+  },
+  {
+    id: "JG-2",
+    text: "An `if:` with no status function gets an implicit `success() &&`, so it is false when a `needs` dependency failed or was skipped.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions",
+    confidence: "High"
+  },
+  {
+    id: "JG-3",
+    text: "A job's `if:` is evaluated before the job starts (and before any matrix expands); a false `if:` skips the whole job.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif",
+    confidence: "High"
+  },
+  {
+    id: "JG-11",
+    text: "Job-level `continue-on-error: true` keeps a failing job from failing the run, but GitHub's docs don't say whether its dependents see it as a success or a failure.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error",
+    confidence: "Low"
+  },
+  {
+    id: "WN-1",
+    text: "Assumption: this job fails.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
+    confidence: "High"
+  },
+  {
+    id: "WN-2",
+    text: "Assumed to succeed: the job runs and WhyNoRun doesn't simulate its steps.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
+    confidence: "High"
+  },
+  {
     id: "WN-3",
     text: "Outside v1: WhyNoRun doesn't simulate this Event.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
@@ -15014,7 +15532,8 @@ var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { event, repo } = withDefaults(input).scenario;
+  const { scenario } = withDefaults(input);
+  const { event, repo } = scenario;
   const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
     return key === void 0 ? [] : [{ key, ...parseWorkflowFile(file.path, file.text) }];
@@ -15037,16 +15556,34 @@ function simulate(files, input) {
           causes: [{ rule: "WN-3", spans: [], inputs }]
         }
       ],
-      diagnostics
+      diagnostics,
+      unmatchedAssumptions: []
     };
   }
   const verdicts = [];
-  for (const { key, ...workflow } of parsed) {
-    if (workflow.diagnostics.length > 0) continue;
-    verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch) });
+  for (const { key, ...file } of parsed) {
+    if (file.diagnostics.length > 0) continue;
+    const workflow = {
+      key,
+      ...trigger(file, event, repo.defaultBranch)
+    };
+    verdicts.push(workflow, ...jobVerdicts(key, file, workflow, scenario));
   }
   verdicts.sort((a, b) => compare(a.key, b.key));
-  return { verdicts, diagnostics };
+  return {
+    verdicts,
+    diagnostics,
+    unmatchedAssumptions: unmatched(scenario, verdicts)
+  };
+}
+function unmatched(scenario, verdicts) {
+  const jobs = verdicts.map((v) => v.key.split(" \u203A ")).filter((parts) => parts.length === 2);
+  return Object.keys(scenario.assume ?? {}).flatMap((key) => {
+    const [file, id] = key.split(" \u203A ");
+    if (jobs.some(([f, j]) => f === file && j === id)) return [];
+    const candidates = jobs.filter(([f, j]) => f === file || j === id).map((parts) => parts.join(" \u203A "));
+    return [{ key, candidates }];
+  });
 }
 var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 

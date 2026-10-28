@@ -1,3 +1,4 @@
+import { jobVerdicts } from "./jobs";
 import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
 import { validateScenario, withDefaults, type Scenario } from "./scenario";
 import { filterDiagnostics, trigger } from "./triggers";
@@ -40,10 +41,18 @@ export interface Verdict {
   settle?: string[];
 }
 
+/** An Assumption whose key matches no subject: "assumed subject not found". */
+export interface UnmatchedAssumption {
+  key: string;
+  /** Job keys in the same file or with the same job id. */
+  candidates: string[];
+}
+
 export interface SimulationResult {
   verdicts: Verdict[];
   /** Sorted by path, then position. */
   diagnostics: Diagnostic[];
+  unmatchedAssumptions: UnmatchedAssumption[];
 }
 
 const SUPPORTED = new Set(["push", "pull_request"]);
@@ -62,7 +71,8 @@ export function simulate(
 ): SimulationResult {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { event, repo } = withDefaults(input).scenario;
+  const { scenario } = withDefaults(input);
+  const { event, repo } = scenario;
 
   // Diagnostics never depend on the Scenario, so an unsupported Event still reports them.
   const parsed = files.flatMap((file) => {
@@ -96,18 +106,45 @@ export function simulate(
         },
       ],
       diagnostics,
+      unmatchedAssumptions: [],
     };
   }
 
   const verdicts: Verdict[] = [];
-  for (const { key, ...workflow } of parsed) {
+  for (const { key, ...file } of parsed) {
     // A file GitHub would reject gets no Verdicts.
-    if (workflow.diagnostics.length > 0) continue;
-    verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch!) });
+    if (file.diagnostics.length > 0) continue;
+    const workflow: Verdict = {
+      key,
+      ...trigger(file, event, repo.defaultBranch!),
+    };
+    verdicts.push(workflow, ...jobVerdicts(key, file, workflow, scenario));
   }
   // Code-unit order, so the result never depends on the host's locale.
   verdicts.sort((a, b) => compare(a.key, b.key));
-  return { verdicts, diagnostics };
+  return {
+    verdicts,
+    diagnostics,
+    unmatchedAssumptions: unmatched(scenario, verdicts),
+  };
+}
+
+// An Assumption names a job key ("fails") or one of its outputs (`<job key> › outputs.<name>`).
+function unmatched(
+  scenario: Scenario,
+  verdicts: Verdict[],
+): UnmatchedAssumption[] {
+  const jobs = verdicts
+    .map((v) => v.key.split(" › "))
+    .filter((parts) => parts.length === 2);
+  return Object.keys(scenario.assume ?? {}).flatMap((key) => {
+    const [file, id] = key.split(" › ");
+    if (jobs.some(([f, j]) => f === file && j === id)) return [];
+    const candidates = jobs
+      .filter(([f, j]) => f === file || j === id)
+      .map((parts) => parts.join(" › "));
+    return [{ key, candidates }];
+  });
 }
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

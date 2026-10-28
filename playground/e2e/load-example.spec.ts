@@ -67,21 +67,31 @@ test("editing a file marks the example edited, and Reset asks first, then restor
   const rows = results(page).locator(".verdicts").getByRole("listitem");
   const all = [
     "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+    "ci.yml › changes runs root WN-2",
+    "ci.yml › e2e skipped root JG-3",
+    "ci.yml › test runs root WN-2",
     "deploy.yml runs root BR-4",
+    "deploy.yml › deploy runs root WN-2",
     "triage.yml skipped root EV-0",
+    "triage.yml › triage no-run root EV-0",
   ];
   await expect(rows).toHaveText(all);
 
   // Two files lose their jobs, so get Diagnostics, one run at a time: the last announcement
   // is deploy.yml's, and a Reset that spoke would say something new (both "cleared").
-  for (const [i, name] of ["ci.yml", "deploy.yml"].entries()) {
+  const broken: string[] = [];
+  for (const name of ["ci.yml", "deploy.yml"]) {
+    broken.push(name);
     await page.getByRole("tab", { name }).click();
     await page
       .getByRole("textbox", { name: `YAML of .github/workflows/${name}` })
       .click();
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.type("on: pull_request");
-    await expect(rows).toHaveText(all.slice(i + 1));
+    await expect(rows).toHaveText(
+      all.filter((row) => !broken.includes(row.split(" ")[0]!)),
+    );
   }
   await expect(source(page)).toHaveText("Example · edited");
   const editor = page.getByRole("textbox", {
@@ -142,7 +152,13 @@ test("with Scenario 1 touched, Load example asks first, then loads the files and
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-01");
   await expect(results(page).getByRole("listitem")).toHaveText([
     "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+    "ci.yml › changes runs root WN-2",
+    "ci.yml › e2e skipped root JG-3",
+    "ci.yml › test runs root WN-2",
     "deploy.yml runs root BR-4",
+    "deploy.yml › deploy runs root WN-2",
     "triage.yml skipped root EV-0",
+    "triage.yml › triage no-run root EV-0",
   ]);
 });

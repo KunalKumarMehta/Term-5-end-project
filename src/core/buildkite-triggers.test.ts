@@ -198,5 +198,7 @@ test.each<[string, string, Event, string]>([
     { event, repo: { date: "2026-12-03" } },
   );
   expect(diagnostics).toEqual([]);
-  expect(verdicts.map((v) => v.value)).toEqual([value]);
+  expect(
+    verdicts.filter((v) => v.key === "ci.yml").map((v) => v.value),
+  ).toEqual([value]);
 });

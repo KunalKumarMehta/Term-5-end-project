@@ -70,7 +70,10 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
   await page.getByLabel("Event name").fill("push");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = results(page).getByRole("listitem");
-  await expect(row).toHaveText(["ci.yml runs root EV-0"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root EV-0",
+    "ci.yml › build runs root WN-2",
+  ]);
 
   await page.getByLabel("Event name").fill("schedule");
   await expect(results(page)).toContainText(
@@ -79,7 +82,7 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
   // Longer than the 300 ms debounce, so a second announcement would have landed.
   await page.waitForTimeout(1000);
   expect(await page.evaluate(() => window.said)).toEqual([
-    "Results updated: 2 Verdicts changed",
+    "Results updated: 3 Verdicts changed",
   ]);
   expect(await page.evaluate(() => window.violations)).toEqual([]);
 });
@@ -124,7 +127,7 @@ test("clearing the date blanks the results to the prompt, linked to the field", 
 }) => {
   await paste(page, CI);
   await page.getByLabel("Simulation date").fill("2026-12-03");
-  await expect(results(page).getByRole("listitem")).toHaveCount(1);
+  await expect(results(page).getByRole("listitem")).toHaveCount(2);
 
   await page.getByLabel("Simulation date").fill("");
   const prompt = results(page).getByRole("link", {
@@ -165,14 +168,26 @@ test("for a push, changing the ref flips a branch-filtered GitHub workflow betwe
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = results(page).getByRole("listitem");
   // An empty ref is the default branch.
-  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
 
   await page.getByLabel("Ref").fill("refs/heads/feature");
-  await expect(row).toHaveText(["ci.yml skipped root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-4",
+    "ci.yml › build no-run root BR-4",
+  ]);
   await page.getByLabel("Ref").fill("refs/tags/v1.0.0");
-  await expect(row).toHaveText(["ci.yml skipped root BR-3"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-3",
+    "ci.yml › build no-run root BR-3",
+  ]);
   await page.getByLabel("Ref").fill("main");
-  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
 });
 
 test("a member's pull_request matches its base branch and activity type", async ({
@@ -186,12 +201,21 @@ test("a member's pull_request matches its base branch and activity type", async 
   await page.getByLabel("Event name").fill("pull_request");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = results(page).getByRole("listitem");
-  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
   await page.getByLabel("Base branch").fill("dev");
-  await expect(row).toHaveText(["ci.yml skipped root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-4",
+    "ci.yml › build no-run root BR-4",
+  ]);
   await page.getByLabel("Base branch").fill("");
   await page.getByLabel("Activity type").fill("closed");
-  await expect(row).toHaveText(["ci.yml skipped root EV-1"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root EV-1",
+    "ci.yml › build no-run root EV-1",
+  ]);
 });
 
 test.describe("on a 390 px screen", () => {
@@ -244,6 +268,7 @@ test.describe("on a 390 px screen", () => {
     await bar.getByRole("button", { name: "Results" }).click();
     await expect(results(page).getByRole("listitem")).toHaveText([
       "ci.yml runs root EV-0",
+      "ci.yml › build runs root WN-2",
     ]);
 
     await bar.getByRole("button", { name: "YAML" }).click();
