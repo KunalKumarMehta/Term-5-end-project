@@ -28,6 +28,12 @@ declare global {
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 
+// All Verdicts' GitHub workflow and job rows, leaving out access keys (#62).
+const runRows = (page: Page) =>
+  results(page)
+    .getByRole("listitem")
+    .filter({ hasNotText: / › (token\.|secrets)/ });
+
 test.beforeEach(async ({ page }) => {
   // Record every CSP violation and every text the status region takes, from before load.
   await page.addInitScript(() => {
@@ -69,7 +75,7 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
 
   await page.getByLabel("Event name").fill("push");
   await page.getByLabel("Simulation date").fill("2026-12-03");
-  const row = results(page).getByRole("listitem");
+  const row = runRows(page);
   await expect(row).toHaveText([
     "ci.yml runs root EV-0",
     "ci.yml › build runs root WN-2",
@@ -81,8 +87,9 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
   );
   // Longer than the 300 ms debounce, so a second announcement would have landed.
   await page.waitForTimeout(1000);
+  // The event key came; the file, its job and the job's 18 access keys went.
   expect(await page.evaluate(() => window.said)).toEqual([
-    "Results updated: 3 Verdicts changed",
+    "Results updated: 21 Verdicts changed",
   ]);
   expect(await page.evaluate(() => window.violations)).toEqual([]);
 });
@@ -127,14 +134,14 @@ test("clearing the date blanks the results to the prompt, linked to the field", 
 }) => {
   await paste(page, CI);
   await page.getByLabel("Simulation date").fill("2026-12-03");
-  await expect(results(page).getByRole("listitem")).toHaveCount(2);
+  await expect(runRows(page)).toHaveCount(2);
 
   await page.getByLabel("Simulation date").fill("");
   const prompt = results(page).getByRole("link", {
     name: "Set the simulation date to see Verdicts",
   });
   await expect(prompt).toBeVisible();
-  await expect(results(page).getByRole("listitem")).toHaveCount(0);
+  await expect(runRows(page)).toHaveCount(0);
   await prompt.click();
   await expect(page.getByLabel("Simulation date")).toBeFocused();
 });
@@ -166,7 +173,7 @@ test("for a push, changing the ref flips a branch-filtered GitHub workflow betwe
     ".github/workflows/ci.yml",
   );
   await page.getByLabel("Simulation date").fill("2026-12-03");
-  const row = results(page).getByRole("listitem");
+  const row = runRows(page);
   // An empty ref is the default branch.
   await expect(row).toHaveText([
     "ci.yml runs root BR-4",
@@ -200,7 +207,7 @@ test("a member's pull_request matches its base branch and activity type", async 
   );
   await page.getByLabel("Event name").fill("pull_request");
   await page.getByLabel("Simulation date").fill("2026-12-03");
-  const row = results(page).getByRole("listitem");
+  const row = runRows(page);
   await expect(row).toHaveText([
     "ci.yml runs root BR-4",
     "ci.yml › build runs root WN-2",
@@ -266,7 +273,7 @@ test.describe("on a 390 px screen", () => {
     await bar.getByRole("button", { name: "Scenario" }).click();
     await page.getByLabel("Simulation date").fill("2026-12-03");
     await bar.getByRole("button", { name: "Results" }).click();
-    await expect(results(page).getByRole("listitem")).toHaveText([
+    await expect(runRows(page)).toHaveText([
       "ci.yml runs root EV-0",
       "ci.yml › build runs root WN-2",
     ]);

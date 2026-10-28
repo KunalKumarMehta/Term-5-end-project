@@ -166,6 +166,48 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "PERM-1",
+    text: "With no `permissions:` block, the `GITHUB_TOKEN` gets the token default: permissive is read and write on every scope, restricted is read on `contents` and `packages` only.",
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#setting-the-permissions-of-the-github_token-for-your-repository",
+    confidence: "High",
+  },
+  {
+    id: "PERM-3",
+    text: "In a `permissions:` block every scope it doesn't list is `none`; `read-all` and `write-all` set every scope, `{}` sets every scope to `none`, and `write` includes `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions",
+    confidence: "High",
+  },
+  {
+    id: "PERM-4",
+    text: "A job-level `permissions:` block replaces the workflow-level block for that job; the two don't merge.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idpermissions",
+    confidence: "Med",
+  },
+  {
+    id: "PERM-5",
+    text: "`id-token` and `copilot-requests` take only `write` or `none`, and `vulnerability-alerts` only `read` or `none`; `read-all` and `write-all` give `vulnerability-alerts` `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    confidence: "High",
+  },
+  {
+    id: "PERM-8",
+    text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    confidence: "Low",
+  },
+  {
+    id: "FK-0",
+    text: "Same-repo runs get the full `secrets` context: repository secrets, the organization secrets the org's access policy and plan grant this repo, and environment secrets only in a job whose `environment` names that environment, once any required reviewers approve (PL-16). Which secrets exist is a repo fact the YAML can't show.",
+    url: "https://docs.github.com/en/actions/concepts/security/secrets",
+    confidence: "High",
+  },
+  {
+    id: "PL-16",
+    text: "Environment protection rules and branch policies can hold a job or keep an environment's secrets from it; WhyNoRun assumes they pass, and doesn't model environment secrets in reusable workflows (RU-3).",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
+    confidence: "High",
+  },
+  {
     id: "JG-1",
     text: "A failed or skipped `needs` dependency skips the dependent job, down the whole chain, unless the dependent's `if:` has a status function that lets it run (`always()`, `failure()`, `cancelled()`, `!cancelled()`).",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds",

@@ -103,9 +103,17 @@ function show(args: string[], stdin: () => string): number {
     }));
 
   const { verdicts, diagnostics } = simulate(files, scenario);
+  // `--flow access`: the token scope and secrets keys, plus an Unsupported Event's own line.
+  const shown =
+    flow === "access"
+      ? verdicts.filter(
+          (v) =>
+            v.key === "event" || / › (token\.[a-z-]+|secrets)$/.test(v.key),
+        )
+      : verdicts;
   // A broken file's Diagnostics print where its Verdicts would, in subject-key order.
   const lines = [
-    ...verdicts.map((v) => {
+    ...shown.map((v) => {
       const root = v.causes[0];
       const line = root?.spans[0]?.line;
       return [

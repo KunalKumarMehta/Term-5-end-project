@@ -7,6 +7,13 @@ declare global {
 }
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
+
+// All Verdicts' GitHub workflow and job rows, leaving out access keys (#62).
+const runRows = (page: Page) =>
+  results(page)
+    .locator(".verdicts")
+    .getByRole("listitem")
+    .filter({ hasNotText: / › (token\.|secrets)/ });
 const header = (page: Page) => page.getByRole("banner");
 const source = (page: Page) => page.locator("#set-source");
 const confirm = (page: Page) => page.getByRole("alertdialog");
@@ -64,7 +71,7 @@ test("editing a file marks the example edited, and Reset asks first, then restor
   await results(page).getByRole("button", { name: "Load example" }).click();
   await confirm(page).getByRole("button", { name: "Load example" }).click();
   await expect(source(page)).toHaveText("Example");
-  const rows = results(page).locator(".verdicts").getByRole("listitem");
+  const rows = runRows(page);
   const all = [
     "ci.yml runs root BR-4",
     "ci.yml › build runs root WN-2",
@@ -150,7 +157,7 @@ test("with Scenario 1 touched, Load example asks first, then loads the files and
   await expect(scenarioTabs(page)).toHaveText(["Scenario 1"]);
   await expect(page.getByLabel("Event name")).toHaveValue("push");
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-01");
-  await expect(results(page).getByRole("listitem")).toHaveText([
+  await expect(runRows(page)).toHaveText([
     "ci.yml runs root BR-4",
     "ci.yml › build runs root WN-2",
     "ci.yml › changes runs root WN-2",

@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
+
+// All Verdicts' GitHub workflow and job rows, leaving out access keys (#62).
+const runRows = (page: Page) =>
+  results(page)
+    .getByRole("listitem")
+    .filter({ hasNotText: / › (token\.|secrets)/ });
 const header = (page: Page) => page.getByRole("banner");
 const source = (page: Page) => page.locator("#set-source");
 const toast = (page: Page) => page.locator("#toasts");
@@ -121,7 +127,7 @@ test("picked files go to .github/workflows/, and the ignored ones are counted an
     ".github/workflows/README.md",
     ".github/workflows/notes.txt",
   ]);
-  await expect(results(page).getByRole("listitem")).toHaveText([
+  await expect(runRows(page)).toHaveText([
     "ci.yml runs root EV-0",
     "ci.yml › build runs root WN-2",
     "docs.yaml skipped root EV-0",
@@ -182,7 +188,7 @@ for (const [folder, items] of [
       ".github/workflows/README.md",
       ".github/workflows/shared/build.yml",
     ]);
-    await expect(results(page).getByRole("listitem")).toHaveText([
+    await expect(runRows(page)).toHaveText([
       "ci.yml runs root EV-0",
       "ci.yml › build runs root WN-2",
       "docs.yaml skipped root EV-0",
@@ -215,7 +221,7 @@ test("uploading over typed work asks first, then replaces the set without announ
   await paste.getByLabel("YAML").fill(workflow("push"));
   await paste.getByRole("button", { name: "Add file" }).click();
   await expect(source(page)).toHaveText("Workflow set: 1 pasted file");
-  const rows = results(page).getByRole("listitem");
+  const rows = runRows(page);
   await expect(rows).toHaveText([
     "untitled.yml runs root EV-0",
     "untitled.yml › build runs root WN-2",

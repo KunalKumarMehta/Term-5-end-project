@@ -8449,6 +8449,99 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join as join2, resolve as resolve2 } from "node:path";
 import { parseArgs } from "node:util";
 
+// src/core/access.ts
+var SCOPES = [
+  "actions",
+  "artifact-metadata",
+  "attestations",
+  "checks",
+  "code-quality",
+  "contents",
+  "copilot-requests",
+  "deployments",
+  "discussions",
+  "id-token",
+  "issues",
+  "packages",
+  "pages",
+  "pull-requests",
+  "security-events",
+  "statuses",
+  "vulnerability-alerts"
+];
+var WRITE_OR_NONE = /* @__PURE__ */ new Set(["copilot-requests", "id-token"]);
+var READ_OR_NONE = /* @__PURE__ */ new Set(["vulnerability-alerts"]);
+var RESTRICTED = /* @__PURE__ */ new Set(["contents", "packages"]);
+var cause = (rule, span, inputs = []) => ({
+  rule,
+  spans: span ? [span] : [],
+  inputs
+});
+function clamp(scope2, level, causes) {
+  if (level === "read" && WRITE_OR_NONE.has(scope2))
+    return { value: "none", causes: [...causes, cause("PERM-5")] };
+  if (level === "write" && READ_OR_NONE.has(scope2))
+    return { value: "read", causes: [...causes, cause("PERM-5")] };
+  return { value: level, causes };
+}
+function scope(name2, block, tokenDefault) {
+  if (block === void 0) {
+    const baseline = cause("PERM-1", void 0, [
+      { path: "repo.tokenDefault", value: tokenDefault }
+    ]);
+    if (tokenDefault === "restricted")
+      return {
+        value: RESTRICTED.has(name2) ? "read" : "none",
+        causes: [baseline]
+      };
+    if (WRITE_OR_NONE.has(name2))
+      return {
+        value: "uncertain",
+        causes: [cause("PERM-8"), baseline],
+        possible: ["none", "write"],
+        settle: []
+      };
+    return clamp(name2, "write", [baseline]);
+  }
+  const listed = block.scopes.get(name2);
+  if (listed)
+    return { value: listed.level, causes: [cause("PERM-3", listed.span)] };
+  if (block.all === "read-all" || block.all === "write-all")
+    return clamp(name2, block.all === "read-all" ? "read" : "write", [
+      cause("PERM-3", block.span)
+    ]);
+  return { value: "none", causes: [cause("PERM-3", block.span)] };
+}
+function accessVerdicts(file, parsed, scenario) {
+  const tokenDefault = scenario.repo.tokenDefault;
+  return parsed.jobs.flatMap((job) => {
+    if (job.type !== "job") return [];
+    const key = `${file} \u203A ${job.id.value}`;
+    const spans = parsed.jobSpans.get(job.id.value);
+    const own = spans?.permissions;
+    const replaced = own && parsed.permissions ? [cause("PERM-4", parsed.permissions.span)] : [];
+    const tokens = SCOPES.map((name2) => {
+      const access = scope(name2, own ?? parsed.permissions, tokenDefault);
+      return {
+        key: `${key} \u203A token.${name2}`,
+        ...access,
+        causes: [...access.causes, ...replaced]
+      };
+    });
+    const secrets = {
+      key: `${key} \u203A secrets`,
+      value: "available",
+      causes: [
+        cause("FK-0", void 0, [
+          { path: "event.actor", value: scenario.event.actor }
+        ]),
+        ...spans?.environment ? [cause("PL-16", spans.environment)] : []
+      ]
+    };
+    return [...tokens, secrets];
+  });
+}
+
 // node_modules/@actions/expressions/dist/ast.js
 var Expr = class {
 };
@@ -14037,6 +14130,34 @@ function indexOn(doc, span) {
   const onEntries = /* @__PURE__ */ new Map();
   const jobSpans = /* @__PURE__ */ new Map();
   if (!(0, import_yaml2.isMap)(doc.contents)) return { onSpan: void 0, onEntries, jobSpans };
+  const permissions = (pair2, own2) => {
+    if (!pair2) return void 0;
+    const via = own2 ?? ((0, import_yaml2.isAlias)(pair2.value) ? span(pair2.value) : void 0);
+    const value2 = resolve(doc, pair2.value);
+    const scopes = /* @__PURE__ */ new Map();
+    for (const p of (0, import_yaml2.isMap)(value2) ? value2.items : []) {
+      const scope2 = name(doc, p.key);
+      const level = name(doc, p.value);
+      if (scope2 === void 0 || level === void 0) continue;
+      const end = span(p.value ?? p.key);
+      scopes.set(scope2, {
+        level,
+        span: via ?? {
+          ...span(p.key),
+          endLine: end.endLine,
+          endCol: end.endCol
+        }
+      });
+    }
+    return {
+      span: own2 ?? span(pair2.key),
+      all: (0, import_yaml2.isMap)(value2) ? void 0 : name(doc, value2),
+      scopes
+    };
+  };
+  const root = doc.contents.items.find(
+    (p) => name(doc, p.key) === "permissions"
+  );
   const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
   const jobs = resolve(doc, jobsPair?.value);
   for (const item of (0, import_yaml2.isMap)(jobs) ? jobs.items : []) {
@@ -14050,16 +14171,20 @@ function indexOn(doc, span) {
     };
     const coe = field("continue-on-error");
     const coeValue = resolve(doc, coe?.pair.value);
+    const env = field("environment");
     jobSpans.set(id, {
       id: span(item.key),
       if: field("if")?.span,
       needs: field("needs")?.span,
-      continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0
+      continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0,
+      permissions: permissions(field("permissions")?.pair, own2),
+      environment: env && (own2 ?? span(env.pair.key))
     });
   }
+  const workflow = { jobSpans, permissions: permissions(root, void 0) };
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
   if (!pair || !(0, import_yaml2.isScalar)(pair.key))
-    return { onSpan: void 0, onEntries, jobSpans };
+    return { ...workflow, onSpan: void 0, onEntries };
   const own = (0, import_yaml2.isAlias)(pair.value) ? span(pair.value) : void 0;
   const value = resolve(doc, pair.value);
   const entries = (0, import_yaml2.isSeq)(value) ? value.items : (0, import_yaml2.isMap)(value) ? value.items.map((p) => p.key) : [value];
@@ -14087,7 +14212,7 @@ function indexOn(doc, span) {
       });
     }
   }
-  return { onSpan: span(pair.key), onEntries, jobSpans };
+  return { ...workflow, onSpan: span(pair.key), onEntries };
 }
 function resolve(doc, node) {
   return (0, import_yaml2.isAlias)(node) ? node.resolve(doc) : node;
@@ -14129,7 +14254,7 @@ function evaluateCondition(source, contexts, status) {
 }
 
 // src/core/jobs.ts
-var cause = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
+var cause2 = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inputs });
 function jobVerdicts(file, parsed, workflow, scenario) {
   const key = (id) => `${file} \u203A ${id}`;
   const ids = parsed.jobs.map((j) => j.id.value);
@@ -14181,7 +14306,7 @@ function jobVerdicts(file, parsed, workflow, scenario) {
       if (runs && fails(id))
         result = {
           value: "fails",
-          causes: [cause("WN-1", at.id, [{ path: key(id), value: "fails" }])],
+          causes: [cause2("WN-1", at.id, [{ path: key(id), value: "fails" }])],
           conclusion: succeeds.has(id) ? "success" : "failure",
           failed: failed || !succeeds.has(id)
         };
@@ -14190,8 +14315,8 @@ function jobVerdicts(file, parsed, workflow, scenario) {
           value: "runs",
           causes: [
             // A dependent that runs past a failed or skipped need does so by its status function.
-            ...blocker ? [cause("JG-1", at.if ?? at.id), ...blocker.causes] : [],
-            cause("WN-2", at.id)
+            ...blocker ? [cause2("JG-1", at.if ?? at.id), ...blocker.causes] : [],
+            cause2("WN-2", at.id)
           ],
           conclusion: "success",
           failed
@@ -14207,9 +14332,9 @@ function jobVerdicts(file, parsed, workflow, scenario) {
           value: "skipped",
           causes: byNeeds ? [
             ...blocker.causes,
-            cause("JG-1", at.needs ?? at.id),
-            ...implicit ? [cause("JG-2", at.if)] : []
-          ] : [cause("JG-3", at.if ?? at.id)],
+            cause2("JG-1", at.needs ?? at.id),
+            ...implicit ? [cause2("JG-2", at.if)] : []
+          ] : [cause2("JG-3", at.if ?? at.id)],
           conclusion: "skipped",
           failed
         };
@@ -14232,7 +14357,7 @@ function jobVerdicts(file, parsed, workflow, scenario) {
     return {
       key: key(id),
       value: "uncertain",
-      causes: [cause("JG-11", spans(source).continueOnError), ...base.causes],
+      causes: [cause2("JG-11", spans(source).continueOnError), ...base.causes],
       possible: possible.sort(),
       settle: []
     };
@@ -15629,6 +15754,48 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "PERM-1",
+    text: "With no `permissions:` block, the `GITHUB_TOKEN` gets the token default: permissive is read and write on every scope, restricted is read on `contents` and `packages` only.",
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#setting-the-permissions-of-the-github_token-for-your-repository",
+    confidence: "High"
+  },
+  {
+    id: "PERM-3",
+    text: "In a `permissions:` block every scope it doesn't list is `none`; `read-all` and `write-all` set every scope, `{}` sets every scope to `none`, and `write` includes `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions",
+    confidence: "High"
+  },
+  {
+    id: "PERM-4",
+    text: "A job-level `permissions:` block replaces the workflow-level block for that job; the two don't merge.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idpermissions",
+    confidence: "Med"
+  },
+  {
+    id: "PERM-5",
+    text: "`id-token` and `copilot-requests` take only `write` or `none`, and `vulnerability-alerts` only `read` or `none`; `read-all` and `write-all` give `vulnerability-alerts` `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    confidence: "High"
+  },
+  {
+    id: "PERM-8",
+    text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    confidence: "Low"
+  },
+  {
+    id: "FK-0",
+    text: "Same-repo runs get the full `secrets` context: repository secrets, the organization secrets the org's access policy and plan grant this repo, and environment secrets only in a job whose `environment` names that environment, once any required reviewers approve (PL-16). Which secrets exist is a repo fact the YAML can't show.",
+    url: "https://docs.github.com/en/actions/concepts/security/secrets",
+    confidence: "High"
+  },
+  {
+    id: "PL-16",
+    text: "Environment protection rules and branch policies can hold a job or keep an environment's secrets from it; WhyNoRun assumes they pass, and doesn't model environment secrets in reusable workflows (RU-3).",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
+    confidence: "High"
+  },
+  {
     id: "JG-1",
     text: "A failed or skipped `needs` dependency skips the dependent job, down the whole chain, unless the dependent's `if:` has a status function that lets it run (`always()`, `failure()`, `cancelled()`, `!cancelled()`).",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds",
@@ -15732,7 +15899,11 @@ function simulate(files, input) {
       value: "skipped",
       causes: [{ rule: "PL-9", spans: [], inputs: [] }]
     } : { key, ...trigger(file, event, repo.defaultBranch) };
-    verdicts.push(workflow, ...jobVerdicts(key, file, workflow, scenario));
+    verdicts.push(
+      workflow,
+      ...jobVerdicts(key, file, workflow, scenario),
+      ...accessVerdicts(key, file, scenario)
+    );
   }
   verdicts.sort((a, b) => compare(a.key, b.key));
   return {
@@ -15831,8 +16002,11 @@ function show(args, stdin) {
     text: readFileSync(join2(dir, e.name), "utf8")
   }));
   const { verdicts, diagnostics } = simulate(files, scenario);
+  const shown = flow === "access" ? verdicts.filter(
+    (v) => v.key === "event" || / › (token\.[a-z-]+|secrets)$/.test(v.key)
+  ) : verdicts;
   const lines = [
-    ...verdicts.map((v) => {
+    ...shown.map((v) => {
       const root = v.causes[0];
       const line = root?.spans[0]?.line;
       return [

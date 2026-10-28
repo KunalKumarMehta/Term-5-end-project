@@ -1,4 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// The Results' GitHub workflow and job rows, leaving out access keys (#62).
+const runRows = (page: Page) =>
+  page
+    .getByRole("region", { name: "Results" })
+    .getByRole("listitem")
+    .filter({ hasNotText: / › (token\.|secrets)/ });
 
 const CI = `on: push
 jobs:
@@ -29,9 +36,7 @@ test('adding "job X fails" in Assumptions turns X\'s row fails and skips its dep
   await dialog.getByRole("button", { name: "Add file" }).click();
   await page.getByLabel("Simulation date").fill("2026-12-03");
 
-  const rows = page
-    .getByRole("region", { name: "Results" })
-    .getByRole("listitem");
+  const rows = runRows(page);
   await expect(rows).toHaveText([
     "ci.yml runs root EV-0",
     "ci.yml › deploy runs root WN-2",

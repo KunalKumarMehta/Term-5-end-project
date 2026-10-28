@@ -11,6 +11,13 @@ const TONES: Record<string, string> = {
   "pending and blocks merge": "wait",
   "may not block": "wait",
   uncertain: "uncertain",
+  // #9 §9: access is shaded by strength, never green or red.
+  write: "strong",
+  available: "strong",
+  read: "mid",
+  "dependabot-only": "mid",
+  none: "faint",
+  empty: "faint",
 };
 
 export function Value({ verdict }: { verdict: Verdict }) {
