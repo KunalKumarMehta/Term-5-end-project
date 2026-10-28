@@ -46,6 +46,9 @@ export interface SimulationResult {
 
 const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 
+/** Whether GitHub reads the file at this path: a `.yml`/`.yaml` file directly in `.github/workflows/`. */
+export const isLoaded = (path: string): boolean => loaded.test(path);
+
 /**
  * Simulates the Workflow set for the Scenario. Pure, synchronous and deterministic.
  * Throws a TypeError when the Scenario doesn't match its schema.
