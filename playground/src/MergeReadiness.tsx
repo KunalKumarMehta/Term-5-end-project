@@ -1,22 +1,39 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import type { Verdict } from "../../src/core";
+import type { ProducedChecks, Verdict } from "../../src/core";
 import { Value, same, type Column } from "./Grid";
 
+const count = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
+
+/** "Require every produced check"'s confirmation, counting each kind it left out (#9 §4). */
+export const producedNews = (
+  added: number,
+  { matrix, remote, expression }: ProducedChecks["left"],
+) =>
+  `Required ${count(added, "more produced check")}. Left out ${count(matrix, "matrix job")}, ${count(remote, "remote reusable caller")} and ${count(expression, "job name: expression")}.`;
+
 /**
- * #9 §4: a Scenario's required checks as chips (Enter adds, × removes) and strict or loose.
- * Typed names are trimmed, an empty one adds nothing, and a duplicate (an exact match, case
- * included) flashes its chip and is announced (#12 §1, addenda E and I).
+ * #9 §4: a Scenario's required checks as chips (Enter adds, × removes), strict or loose, and
+ * merge queue off or on. Typed names are trimmed, an empty one adds nothing, and a duplicate
+ * (an exact match, case included) flashes its chip and is announced (#12 §1, addenda E and I).
  */
 export function RequiredChecks({
   required,
   strict,
+  mergeQueue,
   onChange,
   announce,
+  onRequireProduced,
 }: {
   required: string[];
   strict: boolean;
-  onChange: (path: "required" | "strict", value: string[] | boolean) => void;
+  mergeQueue: boolean;
+  onChange: (
+    path: "required" | "strict" | "mergeQueue",
+    value: string[] | boolean,
+  ) => void;
   announce: (message: string) => void;
+  onRequireProduced: () => void;
 }) {
   const id = useId();
   const [text, setText] = useState("");
@@ -89,6 +106,18 @@ export function RequiredChecks({
         <option value="loose">loose</option>
         <option value="strict">strict (up to date before merging)</option>
       </select>
+      <label htmlFor={`${id}-queue`}>Merge queue</label>
+      <select
+        id={`${id}-queue`}
+        value={mergeQueue ? "on" : "off"}
+        onChange={(e) => onChange("mergeQueue", e.target.value === "on")}
+      >
+        <option value="off">off</option>
+        <option value="on">on</option>
+      </select>
+      <button type="button" onClick={onRequireProduced}>
+        Require every produced check
+      </button>
     </div>
   );
 }

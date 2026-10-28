@@ -11,6 +11,7 @@ import {
   PLATFORM_BASELINE,
   RULES,
   isLoaded,
+  producedChecks,
   setScenarioValue,
   settleValue,
   simulate,
@@ -37,7 +38,7 @@ import {
   type CauseLinks,
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
-import { MergeReadiness, RequiredChecks } from "./MergeReadiness";
+import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { PasteDialog } from "./PasteDialog";
 import { RepoFacts, sourceOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
@@ -627,8 +628,17 @@ export function App() {
     <RequiredChecks
       required={scenario.repo.required ?? []}
       strict={scenario.repo.strict ?? false}
+      mergeQueue={scenario.repo.mergeQueue ?? false}
       onChange={(field, value) => setInput(["repo", field], value)}
       announce={announce}
+      onRequireProduced={() => {
+        // Ordinary Repo facts: the button stores nothing about itself (#9 §4).
+        const required = scenario.repo.required ?? [];
+        const { names, left } = producedChecks(files);
+        const added = names.filter((n) => !required.includes(n));
+        setInput(["repo", "required"], [...required, ...added]);
+        setToast({ id: Date.now(), node: producedNews(added.length, left) });
+      }}
     />
   );
   const mergeReadiness = (
