@@ -520,10 +520,6 @@ test("an unquoted pattern starting with [ is malformed YAML (GL-5): the file get
 
 test.each<[string, Event]>([
   ["an Event outside v1", { name: "schedule" }],
-  [
-    "pull_request_target, until it lands",
-    { name: "pull_request_target", actor: "fork" },
-  ],
   ["a fork contributor's push", { name: "push", actor: "fork" }],
 ])(
   "%s gives exactly one Verdict: event = unsupported, root WN-3",
@@ -2080,6 +2076,341 @@ test("prototype pollution (#14 §6.7): vars.CONSTRUCTOR, vars.__proto__ and the 
     expect(byKey(set, `pr.yml › ${id}`)).toMatchObject({ value: "runs" });
   expect(({} as Record<string, unknown>).x).toBeUndefined();
   expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+});
+
+// pull_request_target (#65): GitHub's 2 December block, its write token and checkout's refusal.
+const forkTarget = (extra = {}, repo = {}) => ({
+  event: {
+    name: "pull_request_target",
+    actor: "fork" as const,
+    ref: "feature",
+    base: "main",
+    changed: ["src/app.ts"],
+    ...extra,
+  },
+  repo: { date, ...repo },
+});
+
+test("the example's Fork target on 2026-12-03: triage.yml fails (root PRT-2, then PRT-3), with WN-5 causes for visibility, predates and event policy, and its job no-run", () => {
+  const { verdicts } = simulate(example, forkTarget());
+  const triage = byKey(verdicts, "triage.yml")!;
+  expect(triage.value).toBe("fails");
+  expect(triage.causes.map((c) => c.rule).slice(0, 2)).toEqual([
+    "PRT-2",
+    "PRT-3",
+  ]);
+  expect(triage.causes[1]!.inputs).toEqual([
+    { path: "repo.date", value: "2026-12-03" },
+  ]);
+  for (const [path, value] of [
+    ["repo.visibility", "public"],
+    ["repo.predates", true],
+    ["repo.eventPolicy", "none"],
+  ] as const)
+    expect(triage.causes).toContainEqual(wn5(path, value));
+  // WN-5 follows the root, never replaces it.
+  expect(triage.causes.findIndex((c) => c.rule === "WN-5")).toBeGreaterThan(1);
+  expect(byKey(verdicts, "triage.yml › triage")).toMatchObject({
+    value: "no-run",
+    causes: triage.causes,
+  });
+  // The other GitHub workflows don't list pull_request_target.
+  expect(byKey(verdicts, "ci.yml")!.value).toBe("skipped");
+});
+
+test("the example's Fork target on 2026-12-01: triage.yml runs (FK-6, then PRT-3 in evaluate mode, DB-4), with pull-requests write and secrets available (FK-7), and triage fails at its checkout (root CO-1)", () => {
+  const { verdicts } = simulate(
+    example,
+    forkTarget({}, { date: "2026-12-01" }),
+  );
+  const triage = byKey(verdicts, "triage.yml")!;
+  expect(triage.value).toBe("runs");
+  expect(triage.causes.map((c) => c.rule)).toEqual(
+    expect.arrayContaining(["EV-0", "EV-1", "DB-4", "FK-6", "PRT-3"]),
+  );
+  expect(byKey(verdicts, "triage.yml › triage › token.pull-requests")).toEqual({
+    key: "triage.yml › triage › token.pull-requests",
+    value: "write",
+    causes: [
+      expect.objectContaining({ rule: "PERM-3" }),
+      expect.objectContaining({ rule: "FK-7" }),
+    ],
+  });
+  expect(byKey(verdicts, "triage.yml › triage › secrets")).toMatchObject({
+    value: "available",
+    causes: [{ rule: "FK-7" }],
+  });
+  const job = byKey(verdicts, "triage.yml › triage")!;
+  expect(job.value).toBe("fails");
+  // The root rests on the checkout step and its ref: line.
+  expect(job.causes[0]).toMatchObject({
+    rule: "CO-1",
+    spans: [
+      expect.objectContaining({ line: 12 }),
+      expect.objectContaining({ line: 14 }),
+    ],
+    inputs: [{ path: "event.actor", value: "fork" }],
+  });
+  expect(RULES["CO-1"]!.text).toContain(
+    "Refusing to check out fork pull request code from a 'pull_request_target' workflow.",
+  );
+  // Never the opt-out (#5).
+  expect(RULES["CO-1"]!.text).not.toContain("allow-unsafe-pr-checkout");
+});
+
+// A pull_request_target GitHub workflow whose job checks out with `step` (YAML under `steps:`).
+const target = (step: string, on = "pull_request_target") => [
+  wf(
+    "t.yml",
+    `on: ${on}\njobs:\n  t:\n    runs-on: x\n    steps:\n${step}      - run: echo\n`,
+  ),
+];
+const checkout = (version: string, inputs: string, extra = "") =>
+  `      - uses: actions/checkout@${version}\n${extra}        with:\n${inputs}`;
+const headSha = "          ref: ${{ github.event.pull_request.head.sha }}\n";
+const on1201 = { date: "2026-12-01" };
+
+test("step-level continue-on-error: true on the refused checkout keeps the job running (WN-2), with the refusal still a cause (CO-6, then CO-1)", () => {
+  const { verdicts } = simulate(
+    target(checkout("v4", headSha, "        continue-on-error: true\n")),
+    forkTarget({}, on1201),
+  );
+  const job = byKey(verdicts, "t.yml › t")!;
+  expect(job.value).toBe("runs");
+  expect(job.causes.map((c) => c.rule)).toEqual(["CO-6", "CO-1", "WN-2"]);
+  expect(job.causes[0]!.spans[0]).toMatchObject({ line: 7 });
+});
+
+test.each<[string, Partial<Scenario["repo"]>, string, string[]]>([
+  ["a private repo runs", { visibility: "private" }, "runs", ["PRT-2"]],
+  ["an internal repo runs", { visibility: "internal" }, "runs", ["PRT-2"]],
+  [
+    "a date before 2026-12-02 runs, in evaluate mode",
+    { date: "2026-12-01" },
+    "runs",
+    ["PRT-3"],
+  ],
+  [
+    "an event policy that allows it runs",
+    { eventPolicy: "allows" },
+    "runs",
+    ["PRT-1"],
+  ],
+  [
+    "an event policy that blocks it fails",
+    { eventPolicy: "blocks", predates: false },
+    "fails",
+    ["PRT-1", "PRT-5", "PL-10"],
+  ],
+  [
+    "a public repo that predates 2026-09-17 with no event policy fails",
+    { visibility: "public", predates: true, eventPolicy: "none" },
+    "fails",
+    ["PRT-2", "PRT-3", "PRT-5", "PL-10"],
+  ],
+])(
+  "PRT table, on a same-repo pull_request_target on 2026-12-03 unless set: %s",
+  (_, repo, value, rules) => {
+    const { verdicts } = simulate(
+      target("      - uses: actions/checkout@v4\n"),
+      {
+        event: { name: "pull_request_target", base: "main" },
+        repo: { date, ...repo },
+      },
+    );
+    const t = byKey(verdicts, "t.yml")!;
+    expect(t.value).toBe(value);
+    const cited = t.causes.map((c) => c.rule);
+    if (value === "fails") expect(cited.slice(0, rules.length)).toEqual(rules);
+    else expect(cited).toEqual(expect.arrayContaining(["EV-0", ...rules]));
+    // A run's jobs run; a failed run's are no-run.
+    expect(byKey(verdicts, "t.yml › t")!.value).toBe(
+      value === "fails" ? "no-run" : "runs",
+    );
+  },
+);
+
+test("PRT table: a public repo created after 2026-09-17 with no event policy is Uncertain [fails, runs] on 2026-12-03 (root PRT-4), settled by the event policy", () => {
+  const files = target("      - uses: actions/checkout@v4\n");
+  const scenario = forkTarget({}, { predates: false });
+  const t = byKey(simulate(files, scenario).verdicts, "t.yml")!;
+  expect(t).toMatchObject({
+    value: "uncertain",
+    possible: ["fails", "runs"],
+    settle: ["repo.eventPolicy"],
+    hints: [
+      {
+        path: "repo.eventPolicy",
+        candidates: ["allows", "blocks"],
+      },
+    ],
+  });
+  expect(t.causes[0]!.rule).toBe("PRT-4");
+  expect(t.causes).toContainEqual(wn5("repo.eventPolicy", "none"));
+  const settled = settleValue(scenario, "repo.eventPolicy", "blocks");
+  expect(byKey(simulate(files, settled).verdicts, "t.yml")!.value).toBe(
+    "fails",
+  );
+});
+
+test("a dependabot[bot] pull_request_target in a public repo follows the PRT table like any actor, and gets the write token and secrets (FK-7)", () => {
+  const files = target(checkout("v4", headSha));
+  const bot = (repo = {}) =>
+    simulate(files, {
+      event: { name: "pull_request_target", actor: "dependabot" },
+      repo: { date, ...repo },
+    }).verdicts;
+  const t = byKey(bot(), "t.yml")!;
+  expect(t.value).toBe("fails");
+  expect(t.causes.map((c) => c.rule).slice(0, 2)).toEqual(["PRT-2", "PRT-3"]);
+  const before = bot(on1201);
+  expect(byKey(before, "t.yml › t")!.value).toBe("runs");
+  expect(byKey(before, "t.yml › t › secrets")).toMatchObject({
+    value: "available",
+    causes: [{ rule: "FK-7" }],
+  });
+});
+
+test("a fork contributor's pull_request_target awaiting approval still runs (FK-6): Approval is ignored and decides nothing", () => {
+  const { verdicts } = simulate(
+    target("      - uses: actions/checkout@v4\n"),
+    forkTarget({ approval: "awaiting" }, on1201),
+  );
+  const t = byKey(verdicts, "t.yml")!;
+  expect(t.value).toBe("runs");
+  expect(t.causes.map((c) => c.rule)).toContain("FK-6");
+  expect(t.causes).not.toContainEqual(
+    expect.objectContaining({ rule: "FK-4" }),
+  );
+  expect(byKey(verdicts, "t.yml › t")!.value).toBe("runs");
+});
+
+test.each([
+  ["a SHA pin", "8e8c483db84b4bee98b60c0593521ed34d9990e8"],
+  ["a minor pin", "v4.2"],
+  ["a patch pin", "v4.2.2"],
+])(
+  "%s of checkout before v7 is Uncertain [fails, runs] (root CO-3, then CO-1), with nothing to settle it",
+  (_, version) => {
+    const job = byKey(
+      simulate(target(checkout(version, headSha)), forkTarget({}, on1201))
+        .verdicts,
+      "t.yml › t",
+    )!;
+    expect(job).toMatchObject({
+      value: "uncertain",
+      possible: ["fails", "runs"],
+      settle: [],
+    });
+    expect(job.causes.map((c) => c.rule)).toEqual(["CO-3", "CO-1"]);
+  },
+);
+
+test("checkout's refusal applies to v7 releases and floating majors from v2, never to v1, a same-repo PR, a default checkout or the opt-out", () => {
+  const job = (step: string, event = {}) =>
+    byKey(
+      simulate(target(step), forkTarget(event, on1201)).verdicts,
+      "t.yml › t",
+    )!.value;
+  expect(job(checkout("v7.0.1", headSha))).toBe("fails");
+  expect(job(checkout("v2", headSha))).toBe("fails");
+  expect(job(checkout("v1", headSha))).toBe("runs");
+  expect(job(checkout("v4", headSha), { actor: "member" })).toBe("runs");
+  expect(job("      - uses: actions/checkout@v4\n")).toBe("runs");
+  expect(
+    job(checkout("v4", `${headSha}          allow-unsafe-pr-checkout: true\n`)),
+  ).toBe("runs");
+});
+
+test("checkout refuses repository: the head repo, a refs/pull ref and the merge commit; the head branch name and the default branch's ref aren't the fork's commit", () => {
+  const job = (inputs: string) =>
+    byKey(
+      simulate(target(checkout("v4", inputs)), forkTarget({}, on1201)).verdicts,
+      "t.yml › t",
+    )!;
+  const repo = job(
+    "          repository: ${{ github.event.pull_request.head.repo.full_name }}\n",
+  );
+  expect(repo.value).toBe("fails");
+  expect(repo.causes[0]!.spans[1]).toMatchObject({ line: 8 });
+  expect(job("          ref: refs/pull/7/merge\n").value).toBe("fails");
+  expect(
+    job("          ref: ${{ github.event.pull_request.merge_commit_sha }}\n")
+      .value,
+  ).toBe("fails");
+  expect(
+    job("          ref: ${{ github.event.pull_request.head.ref }}\n").value,
+  ).toBe("runs");
+  expect(job("          ref: ${{ github.sha }}\n").value).toBe("runs");
+  expect(job("          ref: main\n").value).toBe("runs");
+});
+
+test("a checkout ref known only at run time is Uncertain [fails, runs] (CO-5), root WN-4 at the ref, with that path in settle when a Scenario input holds it", () => {
+  const job = (inputs: string) =>
+    byKey(
+      simulate(target(checkout("v4", inputs)), forkTarget({}, on1201)).verdicts,
+      "t.yml › t",
+    )!;
+  const label = job(
+    "          ref: ${{ github.event.pull_request.head.label }}\n",
+  );
+  expect(label).toMatchObject({
+    value: "uncertain",
+    possible: ["fails", "runs"],
+    settle: ["github.event.pull_request.head.label"],
+    hints: [{ path: "github.event.pull_request.head.label" }],
+  });
+  expect(label.causes.map((c) => c.rule)).toEqual(["WN-4", "CO-5", "CO-1"]);
+  expect(label.causes[0]!.spans[0]).toMatchObject({ line: 8 });
+
+  const step = job("          ref: ${{ steps.pr.outputs.sha }}\n");
+  expect(step).toMatchObject({ value: "uncertain", settle: [] });
+});
+
+test("pull_request_target takes the default activity types (EV-1) and branch filters on the base branch (BR-2), isn't skipped by [skip ci] (SK-1), and reads github.ref as the default branch (DB-4)", () => {
+  const files = [
+    wf(
+      "t.yml",
+      "on:\n  pull_request_target:\n    branches: [main]\njobs:\n  t:\n    if: github.ref == 'refs/heads/main'\n    runs-on: x\n    steps:\n      - run: echo\n",
+    ),
+  ];
+  const run = (event = {}) =>
+    simulate(files, forkTarget(event, on1201)).verdicts;
+  const t = byKey(run({ message: "fix [skip ci]" }), "t.yml")!;
+  expect(t.value).toBe("runs");
+  expect(t.causes.map((c) => c.rule)).toEqual(
+    expect.arrayContaining(["BR-4", "BR-2", "EV-1", "DB-4"]),
+  );
+  expect(byKey(run(), "t.yml › t")!.value).toBe("runs");
+  expect(byKey(run({ base: "dev" }), "t.yml")!.value).toBe("skipped");
+  expect(byKey(run({ type: "labeled" }), "t.yml")).toMatchObject({
+    value: "skipped",
+    causes: [{ rule: "EV-1" }],
+  });
+});
+
+test("a base branch that looks like a SHA is Uncertain [runs, skipped] (BR-9) only when the GitHub workflow would run", () => {
+  const files = [
+    wf(
+      "t.yml",
+      "on:\n  pull_request_target:\n    branches-ignore: [deadbeef]\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n",
+    ),
+  ];
+  const run = (base: string) =>
+    byKey(simulate(files, forkTarget({ base }, on1201)).verdicts, "t.yml")!;
+  expect(run("cafe1234")).toMatchObject({
+    value: "uncertain",
+    possible: ["runs", "skipped"],
+    settle: [],
+  });
+  expect(run("cafe1234").causes[0]).toEqual({
+    rule: "BR-9",
+    spans: [],
+    inputs: [{ path: "event.base", value: "cafe1234" }],
+  });
+  // Skipped by the filter either way.
+  expect(run("deadbeef").value).toBe("skipped");
+  expect(run("main").value).toBe("runs");
 });
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {

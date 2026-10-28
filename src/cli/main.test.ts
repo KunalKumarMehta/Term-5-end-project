@@ -268,8 +268,8 @@ test.each([
   },
 );
 
-test("show --event pull_request --actor fork on the example set: the Fork PR's Verdicts (snapshot)", () => {
-  // The bundled example set (#15 §2), as a repo folder.
+/** The bundled example set (#15 §2), as a repo folder. */
+function exampleRepo(): string {
   const repo = mkdtempSync(join(tmpdir(), "whynorun-example-"));
   const workflows = join(repo, ".github", "workflows");
   mkdirSync(workflows, { recursive: true });
@@ -280,6 +280,51 @@ test("show --event pull_request --actor fork on the example set: the Fork PR's V
       ),
       join(workflows, name),
     );
+  return repo;
+}
+
+test("show --event pull_request_target --actor fork on the example set: triage.yml fails on 2026-12-03 (root PRT-2, assumed facts labelled), and its checkout fails the job on 2026-12-01 (root CO-1) with a write token and secrets", () => {
+  const repo = exampleRepo();
+  const show = (date: string) =>
+    run(
+      "show",
+      "--repo",
+      repo,
+      "--event",
+      "pull_request_target",
+      "--actor",
+      "fork",
+      "--date",
+      date,
+    );
+  try {
+    const blocked = show("2026-12-03");
+    expect(blocked.code).toBe(0);
+    expect(blocked.stdout).toContain(
+      "\ntriage.yml: fails (root PRT-2; WN-5 assumed repo.visibility = public; WN-5 assumed repo.predates = true; WN-5 assumed repo.eventPolicy = none)\n",
+    );
+    expect(blocked.stdout).toContain(
+      "\ntriage.yml › triage: no-run (root PRT-2;",
+    );
+
+    const before = show("2026-12-01").stdout;
+    expect(before).toContain("\ntriage.yml: runs (root EV-0, line 3)\n");
+    expect(before).toContain(
+      "\ntriage.yml › triage: fails (root CO-1, line 12)\n",
+    );
+    expect(before).toContain(
+      "\ntriage.yml › triage › token.pull-requests: write (root PERM-3, line 6)\n",
+    );
+    expect(before).toContain(
+      "\ntriage.yml › triage › secrets: available (root FK-7)\n",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("show --event pull_request --actor fork on the example set: the Fork PR's Verdicts (snapshot)", () => {
+  const repo = exampleRepo();
   try {
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     // `--changed` names a file listing the diff, so stdin holds src/app.ts.

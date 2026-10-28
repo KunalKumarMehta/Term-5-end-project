@@ -87,11 +87,12 @@ export function trigger(
 ): Omit<Verdict, "key"> {
   const decided = byRef(parsed, event, defaultBranch);
   if (decided.value === "skipped") return decided;
-  const result = byPaths(parsed, event, decided);
-  // SK-1: the head commit's message skips a push or pull_request run.
+  const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
+  // SK-1: the head commit's message skips a push or pull_request run, never pull_request_target.
   const message = event.message;
   if (
     result.value === "skipped" ||
+    event.name === "pull_request_target" ||
     message === undefined ||
     !SKIP.test(message)
   )
@@ -107,6 +108,38 @@ export function trigger(
       },
       ...result.causes,
     ],
+  };
+}
+
+// BR-9: GitHub doesn't publish which names "look similar to SHAs".
+// shortcut: 7 to 40 hex digits; narrow it if GitHub ever documents the patterns.
+const SHA_LIKE = /^[0-9a-f]{7,40}$/i;
+
+/** BR-9: a pull_request_target run may not start for a SHA-like branch name. */
+function shaLike(
+  result: Omit<Verdict, "key">,
+  event: Event,
+  defaultBranch: string,
+): Omit<Verdict, "key"> {
+  if (event.name !== "pull_request_target" || result.value !== "runs")
+    return result;
+  const branches = [
+    event.base === undefined
+      ? { path: "repo.defaultBranch", value: defaultBranch }
+      : { path: "event.base", value: event.base },
+    ...(event.ref === undefined
+      ? []
+      : [{ path: "event.ref", value: event.ref }]),
+  ];
+  const inputs = branches.filter((b) =>
+    SHA_LIKE.test(b.value.replace(/^refs\/heads\//, "")),
+  );
+  if (inputs.length === 0) return result;
+  return {
+    value: "uncertain",
+    causes: [{ rule: "BR-9", spans: [], inputs }, ...result.causes],
+    possible: ["runs", "skipped"],
+    settle: [],
   };
 }
 
@@ -226,7 +259,7 @@ function byRef(
   const after: Cause[] = [];
 
   // EV-1: the activity type; an unset one (in the Event or the file) is GitHub's defaults.
-  if (name === "pull_request") {
+  if (name !== "push") {
     const types =
       Array.isArray(settings.types) && settings.types.length > 0
         ? settings.types.map(String)
@@ -246,11 +279,9 @@ function byRef(
     if (event.type === "stacked")
       after.push({ ...typed, rule: "EV-4", spans: spans(`${name}.types`) });
   }
-  after.push({
-    rule: name === "push" ? "DB-2" : "DB-3",
-    spans: [],
-    inputs: [named],
-  });
+  // DB-4: pull_request_target runs the default branch's copy of the GitHub workflow.
+  const copy = { push: "DB-2", pull_request: "DB-3" }[name] ?? "DB-4";
+  after.push({ rule: copy, spans: [], inputs: [named] });
 
   // The ref a filter is tried against: the pushed ref (BR-3) or the base branch (BR-2).
   const given = name === "push" ? event.ref : event.base;
