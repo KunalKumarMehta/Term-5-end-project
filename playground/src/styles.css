@@ -122,9 +122,33 @@ textarea {
   font-family: ui-monospace, monospace;
 }
 
-.required {
+.required,
+.optional {
   color: var(--muted);
   font-style: italic;
+}
+
+/* #9 §7: the Settle it box ends an Uncertain Verdict's Explanation. */
+.settle {
+  margin: 0.75rem 0 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 2px dashed var(--uncertain);
+}
+
+.settle h3 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.settle ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.explanation-panel .settle .row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 .hint {
