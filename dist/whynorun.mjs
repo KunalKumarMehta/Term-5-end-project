@@ -8540,6 +8540,7 @@ function byActor(name2, access, blocked, actor) {
 function accessVerdicts(file, parsed, scenario) {
   const tokenDefault = scenario.repo.tokenDefault;
   const actor = scenario.event.actor;
+  const target = scenario.event.name === "pull_request_target";
   return parsed.jobs.flatMap((job) => {
     if (job.type !== "job") return [];
     const key = `${file} \u203A ${job.id.value}`;
@@ -8547,30 +8548,25 @@ function accessVerdicts(file, parsed, scenario) {
     const own = spans?.permissions;
     const replaced = own && parsed.permissions ? [cause("PERM-4", parsed.permissions.span)] : [];
     const block = own ?? parsed.permissions;
+    const actorInput = [{ path: "event.actor", value: actor }];
+    const fk7 = target ? [cause("FK-7", void 0, actorInput)] : [];
     const tokens = SCOPES.map((name2) => {
       const access = scope(name2, block, tokenDefault);
+      const own2 = { ...access, causes: [...access.causes, ...replaced] };
       return {
         key: `${key} \u203A token.${name2}`,
-        ...byActor(
-          name2,
-          { ...access, causes: [...access.causes, ...replaced] },
-          block !== void 0,
-          actor
-        )
+        ...target ? { ...own2, causes: [...own2.causes, ...fk7] } : byActor(name2, own2, block !== void 0, actor)
       };
     });
-    const actorInput = [{ path: "event.actor", value: actor }];
+    const environment = spans?.environment ? [cause("PL-16", spans.environment)] : [];
     const secrets = {
       key: `${key} \u203A secrets`,
-      ...actor === "fork" ? { value: "empty", causes: [cause("FK-2", void 0, actorInput)] } : actor === "dependabot" ? {
+      ...target ? { value: "available", causes: [...fk7, ...environment] } : actor === "fork" ? { value: "empty", causes: [cause("FK-2", void 0, actorInput)] } : actor === "dependabot" ? {
         value: "dependabot-only",
         causes: [cause("FK-8", void 0, actorInput)]
       } : {
         value: "available",
-        causes: [
-          cause("FK-0", void 0, actorInput),
-          ...spans?.environment ? [cause("PL-16", spans.environment)] : []
-        ]
+        causes: [cause("FK-0", void 0, actorInput), ...environment]
       }
     };
     return [...tokens, secrets];
@@ -14207,13 +14203,15 @@ function indexOn(doc, span) {
     const coe = field("continue-on-error");
     const coeValue = resolve(doc, coe?.pair.value);
     const env = field("environment");
+    const steps = resolve(doc, field("steps")?.pair.value);
     jobSpans.set(id, {
       id: span(item.key),
       if: field("if")?.span,
       needs: field("needs")?.span,
       continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0,
       permissions: permissions(field("permissions")?.pair, own2),
-      environment: env && (own2 ?? span(env.pair.key))
+      environment: env && (own2 ?? span(env.pair.key)),
+      checkouts: (0, import_yaml2.isSeq)(steps) ? checkouts(doc, steps.items, own2, span) : []
     });
   }
   const workflow = { jobSpans, permissions: permissions(root, void 0) };
@@ -14248,6 +14246,43 @@ function indexOn(doc, span) {
     }
   }
   return { ...workflow, onSpan: span(pair.key), onEntries };
+}
+var CHECKOUT = /^actions\/checkout@(.+)$/i;
+function checkouts(doc, items, own, span) {
+  return items.flatMap((item) => {
+    const step = resolve(doc, item);
+    if (!(0, import_yaml2.isMap)(step)) return [];
+    const pair = (map, key) => (0, import_yaml2.isMap)(map) ? map.items.find((p) => name(doc, p.key) === key) : void 0;
+    const at = (p) => own ?? {
+      ...span(p.key),
+      endLine: span(p.value ?? p.key).endLine,
+      endCol: span(p.value ?? p.key).endCol
+    };
+    const uses = pair(step, "uses");
+    const version = CHECKOUT.exec(name(doc, uses?.value) ?? "")?.[1];
+    if (!uses || version === void 0) return [];
+    const scalar = (p) => {
+      const v = resolve(doc, p?.value);
+      return (0, import_yaml2.isScalar)(v) ? v.value : void 0;
+    };
+    const input = (key) => {
+      const p = pair(resolve(doc, pair(step, "with")?.value), key);
+      const v = scalar(p);
+      return v === void 0 || v === null || v === "" ? void 0 : { text: String(v), span: at(p) };
+    };
+    const optOut = input("allow-unsafe-pr-checkout")?.text === "true";
+    const coe = pair(step, "continue-on-error");
+    return [
+      {
+        uses: at(uses),
+        version,
+        ref: input("ref"),
+        repository: input("repository"),
+        optOut,
+        continueOnError: scalar(coe) === true ? at(coe) : void 0
+      }
+    ];
+  });
 }
 function resolve(doc, node) {
   return (0, import_yaml2.isAlias)(node) ? node.resolve(doc) : node;
@@ -14338,6 +14373,16 @@ function stub(name2, minArgs, call) {
   return { name: name2, minArgs, maxArgs: Number.MAX_SAFE_INTEGER, call };
 }
 function evaluateCondition(source, contexts, status, resolve3 = () => void 0) {
+  return truthy(evaluate(source, contexts, status, resolve3));
+}
+function evaluateTemplate(text, contexts, resolve3) {
+  const status = { success: true, failure: false };
+  return text.replace(
+    /\$\{\{([\s\S]*?)\}\}/g,
+    (_, source) => evaluate(source, contexts, status, resolve3).coerceString()
+  );
+}
+function evaluate(source, contexts, status, resolve3) {
   const funcs = stubs(status);
   const { tokens } = new Lexer(source).lex();
   const expr = new Parser(tokens, Object.keys(contexts), funcs).parse();
@@ -14345,15 +14390,13 @@ function evaluateCondition(source, contexts, status, resolve3 = () => void 0) {
     JSON.stringify(contexts),
     data_exports.reviver
   );
-  return truthy(
-    new Reader(
-      expr,
-      dict,
-      // The Evaluator looks functions up by lower-cased name.
-      new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
-      resolve3
-    ).evaluate()
-  );
+  return new Reader(
+    expr,
+    dict,
+    // The Evaluator looks functions up by lower-cased name.
+    new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
+    resolve3
+  ).evaluate();
 }
 
 // src/core/jobs.ts
@@ -14370,8 +14413,26 @@ var FROM_EVENT = /* @__PURE__ */ new Set([
 ]);
 var ABSENT = {
   push: ["pull_request"],
-  pull_request: ["head_commit"]
+  pull_request: ["head_commit"],
+  pull_request_target: ["head_commit"]
 };
+var RUN_TIME = /* @__PURE__ */ new Set([
+  "steps",
+  "env",
+  "matrix",
+  "runner",
+  "job",
+  "secrets",
+  "strategy"
+]);
+var PR_REF = /^refs\/pull\/[0-9]+\/(?:head|merge)$/;
+function covered(version) {
+  const m = /^v(\d+)(\.\d+){0,2}$/.exec(version);
+  if (!m) return void 0;
+  const major = Number(m[1]);
+  if (major < 2) return false;
+  return m[2] === void 0 || major >= 7 ? true : void 0;
+}
 function jobVerdicts(file, parsed, workflow, scenario) {
   const key = (id) => `${file} \u203A ${id}`;
   const ids = parsed.jobs.map((j) => j.id.value);
@@ -14496,7 +14557,108 @@ function jobVerdicts(file, parsed, workflow, scenario) {
     known.candidates = candidatesOf(name2, known.compared);
     grown = true;
   };
-  const evaluate2 = (assigned) => {
+  const ask = (name2, u, assigned) => {
+    if (!assigned.has(name2)) {
+      unsettled.set(name2, u);
+      throw new RuntimeValueNeeded(name2);
+    }
+    return assigned.get(name2) === true;
+  };
+  const refused = (id, needs, assigned, reads) => {
+    if (event.name !== "pull_request_target" || event.actor !== "fork")
+      return void 0;
+    const found = [];
+    for (const [i, step] of spans(id).checkouts?.entries() ?? []) {
+      if (step.optOut || !step.ref && !step.repository) continue;
+      const target = headOf(id, i, step, needs, assigned, reads);
+      if (!target) continue;
+      const version = covered(step.version);
+      if (version === false) continue;
+      const pinned = [];
+      if (version === void 0) {
+        const name2 = `CO-3 ${id} ${i}`;
+        const yes = ask(
+          name2,
+          {
+            rule: "CO-3",
+            span: step.uses,
+            job: id,
+            settle: false,
+            compared: [],
+            candidates: [false, true],
+            after: [cause2("CO-1", step.uses)]
+          },
+          assigned
+        );
+        reads.push(name2);
+        if (!yes) continue;
+        pinned.push(cause2("CO-3", step.uses));
+      }
+      const co1 = {
+        rule: "CO-1",
+        spans: [step.uses, target],
+        inputs: [{ path: "event.actor", value: event.actor }]
+      };
+      if (!step.continueOnError)
+        return { fails: true, parts: [co1, ...pinned, ...found] };
+      found.push(cause2("CO-6", step.continueOnError), co1, ...pinned);
+    }
+    return found.length > 0 ? { fails: false, parts: found } : void 0;
+  };
+  const headOf = (id, i, step, needs, assigned, reads) => {
+    const base = resolver(id, needs, assigned, reads);
+    const context = {
+      ...contexts,
+      needs: Object.fromEntries(
+        needs.map(([n, o]) => [n, { result: o.conclusion, outputs: {} }])
+      ),
+      ...Object.fromEntries([...RUN_TIME].map((c) => [c, {}]))
+    };
+    const pr = github.event.pull_request;
+    const heads = [pr.head.sha, pr.merge_commit_sha];
+    const value = (input) => {
+      try {
+        return evaluateTemplate(
+          input.text,
+          context,
+          (path, compared) => RUN_TIME.has(path[0].toLowerCase()) ? { needed: path.join(".") } : base(path, compared)
+        );
+      } catch (e) {
+        if (!(e instanceof RuntimeValueNeeded)) throw e;
+        const name2 = `CO-5 ${id} ${i}`;
+        const context2 = e.needed.split(".")[0];
+        const yes = ask(
+          name2,
+          {
+            rule: "WN-4",
+            span: input.span,
+            job: id,
+            settle: !RUN_TIME.has(context2) && (context2 !== "github" || e.needed.startsWith("github.event.")),
+            compared: [],
+            candidates: [false, true],
+            path: e.needed,
+            after: [cause2("CO-5", input.span), cause2("CO-1", step.uses)]
+          },
+          assigned
+        );
+        reads.push(name2);
+        return yes ? void 0 : null;
+      }
+    };
+    for (const [input, matches] of [
+      [
+        step.repository,
+        (v) => v.toLowerCase() === pr.head.repo.full_name?.toLowerCase()
+      ],
+      [step.ref, (v) => PR_REF.test(v) || heads.includes(v)]
+    ]) {
+      if (!input) continue;
+      const v = value(input);
+      if (v === void 0 || v !== null && matches(v)) return input.span;
+    }
+    return void 0;
+  };
+  const evaluate3 = (assigned) => {
     const memo = /* @__PURE__ */ new Map();
     const outcome = (id) => {
       const known = memo.get(id);
@@ -14553,18 +14715,25 @@ function jobVerdicts(file, parsed, workflow, scenario) {
           conclusion: succeeds ? "success" : "failure",
           failed: failed || !succeeds
         };
-      } else if (runs)
-        result = {
+      } else if (runs) {
+        const refusal = refused(id, needs, assigned, reads);
+        result = refusal?.fails ? {
+          value: "fails",
+          parts: refusal.parts,
+          conclusion: "failure",
+          failed: true
+        } : {
           value: "runs",
           parts: [
             // A dependent that runs past a failed or skipped need does so by its status function.
             ...blocker ? [cause2("JG-1", at.if ?? at.id), { from: blocker }] : [],
+            ...refusal?.parts ?? [],
             cause2("WN-2", at.id)
           ],
           conclusion: "success",
           failed
         };
-      else {
+      } else {
         let byNeeds = false;
         if (blocker)
           try {
@@ -14600,7 +14769,7 @@ function jobVerdicts(file, parsed, workflow, scenario) {
   let branches = [];
   const explore = (assigned) => {
     try {
-      branches.push(evaluate2(assigned));
+      branches.push(evaluate3(assigned));
     } catch (e) {
       if (!(e instanceof RuntimeValueNeeded)) throw e;
       for (const value of unsettled.get(e.needed).candidates)
@@ -14633,7 +14802,10 @@ function jobVerdicts(file, parsed, workflow, scenario) {
       const reads = [...new Set(results.flatMap((r) => r.reads))].map(
         (name2) => [name2, unsettled.get(name2)]
       );
-      const causes = reads.map(([, u]) => cause2(u.rule, u.span));
+      const causes = reads.flatMap(([, u]) => [
+        cause2(u.rule, u.span),
+        ...u.after ?? []
+      ]);
       if (reads[0][1].job !== id && spans(id).needs)
         causes.push(cause2("JG-1", spans(id).needs));
       const settle = reads.filter(([, u]) => u.settle);
@@ -14642,11 +14814,11 @@ function jobVerdicts(file, parsed, workflow, scenario) {
         value: "uncertain",
         causes,
         ...values.length <= 3 && { possible: values.sort() },
-        settle: settle.map(([name2]) => name2),
+        settle: settle.map(([name2, u]) => u.path ?? name2),
         ...settle.length > 0 && {
-          hints: settle.map(([path, u]) => ({
-            path,
-            text: hint(path),
+          hints: settle.map(([name2, u]) => ({
+            path: u.path ?? name2,
+            text: hint(u.path ?? name2),
             candidates: u.compared
           }))
         }
@@ -14715,16 +14887,17 @@ function githubContext({ event, repo }) {
     }
   } : { head_commit: { message: event.message } };
   if (event.type !== void 0) computed.action = event.type;
+  const merged = event.name === "pull_request";
   return {
     event_name: event.name,
     event: merge(event.payload, computed),
-    ref: pr ? "refs/pull/<number>/merge" : ref,
-    ref_name: pr ? "<number>/merge" : short(ref),
+    ref: merged ? "refs/pull/<number>/merge" : pr ? `refs/heads/${repo.defaultBranch}` : ref,
+    ref_name: merged ? "<number>/merge" : pr ? repo.defaultBranch : short(ref),
     ...pr && {
       head_ref: short(ref),
       base_ref: event.base ?? repo.defaultBranch
     },
-    sha: pr ? "<merge_commit_sha>" : "<sha>",
+    sha: merged ? "<merge_commit_sha>" : "<sha>",
     run_id: "<run_id>"
   };
 }
@@ -15726,9 +15899,9 @@ function filterDiagnostics(parsed) {
 function trigger(parsed, event, defaultBranch) {
   const decided = byRef(parsed, event, defaultBranch);
   if (decided.value === "skipped") return decided;
-  const result = byPaths(parsed, event, decided);
+  const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
   const message = event.message;
-  if (result.value === "skipped" || message === void 0 || !SKIP.test(message))
+  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
     return result;
   const entry = parsed.onEntries.get(event.name);
   return {
@@ -15741,6 +15914,25 @@ function trigger(parsed, event, defaultBranch) {
       },
       ...result.causes
     ]
+  };
+}
+var SHA_LIKE = /^[0-9a-f]{7,40}$/i;
+function shaLike(result, event, defaultBranch) {
+  if (event.name !== "pull_request_target" || result.value !== "runs")
+    return result;
+  const branches = [
+    event.base === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: "event.base", value: event.base },
+    ...event.ref === void 0 ? [] : [{ path: "event.ref", value: event.ref }]
+  ];
+  const inputs = branches.filter(
+    (b) => SHA_LIKE.test(b.value.replace(/^refs\/heads\//, ""))
+  );
+  if (inputs.length === 0) return result;
+  return {
+    value: "uncertain",
+    causes: [{ rule: "BR-9", spans: [], inputs }, ...result.causes],
+    possible: ["runs", "skipped"],
+    settle: []
   };
 }
 function byPaths(parsed, event, decided) {
@@ -15834,7 +16026,7 @@ function byRef(parsed, event, defaultBranch) {
   const has = (key2) => Object.hasOwn(settings, key2);
   const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
   const after = [];
-  if (name2 === "pull_request") {
+  if (name2 !== "push") {
     const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
     const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
     const typed = {
@@ -15848,11 +16040,8 @@ function byRef(parsed, event, defaultBranch) {
     if (event.type === "stacked")
       after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
   }
-  after.push({
-    rule: name2 === "push" ? "DB-2" : "DB-3",
-    spans: [],
-    inputs: [named]
-  });
+  const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
+  after.push({ rule: copy, spans: [], inputs: [named] });
   const given = name2 === "push" ? event.ref : event.base;
   const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
   const ref = given ?? `refs/heads/${defaultBranch}`;
@@ -15935,7 +16124,7 @@ var rows = [
   },
   {
     id: "EV-1",
-    text: "`pull_request` with no `types:` runs only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
+    text: "`pull_request` and `pull_request_target` with no `types:` run only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
     confidence: "High"
   },
@@ -15953,7 +16142,7 @@ var rows = [
   },
   {
     id: "BR-2",
-    text: "For `pull_request`, branch filters match the pull request's base branch.",
+    text: "For `pull_request` and `pull_request_target`, branch filters match the pull request's base branch.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpull_requestpull_request_targetbranchesbranches-ignore",
     confidence: "High"
   },
@@ -15986,6 +16175,12 @@ var rows = [
     text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
     url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
     confidence: "Low"
+  },
+  {
+    id: "BR-9",
+    text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
+    confidence: "Med"
   },
   {
     id: "GL-1",
@@ -16084,6 +16279,72 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "DB-4",
+    text: "A `pull_request_target` runs the GitHub workflow as it is on the default branch, whatever the pull request's base branch, with `GITHUB_REF` set to the default branch.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
+    confidence: "High"
+  },
+  {
+    id: "PRT-1",
+    text: "A repo, org or enterprise Actions policy with an event rule decides which events may trigger GitHub workflows: an event it doesn't allow fails the run with a policy error.",
+    url: "https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution",
+    confidence: "High"
+  },
+  {
+    id: "PRT-2",
+    text: "A default policy blocks `pull_request_target` in public repos that have no applicable Actions event policy. It doesn't apply to private or internal repos, and it doesn't override an event policy that already exists.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "High"
+  },
+  {
+    id: "PRT-3",
+    text: "GitHub enforces the default `pull_request_target` policy from 2 December 2026, a date it has already moved once; until then the policy runs in evaluate mode, so runs continue.",
+    url: "https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/",
+    confidence: "High"
+  },
+  {
+    id: "PRT-4",
+    text: "Enforcement covers \"affected repositories that were using the default `pull_request_target` policy before general availability\" (2026-09-17); GitHub's docs don't say whether a public repo created after that gets the policy in active or evaluate mode.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "Low"
+  },
+  {
+    id: "PRT-5",
+    text: "A run a policy blocks fails with an error, such as `Event 'workflow_dispatch' is not allowed to trigger Actions workflows`: a visible failed run, not a silent skip. GitHub's docs don't say what conclusion its check gets.",
+    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
+    confidence: "High"
+  },
+  {
+    id: "PL-10",
+    text: "An execution-protection event rule, such as the default `pull_request_target` policy, fails the run with a policy error.",
+    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
+    confidence: "High"
+  },
+  {
+    id: "CO-1",
+    text: "`actions/checkout` fails the step for a fork's `pull_request_target` when `repository` is the pull request's head repo, `ref` is `refs/pull/<n>/head` or `/merge`, or the commit is the pull request's head or merge commit: \"Refusing to check out fork pull request code from a 'pull_request_target' workflow. This workflow runs with the base repository's GITHUB_TOKEN, secrets, default-branch cache scope, and runner access.\"",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High"
+  },
+  {
+    id: "CO-3",
+    text: "Every supported `actions/checkout` major except v1 got the refusal on 2026-07-20, so floating tags such as `@v4` have it; a version pinned to a SHA, minor or patch release before v7 may not.",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High"
+  },
+  {
+    id: "CO-5",
+    text: "Whether checkout's `ref` or `repository` is the fork's head is known only once its value is: an expression reading a value the Scenario lacks leaves the refusal open.",
+    url: "https://github.com/actions/checkout/blob/main/src/unsafe-pr-checkout-helper.ts",
+    confidence: "Med"
+  },
+  {
+    id: "CO-6",
+    text: "Step-level `continue-on-error: true` on the refused checkout step keeps the job from failing: the step's outcome is `failure`, its conclusion `success`, and later steps run without the pull request's code.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepscontinue-on-error",
+    confidence: "High"
+  },
+  {
     id: "PERM-1",
     text: "With no `permissions:` block, the `GITHUB_TOKEN` gets the token default: permissive is read and write on every scope, restricted is read on `contents` and `packages` only.",
     url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#setting-the-permissions-of-the-github_token-for-your-repository",
@@ -16141,6 +16402,18 @@ var rows = [
     id: "FK-4",
     text: "In a public repo, a fork contributor's run can wait for a user with write access to approve it before any job starts; by default first-time contributors need approval.",
     url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-6",
+    text: '`pull_request_target` runs "regardless of approval settings", because it runs the base branch\'s code.',
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-7",
+    text: "`pull_request_target` gets a read and write `GITHUB_TOKEN`, subject to `permissions:`, and secrets, even from a fork.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
     confidence: "High"
   },
   {
@@ -16221,7 +16494,7 @@ var RULES = Object.fromEntries(
 );
 
 // src/core/index.ts
-var SUPPORTED = /* @__PURE__ */ new Set(["push", "pull_request"]);
+var SUPPORTED = /* @__PURE__ */ new Set(["push", "pull_request", "pull_request_target"]);
 var MAX_BYTES = 500 * 1024;
 function utf8Length(text) {
   let bytes = 0;
@@ -16272,7 +16545,7 @@ function simulate(files, input) {
       unmatchedAssumptions: []
     };
   }
-  const verdicts = evaluate(parsed, scenario);
+  const verdicts = evaluate2(parsed, scenario);
   for (const path of filled) {
     const allowed = ASSUMED.get(path);
     if (!allowed) continue;
@@ -16286,7 +16559,7 @@ function simulate(files, input) {
         [group]: { ...scenario[group], [field]: other }
       };
       const values = new Map(
-        evaluate(parsed, alt).map((v) => [v.key, v.value])
+        evaluate2(parsed, alt).map((v) => [v.key, v.value])
       );
       for (const v of verdicts)
         if (values.get(v.key) !== v.value) decided.add(v.key);
@@ -16314,7 +16587,7 @@ function unmatched(scenario, verdicts) {
     return [{ key, candidates }];
   });
 }
-function evaluate(parsed, scenario) {
+function evaluate2(parsed, scenario) {
   const { event, repo } = scenario;
   const verdicts = [];
   for (const { key, bytes, ...file } of parsed) {
@@ -16325,7 +16598,10 @@ function evaluate(parsed, scenario) {
       causes: [{ rule: "PL-9", spans: [], inputs: [] }]
     } : {
       key,
-      ...awaiting(trigger(file, event, repo.defaultBranch), event)
+      ...policy(
+        awaiting(trigger(file, event, repo.defaultBranch), event),
+        scenario
+      )
     };
     verdicts.push(
       workflow,
@@ -16336,7 +16612,8 @@ function evaluate(parsed, scenario) {
   return verdicts;
 }
 function awaiting(verdict, event) {
-  if (event.actor !== "fork" || event.approval !== "awaiting") return verdict;
+  if (event.actor !== "fork" || event.approval !== "awaiting" || event.name === "pull_request_target")
+    return verdict;
   if (verdict.value !== "runs" && !verdict.possible?.includes("runs"))
     return verdict;
   const causes = [
@@ -16355,6 +16632,67 @@ function awaiting(verdict, event) {
     possible: verdict.possible.map((p) => p === "runs" ? "pending" : p)
   };
 }
+var ENFORCED = "2026-12-02";
+function policy(verdict, { event, repo }) {
+  if (event.name !== "pull_request_target") return verdict;
+  if (verdict.value !== "runs" && !verdict.possible?.includes("runs"))
+    return verdict;
+  const input = (path, value) => ({ path, value });
+  const visibility = input("repo.visibility", repo.visibility);
+  const date = input("repo.date", repo.date);
+  const ran = event.actor === "fork" ? [cause3("FK-6")] : [];
+  const runs = (rule, ...inputs) => ({
+    ...verdict,
+    causes: [...verdict.causes, ...ran, cause3(rule, inputs)]
+  });
+  if (repo.visibility !== "public") return runs("PRT-2", visibility);
+  if (repo.date < ENFORCED) return runs("PRT-3", date);
+  const policyInput = input("repo.eventPolicy", repo.eventPolicy);
+  if (repo.eventPolicy === "allows") return runs("PRT-1", policyInput);
+  const failed = (...root) => {
+    const causes = [
+      ...root,
+      cause3("PRT-5"),
+      cause3("PL-10"),
+      ...verdict.causes,
+      ...ran
+    ];
+    return verdict.value === "runs" ? { value: "fails", causes } : {
+      ...verdict,
+      causes,
+      possible: verdict.possible.map((p) => p === "runs" ? "fails" : p)
+    };
+  };
+  if (repo.eventPolicy === "blocks")
+    return failed(cause3("PRT-1", [policyInput]));
+  if (repo.predates)
+    return failed(
+      cause3("PRT-2", [visibility, policyInput]),
+      cause3("PRT-3", [date])
+    );
+  return {
+    value: "uncertain",
+    causes: [
+      cause3("PRT-4", [input("repo.predates", false), policyInput, date]),
+      ...verdict.causes,
+      ...ran
+    ],
+    possible: [.../* @__PURE__ */ new Set([...verdict.possible ?? ["runs"], "fails"])].sort(),
+    settle: ["repo.eventPolicy"],
+    hints: [
+      {
+        path: "repo.eventPolicy",
+        text: "the `pull_request_target` event policy Repo fact",
+        candidates: ["allows", "blocks"]
+      }
+    ]
+  };
+}
+var cause3 = (rule, inputs = []) => ({
+  rule,
+  spans: [],
+  inputs
+});
 var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
 // src/cli/main.ts

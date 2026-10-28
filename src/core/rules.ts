@@ -17,7 +17,7 @@ const rows: Rule[] = [
   },
   {
     id: "EV-1",
-    text: "`pull_request` with no `types:` runs only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
+    text: "`pull_request` and `pull_request_target` with no `types:` run only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
     confidence: "High",
   },
@@ -35,7 +35,7 @@ const rows: Rule[] = [
   },
   {
     id: "BR-2",
-    text: "For `pull_request`, branch filters match the pull request's base branch.",
+    text: "For `pull_request` and `pull_request_target`, branch filters match the pull request's base branch.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpull_requestpull_request_targetbranchesbranches-ignore",
     confidence: "High",
   },
@@ -68,6 +68,12 @@ const rows: Rule[] = [
     text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
     url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
     confidence: "Low",
+  },
+  {
+    id: "BR-9",
+    text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
+    confidence: "Med",
   },
   {
     id: "GL-1",
@@ -166,6 +172,72 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "DB-4",
+    text: "A `pull_request_target` runs the GitHub workflow as it is on the default branch, whatever the pull request's base branch, with `GITHUB_REF` set to the default branch.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
+    confidence: "High",
+  },
+  {
+    id: "PRT-1",
+    text: "A repo, org or enterprise Actions policy with an event rule decides which events may trigger GitHub workflows: an event it doesn't allow fails the run with a policy error.",
+    url: "https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution",
+    confidence: "High",
+  },
+  {
+    id: "PRT-2",
+    text: "A default policy blocks `pull_request_target` in public repos that have no applicable Actions event policy. It doesn't apply to private or internal repos, and it doesn't override an event policy that already exists.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "High",
+  },
+  {
+    id: "PRT-3",
+    text: "GitHub enforces the default `pull_request_target` policy from 2 December 2026, a date it has already moved once; until then the policy runs in evaluate mode, so runs continue.",
+    url: "https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/",
+    confidence: "High",
+  },
+  {
+    id: "PRT-4",
+    text: "Enforcement covers \"affected repositories that were using the default `pull_request_target` policy before general availability\" (2026-09-17); GitHub's docs don't say whether a public repo created after that gets the policy in active or evaluate mode.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "Low",
+  },
+  {
+    id: "PRT-5",
+    text: "A run a policy blocks fails with an error, such as `Event 'workflow_dispatch' is not allowed to trigger Actions workflows`: a visible failed run, not a silent skip. GitHub's docs don't say what conclusion its check gets.",
+    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
+    confidence: "High",
+  },
+  {
+    id: "PL-10",
+    text: "An execution-protection event rule, such as the default `pull_request_target` policy, fails the run with a policy error.",
+    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
+    confidence: "High",
+  },
+  {
+    id: "CO-1",
+    text: "`actions/checkout` fails the step for a fork's `pull_request_target` when `repository` is the pull request's head repo, `ref` is `refs/pull/<n>/head` or `/merge`, or the commit is the pull request's head or merge commit: \"Refusing to check out fork pull request code from a 'pull_request_target' workflow. This workflow runs with the base repository's GITHUB_TOKEN, secrets, default-branch cache scope, and runner access.\"",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High",
+  },
+  {
+    id: "CO-3",
+    text: "Every supported `actions/checkout` major except v1 got the refusal on 2026-07-20, so floating tags such as `@v4` have it; a version pinned to a SHA, minor or patch release before v7 may not.",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High",
+  },
+  {
+    id: "CO-5",
+    text: "Whether checkout's `ref` or `repository` is the fork's head is known only once its value is: an expression reading a value the Scenario lacks leaves the refusal open.",
+    url: "https://github.com/actions/checkout/blob/main/src/unsafe-pr-checkout-helper.ts",
+    confidence: "Med",
+  },
+  {
+    id: "CO-6",
+    text: "Step-level `continue-on-error: true` on the refused checkout step keeps the job from failing: the step's outcome is `failure`, its conclusion `success`, and later steps run without the pull request's code.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepscontinue-on-error",
+    confidence: "High",
+  },
+  {
     id: "PERM-1",
     text: "With no `permissions:` block, the `GITHUB_TOKEN` gets the token default: permissive is read and write on every scope, restricted is read on `contents` and `packages` only.",
     url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#setting-the-permissions-of-the-github_token-for-your-repository",
@@ -223,6 +295,18 @@ const rows: Rule[] = [
     id: "FK-4",
     text: "In a public repo, a fork contributor's run can wait for a user with write access to approve it before any job starts; by default first-time contributors need approval.",
     url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High",
+  },
+  {
+    id: "FK-6",
+    text: '`pull_request_target` runs "regardless of approval settings", because it runs the base branch\'s code.',
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High",
+  },
+  {
+    id: "FK-7",
+    text: "`pull_request_target` gets a read and write `GITHUB_TOKEN`, subject to `permissions:`, and secrets, even from a fork.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
     confidence: "High",
   },
   {

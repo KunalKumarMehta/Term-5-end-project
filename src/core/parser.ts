@@ -101,6 +101,23 @@ export interface JobSpans {
   permissions?: Permissions;
   /** The `environment` key. */
   environment?: Span;
+  /** The job's `actions/checkout` steps, in order (CO-1). */
+  checkouts: Checkout[];
+}
+
+/** An `actions/checkout` step as written: the parser drops `with:`. */
+export interface Checkout {
+  /** The `uses:` pair. */
+  uses: Span;
+  /** What follows `@`. */
+  version: string;
+  /** `with: ref` and `with: repository`, as written. */
+  ref?: { text: string; span: Span };
+  repository?: { text: string; span: Span };
+  /** `with: allow-unsafe-pr-checkout` is literally `true`. */
+  optOut: boolean;
+  /** Only when step-level `continue-on-error` is literally `true`. */
+  continueOnError?: Span;
 }
 
 const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
@@ -272,6 +289,7 @@ function indexOn(
     const coe = field("continue-on-error");
     const coeValue = resolve(doc, coe?.pair.value);
     const env = field("environment");
+    const steps = resolve(doc, field("steps")?.pair.value);
     jobSpans.set(id, {
       id: span(item.key as Node),
       if: field("if")?.span,
@@ -280,6 +298,7 @@ function indexOn(
         isScalar(coeValue) && coeValue.value === true ? coe!.span : undefined,
       permissions: permissions(field("permissions")?.pair, own),
       environment: env && (own ?? span(env.pair.key as Node)),
+      checkouts: isSeq(steps) ? checkouts(doc, steps.items, own, span) : [],
     });
   }
 
@@ -324,6 +343,55 @@ function indexOn(
     }
   }
   return { ...workflow, onSpan: span(pair.key), onEntries };
+}
+
+const CHECKOUT = /^actions\/checkout@(.+)$/i;
+
+/** The `actions/checkout` steps among `items`, each span at the alias when `own` is one. */
+function checkouts(
+  doc: Document,
+  items: unknown[],
+  own: Span | undefined,
+  span: (node: Node) => Span,
+): Checkout[] {
+  return items.flatMap((item) => {
+    const step = resolve(doc, item);
+    if (!isMap(step)) return [];
+    const pair = (map: unknown, key: string) =>
+      isMap(map) ? map.items.find((p) => name(doc, p.key) === key) : undefined;
+    const at = (p: Pair) =>
+      own ?? {
+        ...span(p.key as Node),
+        endLine: span((p.value ?? p.key) as Node).endLine,
+        endCol: span((p.value ?? p.key) as Node).endCol,
+      };
+    const uses = pair(step, "uses");
+    const version = CHECKOUT.exec(name(doc, uses?.value) ?? "")?.[1];
+    if (!uses || version === undefined) return [];
+    const scalar = (p: Pair | undefined) => {
+      const v = resolve(doc, p?.value);
+      return isScalar(v) ? v.value : undefined;
+    };
+    const input = (key: string) => {
+      const p = pair(resolve(doc, pair(step, "with")?.value), key);
+      const v = scalar(p);
+      return v === undefined || v === null || v === ""
+        ? undefined
+        : { text: String(v), span: at(p!) };
+    };
+    const optOut = input("allow-unsafe-pr-checkout")?.text === "true";
+    const coe = pair(step, "continue-on-error");
+    return [
+      {
+        uses: at(uses),
+        version,
+        ref: input("ref"),
+        repository: input("repository"),
+        optOut,
+        continueOnError: scalar(coe) === true ? at(coe!) : undefined,
+      },
+    ];
+  });
 }
 
 function resolve(doc: Document, node: unknown): unknown {
@@ -474,6 +542,29 @@ export function evaluateCondition(
   status: Status,
   resolve: Resolve = () => undefined,
 ): boolean {
+  return truthy(evaluate(source, contexts, status, resolve));
+}
+
+/** The string a value with `${{ }}` expressions in it becomes, such as a step's `with:` input. */
+export function evaluateTemplate(
+  text: string,
+  contexts: Record<string, unknown>,
+  resolve: Resolve,
+): string {
+  const status = { success: true, failure: false };
+  // shortcut: a `}}` inside a string literal ends the expression early; parse the template
+  // with the workflow parser if an input ever needs one.
+  return text.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, source: string) =>
+    evaluate(source, contexts, status, resolve).coerceString(),
+  );
+}
+
+function evaluate(
+  source: string,
+  contexts: Record<string, unknown>,
+  status: Status,
+  resolve: Resolve,
+): data.ExpressionData {
   const funcs = stubs(status);
   const { tokens } = new Lexer(source).lex();
   const expr = new Parser(tokens, Object.keys(contexts), funcs).parse();
@@ -481,13 +572,11 @@ export function evaluateCondition(
     JSON.stringify(contexts),
     data.reviver,
   ) as data.Dictionary;
-  return truthy(
-    new Reader(
-      expr,
-      dict,
-      // The Evaluator looks functions up by lower-cased name.
-      new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
-      resolve,
-    ).evaluate(),
-  );
+  return new Reader(
+    expr,
+    dict,
+    // The Evaluator looks functions up by lower-cased name.
+    new Map(funcs.map((f) => [f.name.toLowerCase(), f])),
+    resolve,
+  ).evaluate();
 }

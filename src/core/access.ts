@@ -1,5 +1,5 @@
 // Access keys (#6, ADR 0001): every job with steps gets its 17 token scopes and its secrets,
-// computed as if the job runs (PERM-1..6, PERM-8, FK-0, FK-2, FK-8, PL-16).
+// computed as if the job runs (PERM-1..6, PERM-8, FK-0, FK-2, FK-7, FK-8, PL-16).
 import type { Cause, Verdict } from "./index";
 import type { ParsedWorkflow, Permissions, Span } from "./parser";
 import type { Scenario } from "./scenario";
@@ -132,6 +132,8 @@ export function accessVerdicts(
 ): Verdict[] {
   const tokenDefault = scenario.repo.tokenDefault!;
   const actor = scenario.event.actor!;
+  // FK-7: pull_request_target gets the base repo's token and secrets, whoever opened the PR.
+  const target = scenario.event.name === "pull_request_target";
   return parsed.jobs.flatMap((job) => {
     // shortcut: `uses:` callers get their callee's access with #66 (reusable workflows).
     if (job.type !== "job") return [];
@@ -144,37 +146,36 @@ export function accessVerdicts(
         ? [cause("PERM-4", parsed.permissions.span)]
         : [];
     const block = own ?? parsed.permissions;
+    const actorInput = [{ path: "event.actor", value: actor }];
+    const fk7 = target ? [cause("FK-7", undefined, actorInput)] : [];
     const tokens = SCOPES.map((name) => {
       const access = scope(name, block, tokenDefault);
+      const own = { ...access, causes: [...access.causes, ...replaced] };
       return {
         key: `${key} › token.${name}`,
-        ...byActor(
-          name,
-          { ...access, causes: [...access.causes, ...replaced] },
-          block !== undefined,
-          actor,
-        ),
+        ...(target
+          ? { ...own, causes: [...own.causes, ...fk7] }
+          : byActor(name, own, block !== undefined, actor)),
       };
     });
-    const actorInput = [{ path: "event.actor", value: actor }];
+    const environment = spans?.environment
+      ? [cause("PL-16", spans.environment)]
+      : [];
     const secrets: Verdict = {
       key: `${key} › secrets`,
-      ...(actor === "fork"
-        ? { value: "empty", causes: [cause("FK-2", undefined, actorInput)] }
-        : actor === "dependabot"
-          ? {
-              value: "dependabot-only",
-              causes: [cause("FK-8", undefined, actorInput)],
-            }
-          : {
-              value: "available",
-              causes: [
-                cause("FK-0", undefined, actorInput),
-                ...(spans?.environment
-                  ? [cause("PL-16", spans.environment)]
-                  : []),
-              ],
-            }),
+      ...(target
+        ? { value: "available", causes: [...fk7, ...environment] }
+        : actor === "fork"
+          ? { value: "empty", causes: [cause("FK-2", undefined, actorInput)] }
+          : actor === "dependabot"
+            ? {
+                value: "dependabot-only",
+                causes: [cause("FK-8", undefined, actorInput)],
+              }
+            : {
+                value: "available",
+                causes: [cause("FK-0", undefined, actorInput), ...environment],
+              }),
     };
     return [...tokens, secrets];
   });

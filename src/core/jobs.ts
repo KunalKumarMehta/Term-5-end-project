@@ -1,9 +1,12 @@
 // Job Verdicts: `if:` with its implicit `success() &&`, `needs` propagation, the "job X fails"
-// Assumption, and values that exist only at run time (JG-1..3, JG-11, WN-1, WN-2, WN-4).
+// Assumption, values that exist only at run time (JG-1..3, JG-11, WN-1, WN-2, WN-4), and
+// checkout's refusal of a fork's head under pull_request_target (CO-1, CO-3, CO-5, CO-6).
 import type { Cause, Verdict } from "./index";
 import {
   RuntimeValueNeeded,
   evaluateCondition,
+  evaluateTemplate,
+  type Checkout,
   type JobSpans,
   type ParsedWorkflow,
   type Resolve,
@@ -29,7 +32,7 @@ interface Outcome {
 
 /** A value the Scenario lacks (WN-4), or a JG-11 job's reading, that the branches range over. */
 interface Unsettled {
-  rule: "WN-4" | "JG-11";
+  rule: "WN-4" | "JG-11" | "CO-3";
   span: Span | undefined;
   /** The job whose evaluation first needed it. */
   job: string;
@@ -39,6 +42,10 @@ interface Unsettled {
   compared: unknown[];
   /** The values its branches take. */
   candidates: unknown[];
+  /** The `settle` path, when it isn't the name the branches know it by. */
+  path?: string;
+  /** Causes that follow its own on an Uncertain Verdict. */
+  after?: Cause[];
 }
 
 // A value no expression compares with, standing in for "any other value".
@@ -66,7 +73,31 @@ const FROM_EVENT = new Set([
 const ABSENT: Record<string, string[]> = {
   push: ["pull_request"],
   pull_request: ["head_commit"],
+  pull_request_target: ["head_commit"],
 };
+// Contexts a step's input can read that exist only at run time.
+const RUN_TIME = new Set([
+  "steps",
+  "env",
+  "matrix",
+  "runner",
+  "job",
+  "secrets",
+  "strategy",
+]);
+const PR_REF = /^refs\/pull\/[0-9]+\/(?:head|merge)$/;
+
+/**
+ * Whether a checkout version has the refusal (CO-3): every floating major from v2 and every
+ * v7 release do, v1 doesn't, and an earlier SHA, minor or patch pin may not (undefined).
+ */
+function covered(version: string): boolean | undefined {
+  const m = /^v(\d+)(\.\d+){0,2}$/.exec(version);
+  if (!m) return undefined;
+  const major = Number(m[1]);
+  if (major < 2) return false;
+  return m[2] === undefined || major >= 7 ? true : undefined;
+}
 
 /** One Verdict per job of a loaded GitHub workflow, keyed `<file> › <jobId>`. */
 export function jobVerdicts(
@@ -241,6 +272,141 @@ export function jobVerdicts(
     grown = true;
   };
 
+  /** Branches on a value the Scenario can't give, the way an `if:` read branches on one. */
+  const ask = (name: string, u: Unsettled, assigned: Map<string, unknown>) => {
+    if (!assigned.has(name)) {
+      unsettled.set(name, u);
+      throw new RuntimeValueNeeded(name);
+    }
+    return assigned.get(name) === true;
+  };
+
+  /**
+   * CO-1: checkout refuses a fork's head under pull_request_target; the job fails at the first
+   * refused step without step-level `continue-on-error: true` (CO-6). A default checkout (no
+   * `ref` or `repository`) skips the check, and so does the opt-out.
+   * shortcut: a step's own `if:` is not read; a skipped refused checkout counts as run.
+   */
+  const refused = (
+    id: string,
+    needs: [string, Outcome][],
+    assigned: Map<string, unknown>,
+    reads: string[],
+  ): { fails: boolean; parts: Cause[] } | undefined => {
+    if (event.name !== "pull_request_target" || event.actor !== "fork")
+      return undefined;
+    const found: Cause[] = [];
+    for (const [i, step] of spans(id).checkouts?.entries() ?? []) {
+      if (step.optOut || (!step.ref && !step.repository)) continue;
+      const target = headOf(id, i, step, needs, assigned, reads);
+      if (!target) continue;
+      const version = covered(step.version);
+      if (version === false) continue;
+      const pinned: Cause[] = [];
+      if (version === undefined) {
+        const name = `CO-3 ${id} ${i}`;
+        const yes = ask(
+          name,
+          {
+            rule: "CO-3",
+            span: step.uses,
+            job: id,
+            settle: false,
+            compared: [],
+            candidates: [false, true],
+            after: [cause("CO-1", step.uses)],
+          },
+          assigned,
+        );
+        reads.push(name);
+        if (!yes) continue;
+        pinned.push(cause("CO-3", step.uses));
+      }
+      const co1: Cause = {
+        rule: "CO-1",
+        spans: [step.uses, target],
+        inputs: [{ path: "event.actor", value: event.actor }],
+      };
+      if (!step.continueOnError)
+        return { fails: true, parts: [co1, ...pinned, ...found] };
+      found.push(cause("CO-6", step.continueOnError), co1, ...pinned);
+    }
+    return found.length > 0 ? { fails: false, parts: found } : undefined;
+  };
+
+  /**
+   * The input that points a checkout at the fork's head, if one does: `repository` is the
+   * head repo, or `ref` is a pull ref or the head or merge commit (#8 §6 placeholders).
+   * An input reading a value the Scenario lacks branches on whether it does (CO-5).
+   */
+  const headOf = (
+    id: string,
+    i: number,
+    step: Checkout,
+    needs: [string, Outcome][],
+    assigned: Map<string, unknown>,
+    reads: string[],
+  ): Span | undefined => {
+    const base = resolver(id, needs, assigned, reads);
+    const context = {
+      ...contexts,
+      needs: Object.fromEntries(
+        needs.map(([n, o]) => [n, { result: o.conclusion, outputs: {} }]),
+      ),
+      ...Object.fromEntries([...RUN_TIME].map((c) => [c, {}])),
+    };
+    const pr = github.event.pull_request as {
+      head: { sha: string; repo: { full_name?: string } };
+      merge_commit_sha: string;
+    };
+    const heads = [pr.head.sha, pr.merge_commit_sha];
+    const value = (input: { text: string; span: Span }) => {
+      try {
+        return evaluateTemplate(input.text, context, (path, compared) =>
+          RUN_TIME.has(path[0]!.toLowerCase())
+            ? { needed: path.join(".") }
+            : base(path, compared),
+        );
+      } catch (e) {
+        if (!(e instanceof RuntimeValueNeeded)) throw e;
+        const name = `CO-5 ${id} ${i}`;
+        const context = e.needed.split(".")[0]!;
+        const yes = ask(
+          name,
+          {
+            rule: "WN-4",
+            span: input.span,
+            job: id,
+            settle:
+              !RUN_TIME.has(context) &&
+              (context !== "github" || e.needed.startsWith("github.event.")),
+            compared: [],
+            candidates: [false, true],
+            path: e.needed,
+            after: [cause("CO-5", input.span), cause("CO-1", step.uses)],
+          },
+          assigned,
+        );
+        reads.push(name);
+        return yes ? undefined : null;
+      }
+    };
+    for (const [input, matches] of [
+      [
+        step.repository,
+        (v: string) =>
+          v.toLowerCase() === pr.head.repo.full_name?.toLowerCase(),
+      ],
+      [step.ref, (v: string) => PR_REF.test(v) || heads.includes(v)],
+    ] as const) {
+      if (!input) continue;
+      const v = value(input);
+      // undefined: a branch where the unknown value is the fork's head.
+      if (v === undefined || (v !== null && matches(v))) return input.span;
+    }
+    return undefined;
+  };
+
   const evaluate = (assigned: Map<string, unknown>) => {
     const memo = new Map<string, Outcome>();
     const outcome = (id: string): Outcome => {
@@ -301,20 +467,29 @@ export function jobVerdicts(
           conclusion: succeeds ? "success" : "failure",
           failed: failed || !succeeds,
         };
-      } else if (runs)
-        result = {
-          value: "runs",
-          parts: [
-            // A dependent that runs past a failed or skipped need does so by its status function.
-            ...(blocker
-              ? [cause("JG-1", at.if ?? at.id), { from: blocker }]
-              : []),
-            cause("WN-2", at.id),
-          ],
-          conclusion: "success",
-          failed,
-        };
-      else {
+      } else if (runs) {
+        const refusal = refused(id, needs, assigned, reads);
+        result = refusal?.fails
+          ? {
+              value: "fails",
+              parts: refusal.parts,
+              conclusion: "failure",
+              failed: true,
+            }
+          : {
+              value: "runs",
+              parts: [
+                // A dependent that runs past a failed or skipped need does so by its status function.
+                ...(blocker
+                  ? [cause("JG-1", at.if ?? at.id), { from: blocker }]
+                  : []),
+                ...(refusal?.parts ?? []),
+                cause("WN-2", at.id),
+              ],
+              conclusion: "success",
+              failed,
+            };
+      } else {
         // Skipped by `needs` when the same `if:` would pass were every need a success; one
         // that would read a value the Scenario lacks is put down to the needs.
         let byNeeds = false;
@@ -398,7 +573,10 @@ export function jobVerdicts(
       const reads = [...new Set(results.flatMap((r) => r.reads))].map(
         (name) => [name, unsettled.get(name)!] as const,
       );
-      const causes = reads.map(([, u]) => cause(u.rule, u.span));
+      const causes = reads.flatMap(([, u]) => [
+        cause(u.rule, u.span),
+        ...(u.after ?? []),
+      ]);
       if (reads[0]![1].job !== id && spans(id).needs)
         causes.push(cause("JG-1", spans(id).needs));
       const settle = reads.filter(([, u]) => u.settle);
@@ -407,11 +585,11 @@ export function jobVerdicts(
         value: "uncertain",
         causes,
         ...(values.length <= 3 && { possible: values.sort() }),
-        settle: settle.map(([name]) => name),
+        settle: settle.map(([name, u]) => u.path ?? name),
         ...(settle.length > 0 && {
-          hints: settle.map(([path, u]) => ({
-            path,
-            text: hint(path),
+          hints: settle.map(([name, u]) => ({
+            path: u.path ?? name,
+            text: hint(u.path ?? name),
             candidates: u.compared,
           })),
         }),
@@ -505,16 +683,22 @@ function githubContext({ event, repo }: Scenario): { event: Obj } & Obj {
       }
     : { head_commit: { message: event.message } };
   if (event.type !== undefined) computed.action = event.type;
+  // DB-4: pull_request_target runs on the default branch's last commit.
+  const merged = event.name === "pull_request";
   return {
     event_name: event.name,
     event: merge(event.payload, computed),
-    ref: pr ? "refs/pull/<number>/merge" : ref,
-    ref_name: pr ? "<number>/merge" : short(ref),
+    ref: merged
+      ? "refs/pull/<number>/merge"
+      : pr
+        ? `refs/heads/${repo.defaultBranch}`
+        : ref,
+    ref_name: merged ? "<number>/merge" : pr ? repo.defaultBranch : short(ref),
     ...(pr && {
       head_ref: short(ref),
       base_ref: event.base ?? repo.defaultBranch,
     }),
-    sha: pr ? "<merge_commit_sha>" : "<sha>",
+    sha: merged ? "<merge_commit_sha>" : "<sha>",
     run_id: "<run_id>",
   };
 }

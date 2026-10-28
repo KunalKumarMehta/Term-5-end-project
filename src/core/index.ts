@@ -72,7 +72,7 @@ export interface SimulationResult {
   unmatchedAssumptions: UnmatchedAssumption[];
 }
 
-const SUPPORTED = new Set(["push", "pull_request"]);
+const SUPPORTED = new Set(["push", "pull_request", "pull_request_target"]);
 // GitHub's 500 KB workflow file limit (PL-9), read as KiB.
 const MAX_BYTES = 500 * 1024;
 // The core has no DOM or Node types, so no TextEncoder.
@@ -232,7 +232,10 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
           }
         : {
             key,
-            ...awaiting(trigger(file, event, repo.defaultBranch!), event),
+            ...policy(
+              awaiting(trigger(file, event, repo.defaultBranch!), event),
+              scenario,
+            ),
           };
     verdicts.push(
       workflow,
@@ -251,7 +254,13 @@ function awaiting(
   verdict: Omit<Verdict, "key">,
   event: Scenario["event"],
 ): Omit<Verdict, "key"> {
-  if (event.actor !== "fork" || event.approval !== "awaiting") return verdict;
+  // FK-6: pull_request_target runs regardless of approval.
+  if (
+    event.actor !== "fork" ||
+    event.approval !== "awaiting" ||
+    event.name === "pull_request_target"
+  )
+    return verdict;
   if (verdict.value !== "runs" && !verdict.possible?.includes("runs"))
     return verdict;
   const causes = [
@@ -271,5 +280,81 @@ function awaiting(
     possible: verdict.possible!.map((p) => (p === "runs" ? "pending" : p)),
   };
 }
+
+// PRT-3: the day GitHub starts enforcing its default pull_request_target policy.
+const ENFORCED = "2026-12-02";
+
+/**
+ * The PRT decision table (#6), on a `pull_request_target` run the trigger rules create:
+ * GitHub's default policy fails it in an older public repo with no event policy (PRT-2/3),
+ * and a newer repo's case is undocumented (PRT-4), settled by the event policy (#8 §4).
+ */
+function policy(
+  verdict: Omit<Verdict, "key">,
+  { event, repo }: Scenario,
+): Omit<Verdict, "key"> {
+  if (event.name !== "pull_request_target") return verdict;
+  if (verdict.value !== "runs" && !verdict.possible?.includes("runs"))
+    return verdict;
+  const input = (path: string, value: unknown) => ({ path, value });
+  const visibility = input("repo.visibility", repo.visibility);
+  const date = input("repo.date", repo.date);
+  const ran = event.actor === "fork" ? [cause("FK-6")] : [];
+  const runs = (rule: string, ...inputs: Cause["inputs"]) => ({
+    ...verdict,
+    causes: [...verdict.causes, ...ran, cause(rule, inputs)],
+  });
+  if (repo.visibility !== "public") return runs("PRT-2", visibility);
+  if (repo.date < ENFORCED) return runs("PRT-3", date);
+  const policyInput = input("repo.eventPolicy", repo.eventPolicy);
+  if (repo.eventPolicy === "allows") return runs("PRT-1", policyInput);
+  // A blocked run fails with a policy error; its check conclusion is undocumented (PRT-5).
+  const failed = (...root: Cause[]): Omit<Verdict, "key"> => {
+    const causes = [
+      ...root,
+      cause("PRT-5"),
+      cause("PL-10"),
+      ...verdict.causes,
+      ...ran,
+    ];
+    return verdict.value === "runs"
+      ? { value: "fails", causes }
+      : {
+          ...verdict,
+          causes,
+          possible: verdict.possible!.map((p) => (p === "runs" ? "fails" : p)),
+        };
+  };
+  if (repo.eventPolicy === "blocks")
+    return failed(cause("PRT-1", [policyInput]));
+  if (repo.predates)
+    return failed(
+      cause("PRT-2", [visibility, policyInput]),
+      cause("PRT-3", [date]),
+    );
+  return {
+    value: "uncertain",
+    causes: [
+      cause("PRT-4", [input("repo.predates", false), policyInput, date]),
+      ...verdict.causes,
+      ...ran,
+    ],
+    possible: [...new Set([...(verdict.possible ?? ["runs"]), "fails"])].sort(),
+    settle: ["repo.eventPolicy"],
+    hints: [
+      {
+        path: "repo.eventPolicy",
+        text: "the `pull_request_target` event policy Repo fact",
+        candidates: ["allows", "blocks"],
+      },
+    ],
+  };
+}
+
+const cause = (rule: string, inputs: Cause["inputs"] = []): Cause => ({
+  rule,
+  spans: [],
+  inputs,
+});
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
