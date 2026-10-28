@@ -22,15 +22,23 @@ interface Default {
   value: unknown;
   /** How `whynorun show` and the README list it, for the defaults `show` writes out. */
   show?: string;
+  /** Every allowed value, on the fields an assumed default is shown for as WN-5 (#8 §3). */
+  allowed?: readonly unknown[];
 }
 
 // The one defaults table. Every defaulted field is written out (#8 §11); the date never is.
 const DEFAULTS: Default[] = [
-  { path: ["repo", "visibility"], value: "public", show: "Visibility: public" },
+  {
+    path: ["repo", "visibility"],
+    value: "public",
+    show: "Visibility: public",
+    allowed: ["public", "private", "internal"],
+  },
   {
     path: ["repo", "predates"],
     value: true,
     show: "Created before 2026-09-17: yes",
+    allowed: [true, false],
   },
   {
     path: ["repo", "defaultBranch"],
@@ -41,16 +49,19 @@ const DEFAULTS: Default[] = [
     path: ["repo", "tokenDefault"],
     value: "restricted",
     show: "Token default: restricted",
+    allowed: ["restricted", "permissive"],
   },
   {
     path: ["repo", "eventPolicy"],
     value: "none",
     show: "`pull_request_target` event policy: none",
+    allowed: ["none", "allows", "blocks"],
   },
   {
     path: ["event", "approval"],
     value: "approved",
     show: "Approval of a fork contributor's run: approved",
+    allowed: ["approved", "awaiting"],
   },
   { path: ["event", "actor"], value: "member" },
   { path: ["event", "changed"], value: [] },
@@ -71,6 +82,14 @@ const DEFAULTS: Default[] = [
 /** The assumed defaults `whynorun show` writes out, as the README lists them. */
 export const SHOW_DEFAULTS: readonly string[] = DEFAULTS.flatMap((d) =>
   d.show ? [d.show] : [],
+);
+
+/**
+ * The fields whose assumed default is a WN-5 cause where it decides a Verdict, with their
+ * allowed values. The default branch is free text, so it is shown as assumed but never WN-5.
+ */
+export const ASSUMED: ReadonlyMap<string, readonly unknown[]> = new Map(
+  DEFAULTS.flatMap((d) => (d.allowed ? [[d.path.join("."), d.allowed]] : [])),
 );
 
 type Obj = Record<string, unknown>;

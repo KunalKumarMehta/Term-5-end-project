@@ -116,9 +116,15 @@ function show(args: string[], stdin: () => string): number {
     ...shown.map((v) => {
       const root = v.causes[0];
       const line = root?.spans[0]?.line;
+      // The assumed defaults that decide it, after the root (#8 §3).
+      const assumed = v.causes
+        .filter((c) => c.rule === "WN-5")
+        .flatMap((c) => c.inputs)
+        .map(({ path, value }) => `; WN-5 assumed ${path} = ${String(value)}`)
+        .join("");
       return [
         v.key,
-        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""})`,
+        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""}${assumed})`,
       ];
     }),
     ...diagnostics.map((d) => [

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type Ref } from "react";
+import { Fragment, useEffect, useRef, type ReactNode, type Ref } from "react";
 import {
   RULES,
   type Cause,
@@ -26,6 +26,11 @@ const FIELDS: Record<string, { id: string; label: string }> = {
   "event.changed": { id: "event-changed", label: "Changed files" },
   "event.message": { id: "event-message", label: "Head commit message" },
   "repo.date": { id: "sim-date", label: "Simulation date" },
+  "repo.visibility": { id: "repo-visibility", label: "Visibility" },
+  "repo.predates": { id: "repo-predates", label: "Created before 2026-09-17" },
+  "repo.defaultBranch": { id: "repo-default-branch", label: "Default branch" },
+  "repo.tokenDefault": { id: "repo-token-default", label: "Token default" },
+  "repo.eventPolicy": { id: "repo-event-policy", label: "Event policy" },
 };
 
 /** A span's last line, leaving out a line the span only reaches at its first column. */
@@ -37,6 +42,8 @@ export const lastLine = (span: Span) =>
 export interface CauseLinks {
   files: WorkflowFile[];
   focusField: (id: string) => void;
+  /** A Repo fact's source tag (#9 §6); undefined for inputs that carry none. */
+  source: (path: string) => "assumed" | "set" | undefined;
   showLines: (span: Span) => void;
 }
 
@@ -45,24 +52,22 @@ export function Causes({
   causes,
   files,
   focusField,
+  source,
   showLines,
 }: { causes: Cause[] } & CauseLinks) {
   return (
     <ol className="explanation" aria-label="Causes">
-      {causes.map((cause, i) => (
-        <li key={i}>
-          {i === 0 && <span className="root">root </span>}
-          {cause.rule}: {prose(RULES[cause.rule]?.text ?? "")}
-          {cause.spans.map((span, j) => (
-            <Excerpt key={j} span={span} files={files} showLines={showLines} />
-          ))}
-          <ul>
+      {causes.map((cause, i) =>
+        cause.rule === "WN-5" ? (
+          // #9 §6: an assumed default, grey after the root, with a link to set it.
+          <li key={i} className="assumed-cause">
             {cause.inputs.map(({ path, value }) => {
               const field = FIELDS[path];
-              const text = `${field?.label ?? path} = ${String(value)}`;
               return (
-                <li key={path}>
-                  {field ? (
+                <Fragment key={path}>
+                  WN-5: {field?.label ?? path} = {String(value)} (assumed
+                  default){" "}
+                  {field && (
                     <a
                       href={`#${field.id}`}
                       onClick={(e) => {
@@ -70,17 +75,58 @@ export function Causes({
                         focusField(field.id);
                       }}
                     >
-                      {text}
+                      set it
                     </a>
-                  ) : (
-                    text
                   )}
-                </li>
+                </Fragment>
               );
             })}
-          </ul>
-        </li>
-      ))}
+          </li>
+        ) : (
+          <li key={i}>
+            {i === 0 && <span className="root">root </span>}
+            {cause.rule}: {prose(RULES[cause.rule]?.text ?? "")}
+            {cause.spans.map((span, j) => (
+              <Excerpt
+                key={j}
+                span={span}
+                files={files}
+                showLines={showLines}
+              />
+            ))}
+            <ul>
+              {cause.inputs.map(({ path, value }) => {
+                const field = FIELDS[path];
+                const text = `${field?.label ?? path} = ${String(value)}`;
+                const tag = source(path);
+                return (
+                  <li key={path}>
+                    {field ? (
+                      <a
+                        href={`#${field.id}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          focusField(field.id);
+                        }}
+                      >
+                        {text}
+                      </a>
+                    ) : (
+                      text
+                    )}
+                    {tag && (
+                      <>
+                        {" "}
+                        <span className={`source-tag ${tag}`}>{tag}</span>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        ),
+      )}
     </ol>
   );
 }

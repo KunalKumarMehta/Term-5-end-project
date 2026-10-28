@@ -97,11 +97,32 @@ test("show --flow all prints every Verdict: the runs, and each job's access keys
   expect(all.stdout).toContain(
     "ci.yml › test: runs (root WN-2, line 6)\n" +
       "ci.yml › test › secrets: available (root FK-0)\n" +
-      "ci.yml › test › token.actions: none (root PERM-1)\n",
+      "ci.yml › test › token.actions: none (root PERM-1; WN-5 assumed repo.tokenDefault = restricted)\n",
   );
   expect(all.stdout.match(/ › (token\.[a-z-]+|secrets): /g)).toHaveLength(
     3 * 18,
   );
+});
+
+test("show prints each assumed default that decides a Verdict as a WN-5 cause after its root, never as the root", () => {
+  const { stdout } = run(
+    "show",
+    "--repo",
+    fixture,
+    "--event",
+    "push",
+    "--date",
+    "2026-12-03",
+  );
+  // The token default decides every token scope of a job with no permissions: block.
+  expect(stdout).toContain(
+    "ci.yml › test › token.contents: read (root PERM-1; WN-5 assumed repo.tokenDefault = restricted)\n",
+  );
+  // It doesn't decide secrets or a run Verdict.
+  expect(stdout).toContain("ci.yml › test › secrets: available (root FK-0)\n");
+  expect(stdout).toContain("ci.yml: runs (root EV-0, line 3)\n");
+  expect(stdout).not.toMatch(/root WN-5/);
+  expect(stdout.match(/WN-5/g)).toHaveLength(3 * 17);
 });
 
 test("show prints a broken file's Diagnostic at file:line in place of its Verdicts, and the other files' Verdicts", () => {

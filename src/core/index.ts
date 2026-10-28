@@ -1,7 +1,12 @@
 import { accessVerdicts } from "./access";
 import { jobVerdicts } from "./jobs";
 import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
-import { validateScenario, withDefaults, type Scenario } from "./scenario";
+import {
+  ASSUMED,
+  validateScenario,
+  withDefaults,
+  type Scenario,
+} from "./scenario";
 import { filterDiagnostics, trigger } from "./triggers";
 
 export { PLATFORM_BASELINE } from "./baseline";
@@ -83,8 +88,8 @@ export function simulate(
 ): SimulationResult {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { scenario } = withDefaults(input);
-  const { event, repo } = scenario;
+  const { scenario, filled } = withDefaults(input);
+  const { event } = scenario;
 
   // Diagnostics never depend on the Scenario, so an unsupported Event still reports them.
   const parsed = files.flatMap((file) => {
@@ -128,24 +133,37 @@ export function simulate(
     };
   }
 
-  const verdicts: Verdict[] = [];
-  for (const { key, bytes, ...file } of parsed) {
-    // A file GitHub would reject gets no Verdicts.
-    if (file.diagnostics.length > 0) continue;
-    // PL-9: GitHub starts no runs from it, but it isn't a Diagnostic, so its keys stay (ADR 0001).
-    const workflow: Verdict =
-      bytes > MAX_BYTES
-        ? {
-            key,
-            value: "skipped",
-            causes: [{ rule: "PL-9", spans: [], inputs: [] }],
-          }
-        : { key, ...trigger(file, event, repo.defaultBranch!) };
-    verdicts.push(
-      workflow,
-      ...jobVerdicts(key, file, workflow, scenario),
-      ...accessVerdicts(key, file, scenario),
-    );
+  const verdicts = evaluate(parsed, scenario);
+  // WN-5 (#8 §3): an assumed default decides a Verdict when another allowed value of the
+  // field would change its value. It follows the root, never replaces it.
+  for (const path of filled) {
+    const allowed = ASSUMED.get(path);
+    if (!allowed) continue;
+    const [group, field] = path.split(".") as ["repo" | "event", string];
+    const value = (scenario[group] as unknown as Record<string, unknown>)[
+      field
+    ];
+    const decided = new Set<string>();
+    for (const other of allowed) {
+      if (other === value) continue;
+      // Shallow copies keep the null-prototype maps withDefaults made.
+      const alt = {
+        ...scenario,
+        [group]: { ...scenario[group], [field]: other },
+      };
+      const values = new Map(
+        evaluate(parsed, alt).map((v) => [v.key, v.value]),
+      );
+      for (const v of verdicts)
+        if (values.get(v.key) !== v.value) decided.add(v.key);
+    }
+    // A new array: Verdicts may share a cause chain (a no-run job copies its workflow's).
+    for (const v of verdicts)
+      if (decided.has(v.key))
+        v.causes = [
+          ...v.causes,
+          { rule: "WN-5", spans: [], inputs: [{ path, value }] },
+        ];
   }
   // Code-unit order, so the result never depends on the host's locale.
   verdicts.sort((a, b) => compare(a.key, b.key));
@@ -172,6 +190,36 @@ function unmatched(
       .map((parts) => parts.join(" › "));
     return [{ key, candidates }];
   });
+}
+
+type Parsed = ReturnType<typeof parseWorkflowFile> & {
+  key: string;
+  bytes: number;
+};
+
+/** The Verdicts of the files GitHub would accept, unsorted. */
+function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
+  const { event, repo } = scenario;
+  const verdicts: Verdict[] = [];
+  for (const { key, bytes, ...file } of parsed) {
+    // A file GitHub would reject gets no Verdicts.
+    if (file.diagnostics.length > 0) continue;
+    // PL-9: GitHub starts no runs from it, but it isn't a Diagnostic, so its keys stay (ADR 0001).
+    const workflow: Verdict =
+      bytes > MAX_BYTES
+        ? {
+            key,
+            value: "skipped",
+            causes: [{ rule: "PL-9", spans: [], inputs: [] }],
+          }
+        : { key, ...trigger(file, event, repo.defaultBranch!) };
+    verdicts.push(
+      workflow,
+      ...jobVerdicts(key, file, workflow, scenario),
+      ...accessVerdicts(key, file, scenario),
+    );
+  }
+  return verdicts;
 }
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

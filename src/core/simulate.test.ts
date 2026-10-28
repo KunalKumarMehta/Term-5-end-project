@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   RULES,
   simulate as coreSimulate,
+  withDefaults,
   type Event,
   type Verdict,
 } from "./index";
@@ -1336,12 +1337,9 @@ test("a job skipped by its own if: still gets all 17 token keys and its secrets 
       secrets: "available",
     }),
   );
-  expect(a["token.contents"]!.causes).toEqual([
-    {
-      rule: "PERM-1",
-      spans: [],
-      inputs: [{ path: "repo.tokenDefault", value: "restricted" }],
-    },
+  expect(a["token.contents"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-1",
+    "WN-5",
   ]);
 });
 
@@ -1393,6 +1391,91 @@ test("with a permissive token default, a job with no permissions: gets id-token 
     possible: ["none", "write"],
     settle: [],
   });
+});
+
+const wn5 = (path: string, value: unknown) => ({
+  rule: "WN-5",
+  spans: [],
+  inputs: [{ path, value }],
+});
+
+test("a job with no permissions: takes its scopes from the assumed token default: root PERM-1, then a WN-5 cause; setting the token default to that value drops WN-5 and keeps the root", () => {
+  const files = [wf("ci.yml", `on: push\njobs:\n  a:\n${steps}`)];
+  const perm1 = {
+    rule: "PERM-1",
+    spans: [],
+    inputs: [{ path: "repo.tokenDefault", value: "restricted" }],
+  };
+  const assumed = accessOf(simulate(files, push).verdicts, "ci.yml › a");
+  expect(assumed["token.contents"]).toMatchObject({
+    value: "read",
+    causes: [perm1, wn5("repo.tokenDefault", "restricted")],
+  });
+  expect(assumed["token.actions"]).toMatchObject({
+    value: "none",
+    causes: [perm1, wn5("repo.tokenDefault", "restricted")],
+  });
+  // The token default doesn't decide secrets, so no WN-5 there.
+  expect(assumed.secrets!.causes.map((c) => c.rule)).toEqual(["FK-0"]);
+
+  const set = accessOf(
+    simulate(files, {
+      event: { name: "push" },
+      repo: { date, tokenDefault: "restricted" },
+    }).verdicts,
+    "ci.yml › a",
+  );
+  expect(set["token.contents"]).toMatchObject({
+    value: "read",
+    causes: [perm1],
+  });
+});
+
+test("a job with its own permissions: block isn't decided by the token default, so it gets no WN-5 cause", () => {
+  const { verdicts } = simulate(
+    [
+      wf(
+        "ci.yml",
+        `on: push\njobs:\n  a:\n    permissions:\n      contents: write\n${steps}`,
+      ),
+    ],
+    push,
+  );
+  const a = accessOf(verdicts, "ci.yml › a");
+  expect(a["token.contents"]!.causes.map((c) => c.rule)).toEqual(["PERM-3"]);
+});
+
+test("a pinned root survives writing the defaults out: every Verdict keeps its value and root, and only the WN-5 causes go", () => {
+  const scenario = {
+    event: {
+      name: "pull_request",
+      actor: "member" as const,
+      ref: "feature",
+      base: "main",
+      changed: ["src/app.ts"],
+    },
+    repo: { date },
+  };
+  // The example set, plus a GitHub workflow with no permissions: anywhere (PERM-1).
+  const files = [
+    ...example,
+    wf("lint.yml", `on: pull_request\njobs:\n  lint:\n${steps}`),
+  ];
+  const assumed = simulate(files, scenario).verdicts;
+  const written = simulate(files, withDefaults(scenario).scenario).verdicts;
+  expect(assumed.some((v) => v.causes.some((c) => c.rule === "WN-5"))).toBe(
+    true,
+  );
+  expect(written.map((v) => [v.key, v.value, v.causes[0]!.rule])).toEqual(
+    assumed.map((v) => [v.key, v.value, v.causes[0]!.rule]),
+  );
+  for (const v of assumed) expect(v.causes[0]!.rule).not.toBe("WN-5");
+  expect(written).toEqual(
+    assumed.map((v) => ({
+      ...v,
+      causes: v.causes.filter((c) => c.rule !== "WN-5"),
+    })),
+  );
 });
 
 test("a uses: caller job gets no access keys until reusable workflows land", () => {
