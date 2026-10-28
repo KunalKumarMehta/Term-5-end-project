@@ -13,6 +13,6 @@ WhyNoRun simulates a repository's workflows against an event you describe (a pus
 ## Tech Stack
 
 - TypeScript core built on GitHub's own `@actions/workflow-parser` and `@actions/expressions`
-- Node.js CLI (npm) and a composite GitHub Action for CI
+- Node.js CLI (npm) and a JavaScript GitHub Action for CI
 - React + Vite browser playground with CodeMirror, hosted on GitHub Pages
 - Vitest and Playwright for testing; GitHub Actions for CI/CD
