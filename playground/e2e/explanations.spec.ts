@@ -50,13 +50,17 @@ test("clicking a Verdict opens its cause chain with the root marked, the rule's 
   const panel = explanation(page);
   await expect(panel.getByRole("heading")).toHaveText("ci.yml runs");
   const causes = panel.getByRole("list", { name: "Causes" }).locator("> li");
-  await expect(causes).toHaveCount(1);
+  // The root, then where a push reads the file from (DB-2).
+  await expect(causes).toHaveCount(2);
+  await expect(causes.nth(1)).toContainText(
+    "DB-2: A push runs the GitHub workflow as it is in the pushed commit.",
+  );
   await expect(causes.first()).toContainText(`root EV-0: ${EV_0}`);
   // One line of context either side; line 1 has nothing above it.
   await expect(causes.first().locator("pre")).toHaveText("1on: push\n2jobs:");
   await expect(causes.first().locator("mark")).toHaveText("on: push");
 
-  await panel.getByRole("link", { name: "Event name = push" }).click();
+  await causes.first().getByRole("link", { name: "Event name = push" }).click();
   await expect(page.getByLabel("Event name")).toBeFocused();
 
   await panel.getByRole("button", { name: "Close" }).click();

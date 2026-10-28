@@ -5,10 +5,14 @@ import {
   PLATFORM_BASELINE,
   simulate,
   validateScenario,
+  type ActorKind,
   type Scenario,
 } from "../core";
 
-const USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--repo <dir>] [--flow access|all]
+const ACTORS = ["member", "fork", "dependabot"];
+
+const USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref>] [--base <branch>]
+                     [--actor member|fork|dependabot] [--repo <dir>] [--flow access|all]
        whynorun --version
 `;
 
@@ -34,6 +38,9 @@ function show(args: string[]): number {
       options: {
         event: { type: "string" },
         date: { type: "string" },
+        ref: { type: "string" },
+        base: { type: "string" },
+        actor: { type: "string" },
         repo: { type: "string", default: "." },
         flow: { type: "string", default: "all" },
       },
@@ -41,7 +48,7 @@ function show(args: string[]): number {
   } catch (err) {
     return misuse((err as Error).message);
   }
-  const { event, date, repo, flow } = values;
+  const { event, date, ref, base, actor, repo, flow } = values;
   if (flow === "checks" || flow === "concurrency")
     return misuse(
       `--flow ${flow} needs required checks or a Follow-up event, which flags can't describe: use --from <test file>`,
@@ -52,7 +59,14 @@ function show(args: string[]): number {
   if (date === undefined)
     return misuse("show needs --date <YYYY-MM-DD>, the simulation date");
 
+  if (actor !== undefined && !ACTORS.includes(actor))
+    return misuse("--actor must be member, fork or dependabot");
+
+  // The activity type has no flag: it is always GitHub's defaults (#10 §6).
   const scenario: Scenario = { event: { name: event }, repo: { date } };
+  if (ref !== undefined) scenario.event.ref = ref;
+  if (base !== undefined) scenario.event.base = base;
+  if (actor !== undefined) scenario.event.actor = actor as ActorKind;
   if (validateScenario(scenario).length > 0)
     return misuse(`--event or --date is invalid: --date must be YYYY-MM-DD`);
 

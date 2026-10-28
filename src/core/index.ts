@@ -1,5 +1,6 @@
 import { parseWorkflowFile, type Diagnostic, type Span } from "./parser";
 import { validateScenario, withDefaults, type Scenario } from "./scenario";
+import { filterDiagnostics, trigger } from "./triggers";
 
 export { PLATFORM_BASELINE } from "./baseline";
 export type { Diagnostic, Span } from "./parser";
@@ -45,6 +46,7 @@ export interface SimulationResult {
   diagnostics: Diagnostic[];
 }
 
+const SUPPORTED = new Set(["push", "pull_request"]);
 const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 
 /** Whether GitHub reads the file at this path: a `.yml`/`.yaml` file directly in `.github/workflows/`. */
@@ -60,7 +62,7 @@ export function simulate(
 ): SimulationResult {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { event } = withDefaults(input).scenario;
+  const { event, repo } = withDefaults(input).scenario;
 
   // Diagnostics never depend on the Scenario, so an unsupported Event still reports them.
   const parsed = files.flatMap((file) => {
@@ -69,14 +71,18 @@ export function simulate(
       ? []
       : [{ key, ...parseWorkflowFile(file.path, file.text) }];
   });
+  // Branch and tag filter checks need a file the parser accepted.
+  for (const p of parsed)
+    if (p.diagnostics.length === 0) p.diagnostics = filterDiagnostics(p);
   const diagnostics = parsed
     .flatMap((p) => p.diagnostics)
     .sort(
       (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col,
     );
 
-  // Until later tickets support them, every Event but a member's push is outside the model.
-  if (event.name !== "push" || event.actor !== "member") {
+  // Until later tickets support them, every Event but a member's push or pull_request
+  // is outside the model.
+  if (!SUPPORTED.has(event.name) || event.actor !== "member") {
     const inputs = [
       { path: "event.name", value: event.name },
       { path: "event.actor", value: event.actor },
@@ -97,19 +103,7 @@ export function simulate(
   for (const { key, ...workflow } of parsed) {
     // A file GitHub would reject gets no Verdicts.
     if (workflow.diagnostics.length > 0) continue;
-    const listed = Object.hasOwn(workflow.events, event.name);
-    const span = listed ? workflow.onEntries.get(event.name) : workflow.onSpan;
-    verdicts.push({
-      key,
-      value: listed ? "runs" : "skipped",
-      causes: [
-        {
-          rule: "EV-0",
-          spans: span ? [span] : [],
-          inputs: [{ path: "event.name", value: event.name }],
-        },
-      ],
-    });
+    verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch!) });
   }
   // Code-unit order, so the result never depends on the host's locale.
   verdicts.sort((a, b) => compare(a.key, b.key));

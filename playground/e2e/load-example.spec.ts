@@ -66,8 +66,8 @@ test("editing a file marks the example edited, and Reset asks first, then restor
   await expect(source(page)).toHaveText("Example");
   const rows = results(page).locator(".verdicts").getByRole("listitem");
   const all = [
-    "ci.yml runs root EV-0",
-    "deploy.yml runs root EV-0",
+    "ci.yml runs root BR-4",
+    "deploy.yml runs root BR-4",
     "triage.yml skipped root EV-0",
   ];
   await expect(rows).toHaveText(all);
@@ -141,8 +141,8 @@ test("with Scenario 1 touched, Load example asks first, then loads the files and
   await expect(page.getByLabel("Event name")).toHaveValue("push");
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-01");
   await expect(results(page).getByRole("listitem")).toHaveText([
-    "ci.yml runs root EV-0",
-    "deploy.yml runs root EV-0",
+    "ci.yml runs root BR-4",
+    "deploy.yml runs root BR-4",
     "triage.yml skipped root EV-0",
   ]);
 });

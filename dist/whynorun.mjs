@@ -13761,6 +13761,25 @@ function indexOn(doc, span) {
     if (event !== void 0 && !onEntries.has(event))
       onEntries.set(event, own ?? span(entry));
   }
+  for (const pair2 of (0, import_yaml2.isMap)(value) ? value.items : []) {
+    const event = name(doc, pair2.key);
+    if (event === void 0) continue;
+    const viaEvent = own ?? ((0, import_yaml2.isAlias)(pair2.value) ? span(pair2.value) : void 0);
+    const settings = resolve(doc, pair2.value);
+    for (const setting of (0, import_yaml2.isMap)(settings) ? settings.items : []) {
+      const key = name(doc, setting.key);
+      if (key === void 0 || !(0, import_yaml2.isScalar)(setting.key)) continue;
+      const at = `${event}.${key}`;
+      if (!onEntries.has(at)) onEntries.set(at, viaEvent ?? span(setting.key));
+      const via = viaEvent ?? ((0, import_yaml2.isAlias)(setting.value) ? span(setting.value) : void 0);
+      const list = resolve(doc, setting.value);
+      const items = (0, import_yaml2.isSeq)(list) ? list.items : [list];
+      items.forEach((item, i) => {
+        if ((0, import_yaml2.isAlias)(item) || (0, import_yaml2.isScalar)(item))
+          onEntries.set(`${at}.${i}`, via ?? span(item));
+      });
+    }
+  }
   return { onSpan: span(pair.key), onEntries };
 }
 function resolve(doc, node) {
@@ -14588,6 +14607,279 @@ function walk(node, path) {
   return typeof at === "object" && at !== null ? at : void 0;
 }
 
+// src/core/workflowpattern.ts
+var quoteMeta = (s) => s.replace(/[\\.+*?()|[\]{}^$]/g, "\\$&");
+function compilePattern(raw, flags = "") {
+  const negative = raw.startsWith("!");
+  const pattern = negative ? raw.slice(1) : raw;
+  const source = patternToRegex(pattern);
+  let regex;
+  try {
+    regex = new RegExp(source, flags);
+  } catch {
+    throw new Error(`invalid Pattern '${pattern}'`);
+  }
+  return { pattern, negative, regex };
+}
+function patternToRegex(pattern) {
+  let r = "^";
+  let pos = 0;
+  const errors = /* @__PURE__ */ new Map();
+  const validChar = (a, b, test) => test !== void 0 && test >= a && test <= b;
+  while (pos < pattern.length) {
+    const c = pattern[pos];
+    switch (c) {
+      case "*":
+        if (pattern[pos + 1] === "*") {
+          if (pattern[pos + 2] === "/") {
+            r += "(.+/)?";
+            pos += 3;
+          } else {
+            r += ".*";
+            pos += 2;
+          }
+        } else {
+          r += "[^/]*";
+          pos++;
+        }
+        break;
+      case "+":
+      case "?":
+        r += pos > 0 ? c : quoteMeta(c);
+        pos++;
+        break;
+      case "[": {
+        r += c;
+        pos++;
+        if (pattern[pos] === "]") {
+          errors.set(pos, "Unexpected empty brackets '[]'");
+          pos++;
+          break;
+        }
+        const startPos = pos;
+        while (pos < pattern.length && pattern[pos] !== "]") {
+          const d = pattern[pos];
+          if (d === "-") {
+            if (pos <= startPos || pos + 1 >= pattern.length) {
+              errors.set(pos, "Invalid range");
+              pos++;
+              continue;
+            }
+            const before = pattern[pos - 1];
+            const after = pattern[pos + 1];
+            const validRange = (a, b) => validChar(a, b, before) && validChar(a, b, after) && before <= after;
+            if (!validRange("A", "z") && !validRange("0", "9")) {
+              errors.set(pos, "Ranges can only include a-z, A-Z, A-z, and 0-9");
+              pos++;
+              continue;
+            }
+            r += pattern.slice(pos, pos + 2);
+            pos += 2;
+          } else {
+            if (!validChar("A", "z", d) && !validChar("0", "9", d)) {
+              errors.set(pos, "Ranges can only include a-z, A-Z and 0-9");
+              pos++;
+              continue;
+            }
+            r += quoteMeta(d);
+            pos++;
+          }
+        }
+        if (pos >= pattern.length || pattern[pos] !== "]") {
+          errors.set(pos, "Missing closing bracket ']' after '['");
+          pos++;
+        }
+        r += "]";
+        pos++;
+        break;
+      }
+      case "\\":
+        if (pos + 1 >= pattern.length) {
+          errors.set(pos, "Missing symbol after \\");
+          pos++;
+          break;
+        }
+        r += quoteMeta(pattern[pos + 1]);
+        pos += 2;
+        break;
+      default:
+        r += quoteMeta(c);
+        pos++;
+    }
+  }
+  if (errors.size > 0) {
+    const list = [...errors].sort(([a], [b]) => a - b).map(([at, err]) => `Position: ${at} Error: ${err}`);
+    throw new Error(`invalid Pattern '${pattern}': ${list.join(", ")}`);
+  }
+  return r + "$";
+}
+function compilePatterns(patterns, flags = "") {
+  return patterns.map((p) => compilePattern(p, flags));
+}
+function skip(sequence, input) {
+  if (sequence.length === 0) return { skip: false, by: -1 };
+  let matched = false;
+  let by = -1;
+  sequence.forEach((item, i) => {
+    if (item.regex.test(input)) {
+      matched = !item.negative;
+      by = i;
+    }
+  });
+  return { skip: !matched, by };
+}
+function filter(sequence, input) {
+  const by = sequence.findIndex(
+    (item) => item.regex.test(input) === !item.negative
+  );
+  return { skip: by >= 0, by };
+}
+
+// src/core/triggers.ts
+var KINDS = ["branches", "tags"];
+var PR_DEFAULT_TYPES = ["opened", "synchronize", "reopened"];
+var settingsOf = (parsed, event) => {
+  const value = parsed.events[event];
+  return typeof value === "object" && value !== null ? value : {};
+};
+function filterDiagnostics(parsed) {
+  const found = [];
+  for (const event of Object.keys(parsed.events)) {
+    const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
+    const settings = settingsOf(parsed, event);
+    for (const kind of KINDS) {
+      const ignore = `${kind}-ignore`;
+      if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
+        found.push({
+          ...at(`${event}.${ignore}`),
+          rule: "BR-1",
+          message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
+        });
+      for (const key of [kind, ignore]) {
+        const list = settings[key];
+        if (!Array.isArray(list)) continue;
+        list.forEach((pattern, i) => {
+          try {
+            compilePattern(String(pattern));
+          } catch (err) {
+            found.push({
+              ...at(`${event}.${key}.${i}`),
+              message: err.message
+            });
+          }
+        });
+      }
+    }
+  }
+  return found;
+}
+function trigger(parsed, event, defaultBranch) {
+  const name2 = event.name;
+  const spans = (key2) => {
+    const span = parsed.onEntries.get(key2);
+    return span ? [span] : [];
+  };
+  const named = { path: "event.name", value: name2 };
+  if (!Object.hasOwn(parsed.events, name2))
+    return {
+      value: "skipped",
+      causes: [
+        {
+          rule: "EV-0",
+          spans: parsed.onSpan ? [parsed.onSpan] : [],
+          inputs: [named]
+        }
+      ]
+    };
+  const settings = settingsOf(parsed, name2);
+  const has = (key2) => Object.hasOwn(settings, key2);
+  const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
+  const after = [];
+  if (name2 === "pull_request") {
+    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
+    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
+    const typed = {
+      rule: "EV-1",
+      spans: spans(has("types") ? `${name2}.types` : name2),
+      inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
+    };
+    if (!wanted.some((t) => types.includes(t)))
+      return { value: "skipped", causes: [typed] };
+    after.push(typed);
+    if (event.type === "stacked")
+      after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
+  }
+  after.push({
+    rule: name2 === "push" ? "DB-2" : "DB-3",
+    spans: [],
+    inputs: [named]
+  });
+  const given = name2 === "push" ? event.ref : event.base;
+  const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
+  const ref = given ?? `refs/heads/${defaultBranch}`;
+  const kind = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
+  const short = ref.replace(/^refs\/(heads|tags)\//, "");
+  const other = kind === "branches" ? "tags" : "branches";
+  const include = has(kind);
+  if (!include && !has(`${kind}-ignore`)) {
+    const otherKey = has(other) ? other : `${other}-ignore`;
+    if (name2 === "push" && has(otherKey))
+      return {
+        value: "skipped",
+        causes: [
+          { rule: "BR-3", spans: spans(`push.${otherKey}`), inputs: [input] },
+          ...after
+        ]
+      };
+    return { value: "runs", causes: [listed, ...after] };
+  }
+  const key = include ? kind : `${kind}-ignore`;
+  const patterns = settings[key].map(String);
+  const decide = (list, flags = "") => (include ? skip : filter)(compilePatterns(list, flags), short);
+  const base = decide(patterns);
+  const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
+  const matched = {
+    rule: name2 === "push" ? "BR-3" : "BR-2",
+    spans: spans(`${name2}.${key}`),
+    inputs: [input]
+  };
+  const prefix = `refs/${kind === "tags" ? "tags" : "heads"}/`;
+  const fullRef = patterns.findIndex(
+    (p) => p.replace(/^!/, "").startsWith(prefix)
+  );
+  const uncertain = (rule, i) => ({
+    value: "uncertain",
+    causes: [{ rule, spans: at(i), inputs: [input] }, matched, ...after],
+    possible: ["runs", "skipped"],
+    settle: []
+  });
+  if (fullRef >= 0) {
+    const asFull = decide(
+      patterns.map((p) => p.replace(new RegExp(`^(!?)${prefix}`), "$1"))
+    );
+    if (asFull.skip !== base.skip) return uncertain("BR-8", fullRef);
+  }
+  const anyCase = decide(patterns, "i");
+  if (anyCase.skip !== base.skip)
+    return uncertain("GL-6", anyCase.by >= 0 ? anyCase.by : base.by);
+  const deciding = patterns[base.by] ?? "";
+  const glob = [
+    ["GL-1", /\*/],
+    ["GL-2", /.[?+]/],
+    ["GL-3", /\[/],
+    ["GL-4", /^!|\\/]
+  ];
+  return {
+    value: base.skip ? "skipped" : "runs",
+    causes: [
+      { rule: include ? "BR-4" : "BR-5", spans: at(base.by), inputs: [input] },
+      matched,
+      ...glob.filter(([, re]) => re.test(deciding)).map(([rule]) => ({ rule, spans: at(base.by), inputs: [] })),
+      ...after
+    ]
+  };
+}
+
 // src/core/baseline.ts
 var PLATFORM_BASELINE = [
   "Actions are enabled for the repo, org and enterprise, and the GitHub workflow isn't disabled (PL-1, PL-2).",
@@ -14610,6 +14902,102 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "EV-1",
+    text: "`pull_request` with no `types:` runs only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
+    confidence: "High"
+  },
+  {
+    id: "EV-4",
+    text: "The parser accepts a `stacked` activity type for `pull_request`, but GitHub's docs don't list it: valid syntax with undocumented meaning.",
+    url: "https://github.com/actions/languageservices/blob/4043eda/workflow-parser/src/workflow-v1.0.json",
+    confidence: "Med"
+  },
+  {
+    id: "BR-1",
+    text: "`branches` and `branches-ignore` can't both appear on one event, and neither can `tags` and `tags-ignore`: GitHub rejects the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-2",
+    text: "For `pull_request`, branch filters match the pull request's base branch.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpull_requestpull_request_targetbranchesbranches-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-3",
+    text: "For `push`, filters match the pushed ref's name: with only branch filters a tag push doesn't run, and with only tag filters a branch push doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-4",
+    text: "`branches` and `tags` patterns are tried in order and the last match wins: a `!` pattern excludes a ref an earlier pattern matched, and a later positive pattern includes it again.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High"
+  },
+  {
+    id: "BR-5",
+    text: "`branches-ignore` and `tags-ignore` skip the GitHub workflow when any pattern matches the ref.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High"
+  },
+  {
+    id: "BR-8",
+    text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "Low"
+  },
+  {
+    id: "GL-1",
+    text: "In a filter pattern `*` matches any characters except `/`, and `**` matches any characters including `/`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-2",
+    text: "In a filter pattern `?` means zero or one of the preceding character, and `+` one or more of it.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-3",
+    text: "In a filter pattern `[]` matches one alphanumeric character from a set or an `a-z`, `A-Z` or `0-9` range.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-4",
+    text: "In a filter pattern `!` has meaning only as the first character, and `\\` makes the next character literal.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-5",
+    text: "A filter pattern starting with `*`, `[` or `!` must be quoted: unquoted, the YAML doesn't parse and the GitHub workflow doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-6",
+    text: "GitHub's docs don't say whether filter patterns are case-sensitive.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "Low"
+  },
+  {
+    id: "DB-2",
+    text: "A `push` runs the GitHub workflow as it is in the pushed commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push",
+    confidence: "High"
+  },
+  {
+    id: "DB-3",
+    text: "A `pull_request` runs the GitHub workflow as it is in the pull request's merge commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
+    confidence: "High"
+  },
+  {
     id: "WN-3",
     text: "Outside v1: WhyNoRun doesn't simulate this Event.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
@@ -14621,19 +15009,22 @@ var RULES = Object.fromEntries(
 );
 
 // src/core/index.ts
+var SUPPORTED = /* @__PURE__ */ new Set(["push", "pull_request"]);
 var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
-  const { event } = withDefaults(input).scenario;
+  const { event, repo } = withDefaults(input).scenario;
   const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
     return key === void 0 ? [] : [{ key, ...parseWorkflowFile(file.path, file.text) }];
   });
+  for (const p of parsed)
+    if (p.diagnostics.length === 0) p.diagnostics = filterDiagnostics(p);
   const diagnostics = parsed.flatMap((p) => p.diagnostics).sort(
     (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col
   );
-  if (event.name !== "push" || event.actor !== "member") {
+  if (!SUPPORTED.has(event.name) || event.actor !== "member") {
     const inputs = [
       { path: "event.name", value: event.name },
       { path: "event.actor", value: event.actor }
@@ -14652,19 +15043,7 @@ function simulate(files, input) {
   const verdicts = [];
   for (const { key, ...workflow } of parsed) {
     if (workflow.diagnostics.length > 0) continue;
-    const listed = Object.hasOwn(workflow.events, event.name);
-    const span = listed ? workflow.onEntries.get(event.name) : workflow.onSpan;
-    verdicts.push({
-      key,
-      value: listed ? "runs" : "skipped",
-      causes: [
-        {
-          rule: "EV-0",
-          spans: span ? [span] : [],
-          inputs: [{ path: "event.name", value: event.name }]
-        }
-      ]
-    });
+    verdicts.push({ key, ...trigger(workflow, event, repo.defaultBranch) });
   }
   verdicts.sort((a, b) => compare(a.key, b.key));
   return { verdicts, diagnostics };
@@ -14672,7 +15051,9 @@ function simulate(files, input) {
 var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
 // src/cli/main.ts
-var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--repo <dir>] [--flow access|all]
+var ACTORS = ["member", "fork", "dependabot"];
+var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref>] [--base <branch>]
+                     [--actor member|fork|dependabot] [--repo <dir>] [--flow access|all]
        whynorun --version
 `;
 function main(argv) {
@@ -14697,6 +15078,9 @@ function show(args) {
       options: {
         event: { type: "string" },
         date: { type: "string" },
+        ref: { type: "string" },
+        base: { type: "string" },
+        actor: { type: "string" },
         repo: { type: "string", default: "." },
         flow: { type: "string", default: "all" }
       }
@@ -14704,7 +15088,7 @@ function show(args) {
   } catch (err) {
     return misuse(err.message);
   }
-  const { event, date, repo, flow } = values;
+  const { event, date, ref, base, actor, repo, flow } = values;
   if (flow === "checks" || flow === "concurrency")
     return misuse(
       `--flow ${flow} needs required checks or a Follow-up event, which flags can't describe: use --from <test file>`
@@ -14714,7 +15098,12 @@ function show(args) {
   if (event === void 0) return misuse("show needs --event <name>");
   if (date === void 0)
     return misuse("show needs --date <YYYY-MM-DD>, the simulation date");
+  if (actor !== void 0 && !ACTORS.includes(actor))
+    return misuse("--actor must be member, fork or dependabot");
   const scenario = { event: { name: event }, repo: { date } };
+  if (ref !== void 0) scenario.event.ref = ref;
+  if (base !== void 0) scenario.event.base = base;
+  if (actor !== void 0) scenario.event.actor = actor;
   if (validateScenario(scenario).length > 0)
     return misuse(`--event or --date is invalid: --date must be YYYY-MM-DD`);
   const dir = join2(resolve2(repo), ".github", "workflows");
@@ -14759,3 +15148,28 @@ function show(args) {
 
 // src/cli/index.ts
 process.exitCode = main(process.argv.slice(2));
+/*!
+ * A TypeScript port of nektos/act's pkg/workflowpattern (workflow_pattern.go at 2b8b3d6).
+ *
+ * MIT License
+ *
+ * Copyright (c) 2019
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */

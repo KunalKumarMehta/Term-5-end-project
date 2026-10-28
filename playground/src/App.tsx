@@ -12,6 +12,7 @@ import {
   RULES,
   setScenarioValue,
   simulate,
+  type ActorKind,
   type Diagnostic,
   type Scenario,
   type Span,
@@ -399,6 +400,16 @@ export function App() {
     setTouched(true);
   };
 
+  /** Sets an optional Event field; emptied, it is unset so its default applies. */
+  const setEventField = (field: "type" | "ref" | "base", value: string) => {
+    setScenario((s) => {
+      const event = { ...s.event, [field]: value };
+      if (value === "") delete event[field];
+      return { ...s, event };
+    });
+    setTouched(true);
+  };
+
   const links: CauseLinks = {
     files,
     focusField,
@@ -591,6 +602,51 @@ export function App() {
             <p id="event-name-error" className="error">
               {eventName.trim() === "" && "Enter an event name, such as push"}
             </p>
+            <label htmlFor="event-type">Activity type</label>
+            <input
+              id="event-type"
+              list="event-types"
+              placeholder="GitHub's defaults"
+              value={scenario.event.type ?? ""}
+              onChange={(e) => setEventField("type", e.target.value)}
+            />
+            <datalist id="event-types">
+              <option value="opened" />
+              <option value="synchronize" />
+              <option value="reopened" />
+              <option value="labeled" />
+              <option value="closed" />
+            </datalist>
+            <label htmlFor="event-actor">Actor kind</label>
+            <select
+              id="event-actor"
+              value={scenario.event.actor ?? "member"}
+              onChange={(e) =>
+                setInput(["event", "actor"], e.target.value as ActorKind)
+              }
+            >
+              <option value="member">Member</option>
+              <option value="fork">Fork contributor</option>
+              <option value="dependabot">dependabot[bot]</option>
+            </select>
+            <label htmlFor="event-ref">Ref</label>
+            <input
+              id="event-ref"
+              placeholder="the default branch"
+              aria-describedby="event-ref-hint"
+              value={scenario.event.ref ?? ""}
+              onChange={(e) => setEventField("ref", e.target.value)}
+            />
+            <p id="event-ref-hint" className="hint">
+              A branch, <code>refs/heads/…</code> or <code>refs/tags/…</code>
+            </p>
+            <label htmlFor="event-base">Base branch</label>
+            <input
+              id="event-base"
+              placeholder="the default branch"
+              value={scenario.event.base ?? ""}
+              onChange={(e) => setEventField("base", e.target.value)}
+            />
           </fieldset>
           <fieldset>
             <legend>Repo facts</legend>

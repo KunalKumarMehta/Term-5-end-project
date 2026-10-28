@@ -19,9 +19,12 @@ export const basename = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 // The Scenario inputs that have a form field so far; the others arrive with their tickets.
 const FIELDS: Record<string, { id: string; label: string }> = {
   "event.name": { id: "event-name", label: "Event name" },
+  "event.type": { id: "event-type", label: "Activity type" },
+  "event.actor": { id: "event-actor", label: "Actor kind" },
+  "event.ref": { id: "event-ref", label: "Ref" },
+  "event.base": { id: "event-base", label: "Base branch" },
   "repo.date": { id: "sim-date", label: "Simulation date" },
 };
-const LABELS: Record<string, string> = { "event.actor": "Actor kind" };
 
 /** A span's last line, leaving out a line the span only reaches at its first column. */
 export const lastLine = (span: Span) =>
@@ -54,7 +57,7 @@ export function Causes({
           <ul>
             {cause.inputs.map(({ path, value }) => {
               const field = FIELDS[path];
-              const text = `${field?.label ?? LABELS[path] ?? path} = ${String(value)}`;
+              const text = `${field?.label ?? path} = ${String(value)}`;
               return (
                 <li key={path}>
                   {field ? (

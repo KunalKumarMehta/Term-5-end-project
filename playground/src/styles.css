@@ -111,6 +111,7 @@ fieldset {
 }
 
 input,
+select,
 textarea {
   max-width: 100%;
   font: inherit;
@@ -124,6 +125,12 @@ textarea {
 .required {
   color: var(--muted);
   font-style: italic;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875em;
 }
 
 .error {

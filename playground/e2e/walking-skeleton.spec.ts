@@ -141,15 +141,57 @@ test("an unsupported event shows the Unsupported panel, its inputs linked to the
 }) => {
   await paste(page, CI);
   await page.getByLabel("Event name").fill("pull_request");
+  await page.getByLabel("Actor kind").selectOption("fork");
   await page.getByLabel("Simulation date").fill("2026-12-03");
 
   const panel = results(page);
   await expect(panel).toContainText(
     "Unsupported Scenario: Outside v1: WhyNoRun doesn't simulate this Event. (WN-3)",
   );
-  await expect(panel).toContainText("Actor kind = member");
+  await panel.getByRole("link", { name: "Actor kind = fork" }).click();
+  await expect(page.getByLabel("Actor kind")).toBeFocused();
   await panel.getByRole("link", { name: "Event name = pull_request" }).click();
   await expect(page.getByLabel("Event name")).toBeFocused();
+});
+
+test("for a push, changing the ref flips a branch-filtered GitHub workflow between runs and skipped, each with its root", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    ".github/workflows/ci.yml",
+  );
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  const row = results(page).getByRole("listitem");
+  // An empty ref is the default branch.
+  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+
+  await page.getByLabel("Ref").fill("refs/heads/feature");
+  await expect(row).toHaveText(["ci.yml skipped root BR-4"]);
+  await page.getByLabel("Ref").fill("refs/tags/v1.0.0");
+  await expect(row).toHaveText(["ci.yml skipped root BR-3"]);
+  await page.getByLabel("Ref").fill("main");
+  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+});
+
+test("a member's pull_request matches its base branch and activity type", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on:\n  pull_request:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    ".github/workflows/ci.yml",
+  );
+  await page.getByLabel("Event name").fill("pull_request");
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  const row = results(page).getByRole("listitem");
+  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await page.getByLabel("Base branch").fill("dev");
+  await expect(row).toHaveText(["ci.yml skipped root BR-4"]);
+  await page.getByLabel("Base branch").fill("");
+  await page.getByLabel("Activity type").fill("closed");
+  await expect(row).toHaveText(["ci.yml skipped root EV-1"]);
 });
 
 test.describe("on a 390 px screen", () => {
