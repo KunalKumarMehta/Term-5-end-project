@@ -1,17 +1,18 @@
-import Ajv from "ajv";
-import schema from "../../schemas/scenario.schema.json" with { type: "json" };
 import type { Scenario } from "./generated/scenario";
+import validate from "./generated/validate-scenario";
 
 export type * from "./generated/scenario";
 
-// shortcut: Ajv compiles with new Function, which a CSP without 'unsafe-eval' blocks;
-// switch to Ajv's standalone output when the playground's meta CSP lands.
-const validate = new Ajv({ allErrors: true }).compile<Scenario>(schema);
+interface ValidateFn {
+  (value: unknown): boolean;
+  errors?: { instancePath: string; message?: string }[] | null;
+}
 
 /** Checks a Scenario against `schemas/scenario.schema.json`; returns one message per problem. */
 export function validateScenario(value: unknown): string[] {
-  if (validate(value)) return [];
-  return (validate.errors ?? []).map(
+  const check = validate as ValidateFn;
+  if (check(value)) return [];
+  return (check.errors ?? []).map(
     (e) => `${e.instancePath || "scenario"} ${e.message ?? "is invalid"}`,
   );
 }

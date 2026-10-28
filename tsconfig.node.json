@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "types": ["node"] },
+  "compilerOptions": { "types": ["node"], "lib": ["ES2023", "DOM"] },
   "include": [
     "*.config.ts",
     "playground/vite.config.ts",
