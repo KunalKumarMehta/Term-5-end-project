@@ -7,5 +7,5 @@ const { version } = JSON.parse(readFileSync("package.json", "utf8")) as {
 
 export default defineConfig({
   define: { __VERSION__: JSON.stringify(version) },
-  test: { include: ["src/**/*.test.ts"] },
+  test: { include: ["src/**/*.test.ts", "scripts/**/*.test.ts"] },
 });
