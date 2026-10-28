@@ -14133,6 +14133,13 @@ var cause = (rule, span, inputs = []) => ({ rule, spans: span ? [span] : [], inp
 function jobVerdicts(file, parsed, workflow, scenario) {
   const key = (id) => `${file} \u203A ${id}`;
   const ids = parsed.jobs.map((j) => j.id.value);
+  if (workflow.value === "uncertain")
+    return ids.map((id) => ({
+      key: key(id),
+      value: "uncertain",
+      causes: workflow.causes,
+      settle: workflow.settle
+    }));
   if (workflow.value !== "runs")
     return ids.map((id) => ({
       key: key(id),

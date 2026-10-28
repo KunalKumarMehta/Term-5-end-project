@@ -112,7 +112,7 @@ test("a push to a branch a branches: filter lists runs, rooted in BR-4 on the ma
     event: { name: "push", ref: "refs/heads/releases/v1" },
     repo: { date },
   });
-  expect(verdicts).toHaveLength(1);
+  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › a"]);
   expect(verdicts[0]).toMatchObject({ key: "ci.yml", value: "runs" });
   expect(verdicts[0]!.causes[0]).toMatchObject({
     rule: "BR-4",
@@ -147,7 +147,7 @@ function verdictOf(on: string, event: Event) {
     repo: { date },
   });
   expect(diagnostics).toEqual([]);
-  expect(verdicts).toHaveLength(1);
+  expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › a"]);
   return verdicts[0]!;
 }
 // [value, root rule, root line]
@@ -361,6 +361,19 @@ test("a filter decision explains the input it used, the glob features of the dec
   ]);
 });
 
+test("an uncertain GitHub workflow leaves its jobs uncertain, for the same causes", () => {
+  const { verdicts } = simulate(
+    [wf("ci.yml", `on:\n  push:\n    branches: [refs/heads/main]\n${jobs}`)],
+    { event: { name: "push", ref: "refs/heads/main" }, repo: { date } },
+  );
+  expect(verdicts[1]).toEqual({
+    key: "ci.yml › a",
+    value: "uncertain",
+    causes: verdicts[0]!.causes,
+    settle: [],
+  });
+});
+
 test("a full-ref refs/heads/ pattern is uncertain when matching it would flip the outcome (BR-8), with nothing to settle it", () => {
   expect(
     verdictOf("on:\n  push:\n    branches:\n      - refs/heads/main\n", {
@@ -433,7 +446,7 @@ test.each([
       [wf("bad.yml", `on:\n${on}${jobs}`), wf("ok.yml", `on: push\n${jobs}`)],
       { event: { name: "push" }, repo: { date } },
     );
-    expect(verdicts.map((v) => v.key)).toEqual(["ok.yml"]);
+    expect(verdicts.map((v) => v.key)).toEqual(["ok.yml", "ok.yml › a"]);
     expect(diagnostics).toEqual([
       expect.objectContaining({
         rule: "BR-1",

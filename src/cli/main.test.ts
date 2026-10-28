@@ -185,13 +185,20 @@ test("show --ref with a tag ref skips a GitHub workflow with only a branches: fi
   );
   expect(code).toBe(0);
   expect(verdictLines(stdout)).toBe(
-    "release.yml: skipped (root BR-3, line 4)\n",
+    "release.yml: skipped (root BR-3, line 4)\n" +
+      "release.yml › build: no-run (root BR-3, line 4)\n",
   );
 });
 
 test.each([
-  ["main", "release.yml: runs (root BR-4, line 6)\n"],
-  ["dev", "release.yml: skipped (root BR-4, line 6)\n"],
+  [
+    "main",
+    "release.yml: runs (root BR-4, line 6)\nrelease.yml › build: runs (root WN-2, line 8)\n",
+  ],
+  [
+    "dev",
+    "release.yml: skipped (root BR-4, line 6)\nrelease.yml › build: no-run (root BR-4, line 6)\n",
+  ],
 ])(
   "show --event pull_request --base %s matches the base branch",
   (base, line) => {

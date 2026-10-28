@@ -35,6 +35,14 @@ export function jobVerdicts(
 ): Verdict[] {
   const key = (id: string) => `${file} › ${id}`;
   const ids = parsed.jobs.map((j) => j.id.value);
+  // An uncertain GitHub workflow leaves its jobs uncertain, settled by the same inputs.
+  if (workflow.value === "uncertain")
+    return ids.map((id) => ({
+      key: key(id),
+      value: "uncertain",
+      causes: workflow.causes,
+      settle: workflow.settle,
+    }));
   if (workflow.value !== "runs")
     return ids.map((id) => ({
       key: key(id),

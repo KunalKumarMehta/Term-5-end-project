@@ -168,14 +168,26 @@ test("for a push, changing the ref flips a branch-filtered GitHub workflow betwe
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = results(page).getByRole("listitem");
   // An empty ref is the default branch.
-  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
 
   await page.getByLabel("Ref").fill("refs/heads/feature");
-  await expect(row).toHaveText(["ci.yml skipped root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-4",
+    "ci.yml › build no-run root BR-4",
+  ]);
   await page.getByLabel("Ref").fill("refs/tags/v1.0.0");
-  await expect(row).toHaveText(["ci.yml skipped root BR-3"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-3",
+    "ci.yml › build no-run root BR-3",
+  ]);
   await page.getByLabel("Ref").fill("main");
-  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
 });
 
 test("a member's pull_request matches its base branch and activity type", async ({
@@ -189,12 +201,21 @@ test("a member's pull_request matches its base branch and activity type", async 
   await page.getByLabel("Event name").fill("pull_request");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = results(page).getByRole("listitem");
-  await expect(row).toHaveText(["ci.yml runs root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
   await page.getByLabel("Base branch").fill("dev");
-  await expect(row).toHaveText(["ci.yml skipped root BR-4"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-4",
+    "ci.yml › build no-run root BR-4",
+  ]);
   await page.getByLabel("Base branch").fill("");
   await page.getByLabel("Activity type").fill("closed");
-  await expect(row).toHaveText(["ci.yml skipped root EV-1"]);
+  await expect(row).toHaveText([
+    "ci.yml skipped root EV-1",
+    "ci.yml › build no-run root EV-1",
+  ]);
 });
 
 test.describe("on a 390 px screen", () => {
