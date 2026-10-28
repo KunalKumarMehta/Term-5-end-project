@@ -184,7 +184,9 @@ function merge(base: unknown, over: Obj): Obj {
 function githubContext({ event, repo }: Scenario): Obj {
   const pr =
     event.name === "pull_request" || event.name === "pull_request_target";
-  const ref = event.ref ?? `refs/heads/${repo.defaultBranch}`;
+  // A bare name is a branch, as the Scenario form takes it.
+  const given = event.ref ?? repo.defaultBranch!;
+  const ref = given.startsWith("refs/") ? given : `refs/heads/${given}`;
   const short = (r: string) => r.replace(/^refs\/(heads|tags)\//, "");
   const computed: Obj = pr
     ? {

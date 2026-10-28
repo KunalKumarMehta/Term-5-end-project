@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -9,11 +10,24 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  setScenarioValue,
   simulate,
+  type Diagnostic,
+  type Scenario,
+  type Span,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
-import { Editor } from "./Editor";
+import { ConfirmDialog, type Confirm } from "./ConfirmDialog";
+import { Editor, type Target } from "./Editor";
+import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
+import {
+  Causes,
+  Explanation,
+  basename,
+  prose,
+  type CauseLinks,
+} from "./Explanation";
 import { PasteDialog } from "./PasteDialog";
 
 type Pane = "yaml" | "scenario" | "results";
@@ -23,13 +37,6 @@ const INTERNAL_ERROR =
 
 const statusRegion = document.getElementById("status")!;
 const toastRegion = document.getElementById("toasts")!;
-
-/** Renders `code` spans in the core's prose as code, and everything else as text. */
-function prose(text: string): ReactNode {
-  return text
-    .split("`")
-    .map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
-}
 
 /** #12 addendum E: per-key changes of `value` or `possible`, plus keys that came or went. */
 function changedCount(before: Verdict[], after: Verdict[]): number {
@@ -48,72 +55,131 @@ function samePossible(a: Verdict, b: Verdict): boolean {
   return key(a) === key(b);
 }
 
-const basename = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+const sameFiles = (a: readonly WorkflowFile[], b: readonly WorkflowFile[]) =>
+  a.length === b.length &&
+  a.every((f, i) => f.path === b[i]!.path && f.text === b[i]!.text);
+
+// The form keeps an empty date as "", and shows Verdicts only once one is set (#12 §3).
+const BLANK: Scenario = { event: { name: "push" }, repo: { date: "" } };
+
+// Diagnostics never depend on the Scenario, so this stands in for the date while it's empty.
+const ANY_DATE = "2000-01-01";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function countByPath(diagnostics: Diagnostic[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const d of diagnostics)
+    counts.set(d.path, (counts.get(d.path) ?? 0) + 1);
+  return counts;
+}
+
+/** #12 addendum E: "· `ci.yml` has N Diagnostics" or "· `ci.yml` Diagnostics cleared". */
+function diagnosticNews(
+  before: Map<string, number>,
+  after: Map<string, number>,
+): string[] {
+  const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
+  return paths.flatMap((path) => {
+    const n = after.get(path) ?? 0;
+    if (n === (before.get(path) ?? 0)) return [];
+    return n
+      ? [`· ${basename(path)} has ${plural(n, "Diagnostic")}`]
+      : [`· ${basename(path)} Diagnostics cleared`];
+  });
+}
 
 /** A job key is `<file> › <jobId>`. */
 const isJob = (key: string) => key.split(" › ").length === 2;
 
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
+  const [origin, setOrigin] = useState<"example" | "pasted">();
   const [active, setActive] = useState<string>();
-  const [eventName, setEventName] = useState("push");
-  const [date, setDate] = useState("");
-  // Assumptions, keyed by job key ("job X fails").
-  const [assume, setAssume] = useState<Record<string, string>>({});
+  const [scenario, setScenario] = useState(BLANK);
+  const [label, setLabel] = useState("Scenario 1");
+  // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
+  const [touched, setTouched] = useState(false);
+  const [confirm, setConfirm] = useState<Confirm>();
+  // The job picked in the Assumptions section, before Add.
   const [failPick, setFailPick] = useState("");
   const [verdicts, setVerdicts] = useState<Verdict[]>();
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [target, setTarget] = useState<Target>();
   const [failed, setFailed] = useState(false);
   const [pane, setPane] = useState<Pane>("yaml");
   const [pasting, setPasting] = useState(false);
   const [toast, setToast] = useState<{ id: number; node: ReactNode }>();
   const [status, setStatus] = useState("");
+  // The subject key of the open Explanation, and the YAML lines a file:line link showed.
+  const [open, setOpen] = useState<string>();
+  const [highlight, setHighlight] = useState<Span>();
+  const sheet = useRef<HTMLElement>(null);
+  const sheetScroll = useRef(0);
 
   // What the last run left on screen and what was last announced, read by the next run.
-  const last = useRef<{ verdicts?: Verdict[]; failed: boolean }>({
-    failed: false,
-  });
+  const last = useRef<{
+    verdicts?: Verdict[];
+    counts: Map<string, number>;
+    failed: boolean;
+    /** Set by a wholesale replacement, whose first run stays silent. */
+    replaced?: boolean;
+  }>({ counts: new Map(), failed: false });
 
   const announce = useCallback((message: string) => {
     setStatus((prev) => (message === "" || message === prev ? prev : message));
   }, []);
 
+  const eventName = scenario.event.name;
+  const date = scenario.repo.date;
+
   useEffect(() => {
-    if (eventName.trim() === "") return; // The field shows why; the last results stay.
+    if (scenario.event.name.trim() === "") return; // The field shows why; the last results stay.
     const timer = setTimeout(() => {
-      if (files.length === 0 || date === "") {
-        last.current = { failed: false };
+      if (files.length === 0) {
+        last.current = { counts: new Map(), failed: false };
         setVerdicts(undefined);
+        setDiagnostics([]);
         setFailed(false);
         return;
       }
-      let next: Verdict[];
+      const dated = scenario.repo.date !== "";
+      let result;
       try {
-        next = simulate(files, {
-          event: { name: eventName },
-          repo: { date },
-          assume,
-        }).verdicts;
+        result = simulate(
+          files,
+          dated
+            ? scenario
+            : setScenarioValue(scenario, ["repo", "date"], ANY_DATE),
+        );
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
         last.current.failed = true;
         setFailed(true);
         return;
       }
-      const before = last.current.verdicts;
+      const next = dated ? result.verdicts : undefined;
+      const counts = countByPath(result.diagnostics);
+      const { verdicts: before, counts: was, replaced } = last.current;
+      const news = diagnosticNews(was, counts);
+      // Files with Diagnostics on either side are counted by their own news, not as Verdicts.
+      const broken = new Set([...was.keys(), ...counts.keys()].map(basename));
+      const kept = (vs: Verdict[]) =>
+        vs.filter((v) => !broken.has(v.key.split(" › ")[0]!));
       // Runs where either side had no Verdicts stay silent.
-      if (before?.length && next.length) {
-        const n = changedCount(before, next);
+      if (before?.length && next?.length) {
+        const n = changedCount(kept(before), kept(next));
         if (n > 0)
-          announce(
-            `Results updated: ${n} Verdict${n === 1 ? "" : "s"} changed`,
-          );
+          news.unshift(`Results updated: ${plural(n, "Verdict")} changed`);
       }
-      last.current = { verdicts: next, failed: false };
+      if (!replaced) announce(news.join(" "));
+      last.current = { verdicts: next, counts, failed: false };
       setVerdicts(next);
+      setDiagnostics(result.diagnostics);
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [files, eventName, date, assume, announce]);
+  }, [files, scenario, announce]);
 
   useEffect(() => {
     if (!toast) return;
@@ -126,6 +192,8 @@ export function App() {
   }, []);
 
   const addFile = (file: WorkflowFile) => {
+    // Pasting into the example edits it; pasting into nothing starts a pasted set.
+    if (files.length === 0) setOrigin("pasted");
     setFiles((fs) =>
       fs.some((f) => f.path === file.path)
         ? fs.map((f) => (f.path === file.path ? file : f))
@@ -143,15 +211,131 @@ export function App() {
     });
   };
 
+  // #12 addendum J: the sheet belongs to Results and comes back where it was left.
+  // Chromium keeps a hidden element's scroll offset; this restores it where an engine doesn't.
+  useLayoutEffect(() => {
+    if (pane === "results" && sheet.current)
+      sheet.current.scrollTop = sheetScroll.current;
+  }, [pane]);
+
+  const openExplanation = (key: string) => {
+    sheetScroll.current = 0;
+    if (sheet.current) sheet.current.scrollTop = 0;
+    setOpen(key);
+  };
+
+  const closeExplanation = (key: string) => {
+    setOpen(undefined);
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)
+        ?.focus(),
+    );
+  };
+
   /** Shows the pane a field lives in, then focuses the field. */
   const focusField = (id: string) => {
     setPane("scenario");
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
+  const edited = origin === "example" && !sameFiles(files, EXAMPLE_FILES);
+
+  /** The confirm-first rule (#12 §1): asks only when something would be lost. */
+  const ask = (next: Confirm) => {
+    if (next.losses.length > 0) setConfirm(next);
+    else finish(next, true);
+  };
+
+  // Afterwards, focus moves to the header's Workflow set source (#14 §10).
+  const finish = (done: Confirm, accepted: boolean) => {
+    setConfirm(undefined);
+    if (accepted) done.run();
+    requestAnimationFrame(() => document.getElementById("set-source")?.focus());
+  };
+
+  /** What replacing the Workflow set would lose: edits, or files the Maintainer pasted. */
+  const setLosses = () =>
+    edited
+      ? ["It replaces your edits to the example files."]
+      : origin === "pasted" && files.length > 0
+        ? [
+            `It replaces your ${files.length} pasted file${files.length === 1 ? "" : "s"}.`,
+          ]
+        : [];
+
+  // #12 addendum E: the first run after a wholesale replacement stays silent.
+  const replaceFiles = (next: readonly WorkflowFile[]) => {
+    last.current.replaced = true;
+    setFiles([...next]);
+  };
+
+  const loadExample = () =>
+    ask({
+      title: "Load the example?",
+      losses: [
+        ...setLosses(),
+        ...(touched
+          ? [
+              `${label} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
+            ]
+          : []),
+      ],
+      action: "Load example",
+      run: () => {
+        replaceFiles(EXAMPLE_FILES);
+        setOrigin("example");
+        setActive(undefined);
+        if (!touched) {
+          setScenario(EXAMPLE_SCENARIO);
+          setLabel(EXAMPLE_LABEL);
+        }
+        setToast({ id: Date.now(), node: "Loaded the example" });
+      },
+    });
+
+  const reset = () =>
+    ask({
+      title: "Reset to the example files?",
+      losses: setLosses(),
+      action: "Reset",
+      run: () => {
+        replaceFiles(EXAMPLE_FILES);
+        setToast({ id: Date.now(), node: "Reset to example files" });
+      },
+    });
+
+  /** Sets one Scenario input from the form, which touches the Scenario. */
+  const setInput = (path: string[], value: unknown) => {
+    setScenario((s) => setScenarioValue(s, path, value));
+    setTouched(true);
+  };
+
+  // Assumptions, keyed by job key ("job X fails").
+  const assume = scenario.assume ?? {};
+  const removeAssumption = (key: string) => {
+    setScenario((s) => ({
+      ...s,
+      assume: Object.fromEntries(
+        Object.entries(s.assume ?? {}).filter(([k]) => k !== key),
+      ),
+    }));
+    setTouched(true);
+  };
+
+  const links: CauseLinks = {
+    files,
+    focusField,
+    showLines: (span) => {
+      setActive(span.path);
+      setPane("yaml");
+      setHighlight({ ...span }); // A fresh object, so a second click shows the lines again.
+    },
+  };
+
   const actions = (
     <div className="actions">
-      <button type="button" disabled>
+      <button type="button" onClick={loadExample}>
         Load example
       </button>
       <button type="button" onClick={() => setPasting(true)}>
@@ -198,9 +382,7 @@ export function App() {
     );
   else if (verdicts === undefined) results = null;
   else if (unsupported)
-    results = (
-      <UnsupportedPanel verdict={unsupported} focusField={focusField} />
-    );
+    results = <UnsupportedPanel verdict={unsupported} {...links} />;
   else if (verdicts.length === 0)
     results = <p>No Verdicts: every file has Diagnostics (see above).</p>;
   else
@@ -209,25 +391,41 @@ export function App() {
         {verdicts.map((v) => (
           // Sorted by key, so each job row follows its GitHub workflow's row.
           <li key={v.key} className={isJob(v.key) ? "job" : undefined}>
-            <span className="key">{v.key}</span> <Value verdict={v} />{" "}
-            <span className="root">root {v.causes[0]?.rule}</span>
+            <button
+              type="button"
+              className="verdict"
+              data-key={v.key}
+              aria-expanded={open === v.key}
+              onClick={() => openExplanation(v.key)}
+            >
+              <span className="key">{v.key}</span> <Value verdict={v} />{" "}
+              <span className="root">root {v.causes[0]?.rule}</span>
+            </button>
           </li>
         ))}
       </ul>
     );
 
   const blocked = files.length === 0 || date === "";
+  const counts = countByPath(diagnostics);
 
   return (
     <>
       <header>
         <h1>WhyNoRun</h1>
         <div className="source">
-          <span>
+          <span id="set-source" tabIndex={-1}>
             {files.length === 0
               ? "No Workflow set"
-              : `Workflow set: ${files.length} pasted file${files.length === 1 ? "" : "s"}`}
+              : origin === "example"
+                ? `Example${edited ? " · edited" : ""}`
+                : `Workflow set: ${files.length} pasted file${files.length === 1 ? "" : "s"}`}
           </span>
+          {edited && (
+            <button type="button" onClick={reset}>
+              Reset
+            </button>
+          )}
           <button type="button" onClick={() => setPasting(true)}>
             Paste
           </button>
@@ -254,10 +452,29 @@ export function App() {
                     onClick={() => setActive(f.path)}
                   >
                     {basename(f.path)}
+                    {counts.has(f.path) && (
+                      <>
+                        {" "}
+                        <span className="count">
+                          {counts.get(f.path)}
+                          <span className="visually-hidden">
+                            {counts.get(f.path) === 1
+                              ? " Diagnostic"
+                              : " Diagnostics"}
+                          </span>
+                        </span>
+                      </>
+                    )}
                   </button>
                 ))}
               </div>
-              <Editor file={activeFile!} onEdit={onEdit} />
+              <Editor
+                file={activeFile!}
+                diagnostics={diagnostics}
+                target={target}
+                onEdit={onEdit}
+                highlight={highlight}
+              />
             </>
           )}
         </section>
@@ -265,7 +482,7 @@ export function App() {
         <section className="pane" data-id="scenario" aria-label="Scenario">
           <div role="tablist" aria-label="Scenarios" className="tabs">
             <button type="button" role="tab" aria-selected>
-              Scenario 1
+              {label}
             </button>
           </div>
           <fieldset>
@@ -277,7 +494,7 @@ export function App() {
               value={eventName}
               aria-invalid={eventName.trim() === ""}
               aria-describedby="event-name-error"
-              onChange={(e) => setEventName(e.target.value)}
+              onChange={(e) => setInput(["event", "name"], e.target.value)}
             />
             <datalist id="event-names">
               <option value="push" />
@@ -300,11 +517,16 @@ export function App() {
                 type="date"
                 required
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => setInput(["repo", "date"], e.target.value)}
               />
               <button
                 type="button"
-                onClick={() => setDate(new Date().toLocaleDateString("en-CA"))}
+                onClick={() =>
+                  setInput(
+                    ["repo", "date"],
+                    new Date().toLocaleDateString("en-CA"),
+                  )
+                }
               >
                 Today
               </button>
@@ -322,13 +544,7 @@ export function App() {
                     <button
                       type="button"
                       aria-label={`Remove ${key} ${value}`}
-                      onClick={() =>
-                        setAssume((a) =>
-                          Object.fromEntries(
-                            Object.entries(a).filter(([k]) => k !== key),
-                          ),
-                        )
-                      }
+                      onClick={() => removeAssumption(key)}
                     >
                       Remove
                     </button>
@@ -351,9 +567,7 @@ export function App() {
               <button
                 type="button"
                 disabled={!unassumed.includes(failPick)}
-                onClick={() =>
-                  setAssume((a) => ({ ...a, [failPick]: "fails" }))
-                }
+                onClick={() => setInput(["assume", failPick], "fails")}
               >
                 Add
               </button>
@@ -367,10 +581,43 @@ export function App() {
               All Verdicts
             </button>
           </div>
+          {diagnostics.length > 0 && (
+            <ul className="banner diagnostics" aria-label="Diagnostics">
+              {diagnostics.map((d) => (
+                <li key={`${d.path}:${d.line}:${d.col}:${d.message}`}>
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      // #12 §10: on a narrow screen this also switches to the YAML tab.
+                      setPane("yaml");
+                      setActive(d.path);
+                      setTarget({ path: d.path, line: d.line, col: d.col });
+                    }}
+                  >
+                    <code>
+                      {basename(d.path)}:{d.line}
+                    </code>{" "}
+                    {d.message}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
           {failed && !blocked && <p className="banner">{INTERNAL_ERROR}</p>}
           <div className={failed && !blocked ? "stale" : undefined}>
             {results}
           </div>
+          {open !== undefined && !blocked && !unsupported && (
+            <Explanation
+              subject={open}
+              verdict={verdicts?.find((v) => v.key === open)}
+              onClose={() => closeExplanation(open)}
+              sheet={sheet}
+              onScroll={(top) => (sheetScroll.current = top)}
+              {...links}
+            />
+          )}
         </section>
       </main>
 
@@ -413,6 +660,12 @@ export function App() {
           onClose={() => setPasting(false)}
         />
       )}
+      {confirm && (
+        <ConfirmDialog
+          confirm={confirm}
+          onClose={(accepted) => finish(confirm, accepted)}
+        />
+      )}
       {createPortal(status, statusRegion)}
       {createPortal(
         toast && (
@@ -447,20 +700,10 @@ function Value({ verdict }: { verdict: Verdict }) {
   );
 }
 
-// The Scenario inputs that have a form field so far; the others arrive with their tickets.
-const FIELDS: Record<string, { id: string; label: string }> = {
-  "event.name": { id: "event-name", label: "Event name" },
-  "repo.date": { id: "sim-date", label: "Simulation date" },
-};
-const LABELS: Record<string, string> = { "event.actor": "Actor kind" };
-
 function UnsupportedPanel({
   verdict,
-  focusField,
-}: {
-  verdict: Verdict;
-  focusField: (id: string) => void;
-}) {
+  ...links
+}: { verdict: Verdict } & CauseLinks) {
   const root = verdict.causes[0]!;
   return (
     <div className="unsupported">
@@ -468,37 +711,7 @@ function UnsupportedPanel({
         Unsupported Scenario: {prose(RULES[root.rule]?.text ?? "")} ({root.rule}
         )
       </p>
-      <ol className="explanation">
-        {verdict.causes.map((cause, i) => (
-          <li key={i}>
-            {i === 0 && <span className="root">root </span>}
-            {cause.rule}: {prose(RULES[cause.rule]?.text ?? "")}
-            <ul>
-              {cause.inputs.map(({ path, value }) => {
-                const field = FIELDS[path];
-                const text = `${field?.label ?? LABELS[path] ?? path} = ${String(value)}`;
-                return (
-                  <li key={path}>
-                    {field ? (
-                      <a
-                        href={`#${field.id}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          focusField(field.id);
-                        }}
-                      >
-                        {text}
-                      </a>
-                    ) : (
-                      text
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        ))}
-      </ol>
+      <Causes causes={verdict.causes} {...links} />
     </div>
   );
 }

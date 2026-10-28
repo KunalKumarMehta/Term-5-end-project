@@ -13946,18 +13946,76 @@ var defaultOptions = {
 
 // src/core/parser.ts
 var import_yaml2 = __toESM(require_dist(), 1);
+var ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
+var SCHEMA_LAG = { root: ["cache-mode"], step: ["background"] };
 function parseWorkflowFile(path, text) {
-  const index = indexOn(path, text);
+  const lineCounter = new import_yaml2.LineCounter();
+  const doc = (0, import_yaml2.parseDocument)(text, { lineCounter });
+  const span = (node) => {
+    const [start, end] = node.range ?? [0, 0];
+    const a = lineCounter.linePos(start);
+    const b = lineCounter.linePos(end);
+    return { path, line: a.line, col: a.col, endLine: b.line, endCol: b.col };
+  };
+  const at = (line, col, endLine = line, endCol = col) => ({
+    path,
+    line,
+    col,
+    endLine,
+    endCol
+  });
+  const none = {
+    events: {},
+    jobs: [],
+    onSpan: void 0,
+    onEntries: /* @__PURE__ */ new Map(),
+    jobSpans: /* @__PURE__ */ new Map()
+  };
+  try {
+    doc.toJS({ maxAliasCount: 1e3 });
+  } catch (err) {
+    if (err instanceof ReferenceError && /alias count/.test(err.message))
+      return { ...none, diagnostics: [{ ...at(1, 1), message: ALIAS_BOMB }] };
+  }
   const { context, value } = parseWorkflow(
     { name: path, content: text },
     new NoOperationTraceWriter()
   );
-  if (value === void 0) return { ...index, ok: false, events: {}, jobs: [] };
-  return {
-    ...index,
-    ...convert(context, value),
-    ok: context.errors.getErrors().length === 0
+  const { events, jobs } = value === void 0 ? { events: {}, jobs: [] } : convert(context, value);
+  const lagging = schemaLag(doc, span);
+  const diagnostics = [];
+  for (const e of context.errors.getErrors()) {
+    const where = e.range ? at(
+      e.range.start.line,
+      e.range.start.column,
+      e.range.end.line,
+      e.range.end.column
+    ) : at(1, 1);
+    if (lagging.has(`${where.line}:${where.col}`)) continue;
+    const message = e.rawMessage.split("\n")[0].replace(/ at line \d+, column \d+:$/, "");
+    diagnostics.push({ ...where, message });
+  }
+  return { ...indexOn(doc, span), diagnostics, events, jobs };
+}
+function schemaLag(doc, span) {
+  const found = /* @__PURE__ */ new Set();
+  const keys = (map, names) => {
+    if (!(0, import_yaml2.isMap)(map)) return;
+    for (const pair of map.items)
+      if ((0, import_yaml2.isScalar)(pair.key) && names.includes(String(pair.key.value))) {
+        const { line, col } = span(pair.key);
+        found.add(`${line}:${col}`);
+      }
   };
+  keys(doc.contents, SCHEMA_LAG.root);
+  const jobs = (0, import_yaml2.isMap)(doc.contents) ? doc.contents.get("jobs") : void 0;
+  if ((0, import_yaml2.isMap)(jobs))
+    for (const job of jobs.items) {
+      const steps = (0, import_yaml2.isMap)(job.value) ? job.value.get("steps") : void 0;
+      if ((0, import_yaml2.isSeq)(steps))
+        for (const step of steps.items) keys(step, SCHEMA_LAG.step);
+    }
+  return found;
 }
 function convert(context, root) {
   let events = {};
@@ -13975,15 +14033,7 @@ function convert(context, root) {
   });
   return { events, jobs };
 }
-function indexOn(path, text) {
-  const lineCounter = new import_yaml2.LineCounter();
-  const doc = (0, import_yaml2.parseDocument)(text, { lineCounter });
-  const span = (node) => {
-    const [start, end] = node.range ?? [0, 0];
-    const a = lineCounter.linePos(start);
-    const b = lineCounter.linePos(end);
-    return { path, line: a.line, col: a.col, endLine: b.line, endCol: b.col };
-  };
+function indexOn(doc, span) {
   const onEntries = /* @__PURE__ */ new Map();
   const jobSpans = /* @__PURE__ */ new Map();
   if (!(0, import_yaml2.isMap)(doc.contents)) return { onSpan: void 0, onEntries, jobSpans };
@@ -14179,7 +14229,8 @@ function merge(base, over) {
 }
 function githubContext({ event, repo }) {
   const pr = event.name === "pull_request" || event.name === "pull_request_target";
-  const ref = event.ref ?? `refs/heads/${repo.defaultBranch}`;
+  const given = event.ref ?? repo.defaultBranch;
+  const ref = given.startsWith("refs/") ? given : `refs/heads/${given}`;
   const short = (r) => r.replace(/^refs\/(heads|tags)\//, "");
   const computed = pr ? {
     pull_request: {
@@ -15087,6 +15138,13 @@ function simulate(files, input) {
   if (problems.length > 0) throw new TypeError(problems.join("; "));
   const { scenario } = withDefaults(input);
   const { event } = scenario;
+  const parsed = files.flatMap((file) => {
+    const key = loaded.exec(file.path)?.[1];
+    return key === void 0 ? [] : [{ key, ...parseWorkflowFile(file.path, file.text) }];
+  });
+  const diagnostics = parsed.flatMap((p) => p.diagnostics).sort(
+    (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col
+  );
   if (event.name !== "push" || event.actor !== "member") {
     const inputs = [
       { path: "event.name", value: event.name },
@@ -15100,18 +15158,15 @@ function simulate(files, input) {
           causes: [{ rule: "WN-3", spans: [], inputs }]
         }
       ],
-      diagnostics: [],
+      diagnostics,
       unmatchedAssumptions: []
     };
   }
   const verdicts = [];
-  for (const file of files) {
-    const key = loaded.exec(file.path)?.[1];
-    if (key === void 0) continue;
-    const parsed = parseWorkflowFile(file.path, file.text);
-    if (!parsed.ok) continue;
-    const listed = Object.hasOwn(parsed.events, event.name);
-    const span = listed ? parsed.onEntries.get(event.name) : parsed.onSpan;
+  for (const { key, ...file } of parsed) {
+    if (file.diagnostics.length > 0) continue;
+    const listed = Object.hasOwn(file.events, event.name);
+    const span = listed ? file.onEntries.get(event.name) : file.onSpan;
     const workflow = {
       key,
       value: listed ? "runs" : "skipped",
@@ -15123,12 +15178,12 @@ function simulate(files, input) {
         }
       ]
     };
-    verdicts.push(workflow, ...jobVerdicts(key, parsed, workflow, scenario));
+    verdicts.push(workflow, ...jobVerdicts(key, file, workflow, scenario));
   }
-  verdicts.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  verdicts.sort((a, b) => compare(a.key, b.key));
   return {
     verdicts,
-    diagnostics: [],
+    diagnostics,
     unmatchedAssumptions: unmatched(scenario, verdicts)
   };
 }
@@ -15141,6 +15196,7 @@ function unmatched(scenario, verdicts) {
     return [{ key, candidates }];
   });
 }
+var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
 // src/cli/main.ts
 var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--repo <dir>] [--flow access|all]
@@ -15199,11 +15255,21 @@ function show(args) {
     path: `.github/workflows/${e.name}`,
     text: readFileSync(join2(dir, e.name), "utf8")
   }));
-  const lines = simulate(files, scenario).verdicts.map((v) => {
-    const root = v.causes[0];
-    const line = root?.spans[0]?.line;
-    return `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""})`;
-  });
+  const { verdicts, diagnostics } = simulate(files, scenario);
+  const lines = [
+    ...verdicts.map((v) => {
+      const root = v.causes[0];
+      const line = root?.spans[0]?.line;
+      return [
+        v.key,
+        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""})`
+      ];
+    }),
+    ...diagnostics.map((d) => [
+      d.path.slice(d.path.lastIndexOf("/") + 1),
+      `${d.path}:${d.line}: ${d.message}`
+    ])
+  ].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, text]) => text);
   process.stdout.write(
     [
       `whynorun ${"0.0.0"}`,
