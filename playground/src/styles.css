@@ -270,6 +270,15 @@ dialog {
   width: min(40rem, calc(100vw - 2rem));
 }
 
+/* No padding on the dialog itself, so a click on the dialog element is on its backdrop. */
+dialog.confirm {
+  padding: 0;
+}
+
+dialog.confirm > div {
+  padding: 1rem;
+}
+
 dialog form {
   display: grid;
   gap: 0.5rem;
