@@ -167,10 +167,18 @@ export function App() {
             continue;
           }
           const dated = s.repo.date !== "";
-          const result = simulate(
-            files,
-            dated ? s : setScenarioValue(s, ["repo", "date"], ANY_DATE),
-          );
+          // The Changed files field keeps the blank line being typed; simulate() gets only paths.
+          const changed = s.event.changed;
+          let input = changed
+            ? setScenarioValue(
+                s,
+                ["event", "changed"],
+                changed.filter((path) => path !== ""),
+              )
+            : s;
+          if (!dated)
+            input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
+          const result = simulate(files, input);
           diagnostics = result.diagnostics;
           next.push(dated ? result.verdicts : undefined);
         }
@@ -428,7 +436,10 @@ export function App() {
     setScenario((s) => setScenarioValue(s, path, value));
 
   /** Sets an optional Event field; emptied, it is unset so its default applies. */
-  const setEventField = (field: "type" | "ref" | "base", value: string) =>
+  const setEventField = (
+    field: "type" | "ref" | "base" | "message",
+    value: string,
+  ) =>
     setScenario((s) => {
       const event = { ...s.event, [field]: value };
       if (value === "") delete event[field];
@@ -779,6 +790,27 @@ export function App() {
               placeholder="the default branch"
               value={scenario.event.base ?? ""}
               onChange={(e) => setEventField("base", e.target.value)}
+            />
+            <label htmlFor="event-changed">Changed files</label>
+            <textarea
+              id="event-changed"
+              rows={3}
+              spellCheck={false}
+              aria-describedby="event-changed-hint"
+              value={(scenario.event.changed ?? []).join("\n")}
+              onChange={(e) =>
+                setInput(["event", "changed"], e.target.value.split("\n"))
+              }
+            />
+            <p id="event-changed-hint" className="hint">
+              One path per line, taken as the complete diff
+            </p>
+            <label htmlFor="event-message">Head commit message</label>
+            <textarea
+              id="event-message"
+              rows={2}
+              value={scenario.event.message ?? ""}
+              onChange={(e) => setEventField("message", e.target.value)}
             />
           </fieldset>
           <fieldset>

@@ -58,6 +58,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "BR-6",
+    text: "With both a branch or tag filter and a path filter on one event, both must pass for the GitHub workflow to run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "High",
+  },
+  {
     id: "BR-8",
     text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
     url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
@@ -98,6 +104,54 @@ const rows: Rule[] = [
     text: "GitHub's docs don't say whether filter patterns are case-sensitive.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
     confidence: "Low",
+  },
+  {
+    id: "PA-1",
+    text: "`paths` and `paths-ignore` can't both appear on one event: GitHub rejects the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "High",
+  },
+  {
+    id: "PA-2",
+    text: "With `paths`, the GitHub workflow runs if at least one changed file matches, the patterns tried in order with the last match winning. With `paths-ignore`, it is skipped only if every changed file matches.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High",
+  },
+  {
+    id: "PA-3",
+    text: "With a path filter, if no files changed the GitHub workflow doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High",
+  },
+  {
+    id: "PA-5",
+    text: "A diff of more than 3,000 files runs a `paths` GitHub workflow only if a match is among the first 3,000 files; GitHub's docs don't say how `paths-ignore` treats such a diff.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High",
+  },
+  {
+    id: "PA-6",
+    text: "Path filters are not evaluated for pushes of tags; GitHub's docs don't say whether a push GitHub workflow with only `paths:` then runs or is skipped.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "Low",
+  },
+  {
+    id: "PA-7",
+    text: "Path patterns match the whole path from the repository root.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#patterns-to-match-file-paths",
+    confidence: "High",
+  },
+  {
+    id: "SK-1",
+    text: "`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in the head commit's message, or a final `skip-checks: true` trailer after two empty lines, skips `push` and `pull_request` runs.",
+    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs",
+    confidence: "High",
+  },
+  {
+    id: "PL-9",
+    text: "GitHub doesn't start runs from a workflow file larger than 500 KB.",
+    url: "https://docs.github.com/en/actions/reference/limits",
+    confidence: "High",
   },
   {
     id: "DB-2",

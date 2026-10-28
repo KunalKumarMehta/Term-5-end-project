@@ -12,16 +12,21 @@ import {
 const ACTORS = ["member", "fork", "dependabot"];
 
 const USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref>] [--base <branch>]
-                     [--actor member|fork|dependabot] [--repo <dir>] [--flow access|all]
+                     [--actor member|fork|dependabot] [--changed <file>|-] [--repo <dir>]
+                     [--flow access|all]
        whynorun --version
 `;
 
-export function main(argv: string[]): number {
+/** `stdin` reads standard input, for `--changed -`. */
+export function main(
+  argv: string[],
+  stdin: () => string = () => readFileSync(0, "utf8"),
+): number {
   if (argv.length === 1 && argv[0] === "--version") {
     process.stdout.write(`whynorun ${__VERSION__}\n`);
     return 0;
   }
-  if (argv[0] === "show") return show(argv.slice(1));
+  if (argv[0] === "show") return show(argv.slice(1), stdin);
   return misuse();
 }
 
@@ -30,7 +35,7 @@ function misuse(message?: string): number {
   return 2;
 }
 
-function show(args: string[]): number {
+function show(args: string[], stdin: () => string): number {
   let values;
   try {
     ({ values } = parseArgs({
@@ -41,6 +46,7 @@ function show(args: string[]): number {
         ref: { type: "string" },
         base: { type: "string" },
         actor: { type: "string" },
+        changed: { type: "string" },
         repo: { type: "string", default: "." },
         flow: { type: "string", default: "all" },
       },
@@ -48,7 +54,7 @@ function show(args: string[]): number {
   } catch (err) {
     return misuse((err as Error).message);
   }
-  const { event, date, ref, base, actor, repo, flow } = values;
+  const { event, date, ref, base, actor, changed, repo, flow } = values;
   if (flow === "checks" || flow === "concurrency")
     return misuse(
       `--flow ${flow} needs required checks or a Follow-up event, which flags can't describe: use --from <test file>`,
@@ -67,6 +73,17 @@ function show(args: string[]): number {
   if (ref !== undefined) scenario.event.ref = ref;
   if (base !== undefined) scenario.event.base = base;
   if (actor !== undefined) scenario.event.actor = actor as ActorKind;
+  // The complete diff, one path per line; unset, it is empty (#10 §6). Never from git.
+  if (changed !== undefined) {
+    let text: string;
+    try {
+      text = changed === "-" ? stdin() : readFileSync(changed, "utf8");
+    } catch {
+      return misuse(`can't read --changed ${changed}`);
+    }
+    scenario.event.changed = text.split(/\r?\n/).filter((line) => line !== "");
+  }
+  // No head commit message flag: a commit-message skip needs --from (#10 §6).
   if (validateScenario(scenario).length > 0)
     return misuse(`--event or --date is invalid: --date must be YYYY-MM-DD`);
 

@@ -111,7 +111,31 @@ const cases: [string[], string[], boolean, boolean][] = [
 
 const jobs = "jobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n";
 
-// One ref per case: the cases with a list of changed files run with path filters (#59).
+// Every case as changed files against a path filter (PA-2, PA-3).
+test.each(
+  cases.flatMap(([patterns, changed, skipped, ignored]) => [
+    ["paths", patterns, changed, skipped] as const,
+    ["paths-ignore", patterns, changed, ignored] as const,
+  ]),
+)(
+  "%s: %j with changed files %j is skipped: %s",
+  (filter, patterns, changed, skipped) => {
+    const text = `on:\n  pull_request:\n    ${filter}: ${JSON.stringify(patterns)}\n${jobs}`;
+    const { verdicts, diagnostics } = simulate(
+      [{ path: ".github/workflows/ci.yml", text }],
+      {
+        event: { name: "pull_request", changed },
+        repo: { date: "2026-12-03" },
+      },
+    );
+    expect(diagnostics).toEqual([]);
+    expect(
+      verdicts.filter((v) => v.key === "ci.yml").map((v) => v.value),
+    ).toEqual([skipped ? "skipped" : "runs"]);
+  },
+);
+
+// One ref per case.
 const oneRef = cases.filter(([, inputs]) => inputs.length === 1);
 
 test.each(

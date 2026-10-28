@@ -56,6 +56,17 @@ export interface SimulationResult {
 }
 
 const SUPPORTED = new Set(["push", "pull_request"]);
+// GitHub's 500 KB workflow file limit (PL-9), read as KiB.
+const MAX_BYTES = 500 * 1024;
+// The core has no DOM or Node types, so no TextEncoder.
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
 const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 
 /** Whether GitHub reads the file at this path: a `.yml`/`.yaml` file directly in `.github/workflows/`. */
@@ -79,7 +90,13 @@ export function simulate(
     const key = loaded.exec(file.path)?.[1];
     return key === undefined
       ? []
-      : [{ key, ...parseWorkflowFile(file.path, file.text) }];
+      : [
+          {
+            key,
+            bytes: utf8Length(file.text),
+            ...parseWorkflowFile(file.path, file.text),
+          },
+        ];
   });
   // Branch and tag filter checks need a file the parser accepted.
   for (const p of parsed)
@@ -111,13 +128,18 @@ export function simulate(
   }
 
   const verdicts: Verdict[] = [];
-  for (const { key, ...file } of parsed) {
+  for (const { key, bytes, ...file } of parsed) {
     // A file GitHub would reject gets no Verdicts.
     if (file.diagnostics.length > 0) continue;
-    const workflow: Verdict = {
-      key,
-      ...trigger(file, event, repo.defaultBranch!),
-    };
+    // PL-9: GitHub starts no runs from it, but it isn't a Diagnostic, so its keys stay (ADR 0001).
+    const workflow: Verdict =
+      bytes > MAX_BYTES
+        ? {
+            key,
+            value: "skipped",
+            causes: [{ rule: "PL-9", spans: [], inputs: [] }],
+          }
+        : { key, ...trigger(file, event, repo.defaultBranch!) };
     verdicts.push(workflow, ...jobVerdicts(key, file, workflow, scenario));
   }
   // Code-unit order, so the result never depends on the host's locale.

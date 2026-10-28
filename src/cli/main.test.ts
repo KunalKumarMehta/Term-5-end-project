@@ -253,6 +253,54 @@ test("show --actor with an unknown Actor kind exits 2 and names the kinds", () =
   expect(stderr).toContain("--actor must be member, fork or dependabot");
 });
 
+const paths = fileURLToPath(new URL("fixtures/paths", import.meta.url));
+const prArgs = ["show", "--repo", paths, "--event", "pull_request"];
+const prDate = ["--date", "2026-12-03"];
+const runs =
+  "ci.yml: runs (root PA-2, line 5)\nci.yml › build: runs (root WN-2, line 7)\n";
+
+test("show --changed - reads the changed files from stdin, one per line", () => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const code = main(
+    [...prArgs, "--changed", "-", ...prDate],
+    () => "docs/README.md\r\nsrc/app.ts\n",
+  );
+  expect(code).toBe(0);
+  expect(verdictLines(stdout.mock.calls.map((c) => c[0]).join(""))).toBe(runs);
+});
+
+test("show --changed <file> reads the changed files from that file", () => {
+  process.chdir(paths);
+  const { code, stdout } = run(
+    ...prArgs,
+    "--changed",
+    "changed.txt",
+    ...prDate,
+  );
+  expect(code).toBe(0);
+  expect(verdictLines(stdout)).toBe(runs);
+});
+
+test("show without --changed takes an empty diff, so a paths: filter skips (PA-3)", () => {
+  const { code, stdout } = run(...prArgs, ...prDate);
+  expect(code).toBe(0);
+  expect(verdictLines(stdout)).toBe(
+    "ci.yml: skipped (root PA-3, line 4)\n" +
+      "ci.yml › build: no-run (root PA-3, line 4)\n",
+  );
+});
+
+test("show --changed with a file it can't read exits 2 and names it", () => {
+  const { code, stderr } = run(
+    ...prArgs,
+    "--changed",
+    "missing.txt",
+    ...prDate,
+  );
+  expect(code).toBe(2);
+  expect(stderr).toContain("can't read --changed missing.txt");
+});
+
 test("show in a folder without .github/workflows/ exits 2 and names the folder", () => {
   const empty = fileURLToPath(new URL("fixtures", import.meta.url));
   const { code, stderr } = run(
