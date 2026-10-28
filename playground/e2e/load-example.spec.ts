@@ -58,15 +58,37 @@ test("Load example loads the three files and fills Scenario 1 with the Fork PR S
   await expect(scenarioTabs(page)).toHaveText(["Fork PR"]);
   await expect(page.getByLabel("Event name")).toHaveValue("pull_request");
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-03");
-  // Interim: a fork contributor's pull_request is simulated from #64 on.
-  await expect(results(page)).toContainText("Unsupported Scenario");
-  await expect(results(page)).toContainText("Actor kind = fork");
+  // The fork contributor's pull_request is simulated (#64).
+  await expect(results(page)).not.toContainText("Unsupported Scenario");
+  await expect(runRows(page).first()).toHaveText("ci.yml runs root PA-2");
+});
+
+test("Load example's Scenario shows Actor kind fork contributor and Approval approved (assumed); the Approval field disappears for a member", async ({
+  page,
+}) => {
+  await results(page).getByRole("button", { name: "Load example" }).click();
+  const actor = page.getByLabel("Actor kind");
+  await expect(actor.locator("option:checked")).toHaveText("Fork contributor");
+  const approval = page.getByRole("combobox", { name: "Approval" });
+  await expect(approval).toHaveValue("approved");
+  await expect(approval).toHaveAccessibleDescription("assumed");
+  await expect(page.locator("label[for=event-approval]")).toHaveText(
+    "Approval assumed",
+  );
+
+  // Changing it makes it set, and awaiting makes ci.yml pending (root FK-4).
+  await approval.selectOption("awaiting");
+  await expect(approval).toHaveAccessibleDescription("set");
+  await expect(runRows(page).first()).toHaveText("ci.yml pending root FK-4");
+
+  await actor.selectOption("member");
+  await expect(approval).toHaveCount(0);
 });
 
 test("editing a file marks the example edited, and Reset asks first, then restores the files silently", async ({
   page,
 }) => {
-  // A member's push, so the files get Verdicts until fork contributors land with #64.
+  // A member's push, with Scenario 1 touched so Load example keeps it.
   await page.getByLabel("Simulation date").fill("2026-12-03");
   await results(page).getByRole("button", { name: "Load example" }).click();
   await confirm(page).getByRole("button", { name: "Load example" }).click();

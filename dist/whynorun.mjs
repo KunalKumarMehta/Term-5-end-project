@@ -8512,31 +8512,66 @@ function scope(name2, block, tokenDefault) {
     ]);
   return { value: "none", causes: [cause("PERM-3", block.span)] };
 }
+function byActor(name2, access, blocked, actor) {
+  if (actor === "member") return access;
+  const inputs = [{ path: "event.actor", value: actor }];
+  const fk8 = actor === "dependabot" ? [cause("FK-8", void 0, inputs)] : [];
+  if (access.value === "write" && WRITE_OR_NONE.has(name2))
+    return {
+      value: "uncertain",
+      causes: [cause("PERM-8", void 0, inputs), ...access.causes, ...fk8],
+      possible: ["none", "write"],
+      settle: []
+    };
+  if (access.value !== "write")
+    return { ...access, causes: [...access.causes, ...fk8] };
+  if (actor === "dependabot")
+    return blocked ? { ...access, causes: [...access.causes, ...fk8] } : { value: "read", causes: [...fk8, ...access.causes] };
+  const root = access.causes[0];
+  return {
+    value: "read",
+    causes: [
+      { rule: "PERM-2", spans: root.spans, inputs },
+      ...blocked ? [cause("PERM-6")] : [],
+      ...access.causes
+    ]
+  };
+}
 function accessVerdicts(file, parsed, scenario) {
   const tokenDefault = scenario.repo.tokenDefault;
+  const actor = scenario.event.actor;
   return parsed.jobs.flatMap((job) => {
     if (job.type !== "job") return [];
     const key = `${file} \u203A ${job.id.value}`;
     const spans = parsed.jobSpans.get(job.id.value);
     const own = spans?.permissions;
     const replaced = own && parsed.permissions ? [cause("PERM-4", parsed.permissions.span)] : [];
+    const block = own ?? parsed.permissions;
     const tokens = SCOPES.map((name2) => {
-      const access = scope(name2, own ?? parsed.permissions, tokenDefault);
+      const access = scope(name2, block, tokenDefault);
       return {
         key: `${key} \u203A token.${name2}`,
-        ...access,
-        causes: [...access.causes, ...replaced]
+        ...byActor(
+          name2,
+          { ...access, causes: [...access.causes, ...replaced] },
+          block !== void 0,
+          actor
+        )
       };
     });
+    const actorInput = [{ path: "event.actor", value: actor }];
     const secrets = {
       key: `${key} \u203A secrets`,
-      value: "available",
-      causes: [
-        cause("FK-0", void 0, [
-          { path: "event.actor", value: scenario.event.actor }
-        ]),
-        ...spans?.environment ? [cause("PL-16", spans.environment)] : []
-      ]
+      ...actor === "fork" ? { value: "empty", causes: [cause("FK-2", void 0, actorInput)] } : actor === "dependabot" ? {
+        value: "dependabot-only",
+        causes: [cause("FK-8", void 0, actorInput)]
+      } : {
+        value: "available",
+        causes: [
+          cause("FK-0", void 0, actorInput),
+          ...spans?.environment ? [cause("PL-16", spans.environment)] : []
+        ]
+      }
     };
     return [...tokens, secrets];
   });
@@ -16055,6 +16090,12 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "PERM-2",
+    text: "The token is resolved from the baseline, then the workflow-level and job-level `permissions:`; for a fork contributor's pull request event other than `pull_request_target`, every `write` then becomes `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#how-permissions-are-calculated-for-a-workflow-job",
+    confidence: "High"
+  },
+  {
     id: "PERM-3",
     text: "In a `permissions:` block every scope it doesn't list is `none`; `read-all` and `write-all` set every scope, `{}` sets every scope to `none`, and `write` includes `read`.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions",
@@ -16073,6 +16114,12 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "PERM-6",
+    text: "A fork pull request's `permissions:` can add or remove `read` access but can't get `write`, except through the private-repo setting \"Send write tokens to workflows from pull requests\".",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#changing-the-permissions-in-a-forked-repository",
+    confidence: "High"
+  },
+  {
     id: "PERM-8",
     text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
@@ -16082,6 +16129,30 @@ var rows = [
     id: "FK-0",
     text: "Same-repo runs get the full `secrets` context: repository secrets, the organization secrets the org's access policy and plan grant this repo, and environment secrets only in a job whose `environment` names that environment, once any required reviewers approve (PL-16). Which secrets exist is a repo fact the YAML can't show.",
     url: "https://docs.github.com/en/actions/concepts/security/secrets",
+    confidence: "High"
+  },
+  {
+    id: "FK-2",
+    text: "A fork contributor's `pull_request` run gets no secrets except `GITHUB_TOKEN`, and that token is read-only.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-4",
+    text: "In a public repo, a fork contributor's run can wait for a user with write access to approve it before any job starts; by default first-time contributors need approval.",
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-8",
+    text: "A run `dependabot[bot]` triggers on `push` or `pull_request` gets a read-only `GITHUB_TOKEN` by default and only Dependabot secrets, not Actions secrets; unlike a fork's, its `permissions:` can raise the token's access.",
+    url: "https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions",
+    confidence: "High"
+  },
+  {
+    id: "PL-5",
+    text: 'A run awaiting approval shows as "Awaiting approval": none of its jobs start, and after 30 days it expires and is marked failed.',
+    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks",
     confidence: "High"
   },
   {
@@ -16181,10 +16252,13 @@ function simulate(files, input) {
   const diagnostics = parsed.flatMap((p) => p.diagnostics).sort(
     (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col
   );
-  if (!SUPPORTED.has(event.name) || event.actor !== "member") {
+  const fork = event.actor === "fork";
+  const privateFork = fork && scenario.repo.visibility === "private";
+  if (!SUPPORTED.has(event.name) || fork && event.name === "push" || privateFork) {
     const inputs = [
       { path: "event.name", value: event.name },
-      { path: "event.actor", value: event.actor }
+      { path: "event.actor", value: event.actor },
+      ...privateFork ? [{ path: "repo.visibility", value: "private" }] : []
     ];
     return {
       verdicts: [
@@ -16249,7 +16323,10 @@ function evaluate(parsed, scenario) {
       key,
       value: "skipped",
       causes: [{ rule: "PL-9", spans: [], inputs: [] }]
-    } : { key, ...trigger(file, event, repo.defaultBranch) };
+    } : {
+      key,
+      ...awaiting(trigger(file, event, repo.defaultBranch), event)
+    };
     verdicts.push(
       workflow,
       ...jobVerdicts(key, file, workflow, scenario),
@@ -16257,6 +16334,26 @@ function evaluate(parsed, scenario) {
     );
   }
   return verdicts;
+}
+function awaiting(verdict, event) {
+  if (event.actor !== "fork" || event.approval !== "awaiting") return verdict;
+  if (verdict.value !== "runs" && !verdict.possible?.includes("runs"))
+    return verdict;
+  const causes = [
+    {
+      rule: "FK-4",
+      spans: [],
+      inputs: [{ path: "event.approval", value: "awaiting" }]
+    },
+    { rule: "PL-5", spans: [], inputs: [] },
+    ...verdict.causes
+  ];
+  if (verdict.value === "runs") return { value: "pending", causes };
+  return {
+    ...verdict,
+    causes,
+    possible: verdict.possible.map((p) => p === "runs" ? "pending" : p)
+  };
 }
 var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 

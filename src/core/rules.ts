@@ -172,6 +172,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "PERM-2",
+    text: "The token is resolved from the baseline, then the workflow-level and job-level `permissions:`; for a fork contributor's pull request event other than `pull_request_target`, every `write` then becomes `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#how-permissions-are-calculated-for-a-workflow-job",
+    confidence: "High",
+  },
+  {
     id: "PERM-3",
     text: "In a `permissions:` block every scope it doesn't list is `none`; `read-all` and `write-all` set every scope, `{}` sets every scope to `none`, and `write` includes `read`.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions",
@@ -190,6 +196,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "PERM-6",
+    text: "A fork pull request's `permissions:` can add or remove `read` access but can't get `write`, except through the private-repo setting \"Send write tokens to workflows from pull requests\".",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#changing-the-permissions-in-a-forked-repository",
+    confidence: "High",
+  },
+  {
     id: "PERM-8",
     text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
@@ -199,6 +211,30 @@ const rows: Rule[] = [
     id: "FK-0",
     text: "Same-repo runs get the full `secrets` context: repository secrets, the organization secrets the org's access policy and plan grant this repo, and environment secrets only in a job whose `environment` names that environment, once any required reviewers approve (PL-16). Which secrets exist is a repo fact the YAML can't show.",
     url: "https://docs.github.com/en/actions/concepts/security/secrets",
+    confidence: "High",
+  },
+  {
+    id: "FK-2",
+    text: "A fork contributor's `pull_request` run gets no secrets except `GITHUB_TOKEN`, and that token is read-only.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories",
+    confidence: "High",
+  },
+  {
+    id: "FK-4",
+    text: "In a public repo, a fork contributor's run can wait for a user with write access to approve it before any job starts; by default first-time contributors need approval.",
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High",
+  },
+  {
+    id: "FK-8",
+    text: "A run `dependabot[bot]` triggers on `push` or `pull_request` gets a read-only `GITHUB_TOKEN` by default and only Dependabot secrets, not Actions secrets; unlike a fork's, its `permissions:` can raise the token's access.",
+    url: "https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions",
+    confidence: "High",
+  },
+  {
+    id: "PL-5",
+    text: 'A run awaiting approval shows as "Awaiting approval": none of its jobs start, and after 30 days it expires and is marked failed.',
+    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks",
     confidence: "High",
   },
   {

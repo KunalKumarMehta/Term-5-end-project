@@ -61,6 +61,7 @@ const FIELDS: Record<string, { id: string; label: string }> = {
   "event.name": { id: "event-name", label: "Event name" },
   "event.type": { id: "event-type", label: "Activity type" },
   "event.actor": { id: "event-actor", label: "Actor kind" },
+  "event.approval": { id: "event-approval", label: "Approval" },
   "event.ref": { id: "event-ref", label: "Ref" },
   "event.base": { id: "event-base", label: "Base branch" },
   "event.changed": { id: "event-changed", label: "Changed files" },

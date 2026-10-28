@@ -521,11 +521,10 @@ test("an unquoted pattern starting with [ is malformed YAML (GL-5): the file get
 test.each<[string, Event]>([
   ["an Event outside v1", { name: "schedule" }],
   [
-    "a fork contributor's pull_request, until fork PRs land",
-    { name: "pull_request", actor: "fork" },
+    "pull_request_target, until it lands",
+    { name: "pull_request_target", actor: "fork" },
   ],
   ["a fork contributor's push", { name: "push", actor: "fork" }],
-  ["a dependabot[bot] push", { name: "push", actor: "dependabot" }],
 ])(
   "%s gives exactly one Verdict: event = unsupported, root WN-3",
   (_, event) => {
@@ -540,6 +539,31 @@ test.each<[string, Event]>([
     ]);
   },
 );
+
+test("a private repo with a fork contributor gives exactly one Verdict: event = unsupported, root WN-3, naming the visibility", () => {
+  const files = [wf("ci.yml", `on: [push, pull_request]\n${jobs}`)];
+  const { verdicts } = simulate(files, {
+    event: { name: "pull_request", actor: "fork" },
+    repo: { date, visibility: "private" },
+  });
+  expect(verdicts).toEqual([
+    {
+      key: "event",
+      value: "unsupported",
+      causes: [
+        {
+          rule: "WN-3",
+          spans: [],
+          inputs: [
+            { path: "event.name", value: "pull_request" },
+            { path: "event.actor", value: "fork" },
+            { path: "repo.visibility", value: "private" },
+          ],
+        },
+      ],
+    },
+  ]);
+});
 
 // Job Verdicts (#60)
 
@@ -1491,6 +1515,240 @@ test("a uses: caller job gets no access keys until reusable workflows land", () 
     push,
   );
   expect(verdicts.map((v) => v.key)).toEqual(["ci.yml", "ci.yml › call"]);
+});
+
+// Actor kinds (#64): fork contributors and dependabot[bot].
+const actorPr = (actor: "member" | "fork" | "dependabot", extra = {}) => ({
+  event: {
+    name: "pull_request",
+    actor,
+    ref: "feature",
+    base: "main",
+    changed: ["src/app.ts"],
+    ...extra,
+  },
+  repo: { date },
+});
+
+test("the example's Fork PR: ci.yml › test gets pull-requests downgraded to read (root PERM-2 at its line, then PERM-6) and secrets empty (FK-2); a Member PR gets write and available (FK-0)", () => {
+  const fork = accessOf(
+    simulate(example, actorPr("fork")).verdicts,
+    "ci.yml › test",
+  );
+  expect(levels(fork)).toEqual(
+    allScopes("none", {
+      "token.contents": "read",
+      "token.pull-requests": "read",
+      secrets: "empty",
+    }),
+  );
+  expect(fork["token.pull-requests"]!.causes).toEqual([
+    {
+      rule: "PERM-2",
+      spans: [expect.objectContaining({ line: 44 })],
+      inputs: [{ path: "event.actor", value: "fork" }],
+    },
+    { rule: "PERM-6", spans: [], inputs: [] },
+    expect.objectContaining({
+      rule: "PERM-3",
+      spans: [expect.objectContaining({ line: 44 })],
+    }),
+    // The job's block replaces the workflow's.
+    expect.objectContaining({ rule: "PERM-4" }),
+  ]);
+  // A read the block asks for stands: the fork rules don't decide it.
+  expect(fork["token.contents"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-3",
+    "PERM-4",
+  ]);
+  expect(fork.secrets!.causes).toEqual([
+    {
+      rule: "FK-2",
+      spans: [],
+      inputs: [{ path: "event.actor", value: "fork" }],
+    },
+  ]);
+  // PERM-3, #15 §4: the block leaves id-token out, so it stays none.
+  expect(fork["token.id-token"]).toMatchObject({
+    value: "none",
+    causes: [{ rule: "PERM-3", spans: [{ line: 42 }] }, { rule: "PERM-4" }],
+  });
+
+  const member = accessOf(
+    simulate(example, actorPr("member")).verdicts,
+    "ci.yml › test",
+  );
+  expect(member["token.pull-requests"]!.value).toBe("write");
+  expect(member.secrets).toMatchObject({
+    value: "available",
+    causes: [{ rule: "FK-0" }],
+  });
+});
+
+test("a fork's pull_request still resolves write-all to read (PERM-2), and the permissive baseline's writes to read", () => {
+  const files = [
+    wf("a.yml", `on: pull_request\npermissions: write-all\n${jobs}`),
+    wf("b.yml", `on: pull_request\n${jobs}`),
+  ];
+  const { verdicts } = simulate(files, {
+    event: { name: "pull_request", actor: "fork" },
+    repo: { date, tokenDefault: "permissive" },
+  });
+  const a = accessOf(verdicts, "a.yml › a");
+  expect(levels(a)).toEqual(
+    allScopes("read", {
+      // write-all gives them write, a level a fork's run can't be shown to hold (PERM-8).
+      "token.id-token": ["none", "write"],
+      "token.copilot-requests": ["none", "write"],
+      secrets: "empty",
+    }),
+  );
+  expect(a["token.actions"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-2",
+    "PERM-6",
+    "PERM-3",
+  ]);
+  const b = accessOf(verdicts, "b.yml › a");
+  expect(b["token.issues"]).toMatchObject({ value: "read" });
+  expect(b["token.issues"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-2",
+    "PERM-1",
+  ]);
+  // The permissive baseline's own PERM-8 stands.
+  expect(b["token.id-token"]).toMatchObject({
+    value: "uncertain",
+    causes: [{ rule: "PERM-8" }, { rule: "PERM-1" }],
+  });
+});
+
+test.each(["fork", "dependabot"] as const)(
+  "on a %s run whose job sets id-token: write, token.id-token is Uncertain [none, write] (PERM-8) with an empty settle",
+  (actor) => {
+    const { verdicts } = simulate(
+      [
+        wf(
+          "ci.yml",
+          `on: pull_request\njobs:\n  a:\n    permissions:\n      id-token: write\n${steps}`,
+        ),
+      ],
+      { event: { name: "pull_request", actor }, repo: { date } },
+    );
+    expect(accessOf(verdicts, "ci.yml › a")["token.id-token"]).toEqual({
+      key: "ci.yml › a › token.id-token",
+      value: "uncertain",
+      causes: [
+        {
+          rule: "PERM-8",
+          spans: [],
+          inputs: [{ path: "event.actor", value: actor }],
+        },
+        expect.objectContaining({
+          rule: "PERM-3",
+          spans: [expect.objectContaining({ line: 5 })],
+        }),
+        ...(actor === "dependabot"
+          ? [expect.objectContaining({ rule: "FK-8" })]
+          : []),
+      ],
+      possible: ["none", "write"],
+      settle: [],
+    });
+  },
+);
+
+test("a dependabot[bot] pull_request gets dependabot-only secrets (FK-8) and a read-only token (root FK-8) that permissions: can raise (FK-8 cited)", () => {
+  const files = [
+    wf("a.yml", `on: pull_request\n${jobs}`),
+    wf(
+      "b.yml",
+      `on: pull_request\njobs:\n  a:\n    permissions:\n      pull-requests: write\n${steps}`,
+    ),
+  ];
+  const { verdicts } = simulate(files, {
+    event: { name: "pull_request", actor: "dependabot" },
+    repo: { date, tokenDefault: "permissive" },
+  });
+  const a = accessOf(verdicts, "a.yml › a");
+  expect(a.secrets).toMatchObject({
+    value: "dependabot-only",
+    causes: [
+      { rule: "FK-8", inputs: [{ path: "event.actor", value: "dependabot" }] },
+    ],
+  });
+  expect(a["token.contents"]).toMatchObject({ value: "read" });
+  expect(a["token.contents"]!.causes.map((c) => c.rule)).toEqual([
+    "FK-8",
+    "PERM-1",
+  ]);
+  const b = accessOf(verdicts, "b.yml › a");
+  expect(b["token.pull-requests"]).toMatchObject({ value: "write" });
+  expect(b["token.pull-requests"]!.causes.map((c) => c.rule)).toEqual([
+    "PERM-3",
+    "FK-8",
+  ]);
+  // No actor rule is a Platform baseline item: PRT-6 is never shown.
+  expect(
+    verdicts.flatMap((v) => v.causes).some((c) => c.rule === "PRT-6"),
+  ).toBe(false);
+});
+
+test("a dependabot[bot] push is simulated, with dependabot-only secrets", () => {
+  const { verdicts } = simulate([wf("ci.yml", `on: push\n${jobs}`)], {
+    event: { name: "push", actor: "dependabot" },
+    repo: { date },
+  });
+  expect(byKey(verdicts, "ci.yml")).toMatchObject({ value: "runs" });
+  expect(byKey(verdicts, "ci.yml › a › secrets")).toMatchObject({
+    value: "dependabot-only",
+  });
+});
+
+test("a fork contributor's pull_request awaiting approval makes the GitHub workflow pending (root FK-4, then PL-5) and its jobs no-run; a skipped one stays skipped", () => {
+  const { verdicts } = simulate(
+    example,
+    actorPr("fork", { approval: "awaiting" }),
+  );
+  const ci = byKey(verdicts, "ci.yml")!;
+  expect(ci.value).toBe("pending");
+  expect(ci.causes.slice(0, 3)).toEqual([
+    {
+      rule: "FK-4",
+      spans: [],
+      inputs: [{ path: "event.approval", value: "awaiting" }],
+    },
+    { rule: "PL-5", spans: [], inputs: [] },
+    expect.objectContaining({ rule: "PA-2" }),
+  ]);
+  // Each job copies the GitHub workflow's chain.
+  for (const id of ["build", "changes", "e2e", "test"])
+    expect(byKey(verdicts, `ci.yml › ${id}`)).toMatchObject({
+      value: "no-run",
+      causes: ci.causes,
+    });
+  expect(byKey(verdicts, "triage.yml")).toMatchObject({ value: "skipped" });
+  // Access is computed as if the job runs (ADR 0001).
+  expect(byKey(verdicts, "ci.yml › test › token.pull-requests")!.value).toBe(
+    "read",
+  );
+});
+
+test("Approval defaults to approved (WN-5): it follows the root on the fork's GitHub workflow and jobs it decides, and never on a member's", () => {
+  const fork = simulate(example, actorPr("fork")).verdicts;
+  expect(byKey(fork, "ci.yml")!.value).toBe("runs");
+  for (const key of ["ci.yml", "ci.yml › build"])
+    expect(byKey(fork, key)!.causes).toContainEqual(
+      wn5("event.approval", "approved"),
+    );
+  // Skipped either way, so Approval doesn't decide it.
+  expect(byKey(fork, "triage.yml")!.causes).not.toContainEqual(
+    wn5("event.approval", "approved"),
+  );
+  const member = simulate(example, actorPr("member")).verdicts;
+  expect(
+    member.some((v) =>
+      v.causes.some((c) => c.inputs.some((i) => i.path === "event.approval")),
+    ),
+  ).toBe(false);
 });
 
 // A member's pull_request touching src: ci.yml runs, and e2e reads the changes job's output.

@@ -1,4 +1,12 @@
-import { readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test, vi } from "vitest";
 import { PLATFORM_BASELINE } from "../core";
@@ -260,20 +268,44 @@ test.each([
   },
 );
 
-test("show --actor fork prints the Unsupported Verdict until fork PRs land", () => {
-  const { code, stdout } = run(
-    "show",
-    "--repo",
-    filters,
-    "--event",
-    "pull_request",
-    "--actor",
-    "fork",
-    "--date",
-    "2026-12-03",
-  );
-  expect(code).toBe(0);
-  expect(verdictLines(stdout)).toBe("event: unsupported (root WN-3)\n");
+test("show --event pull_request --actor fork on the example set: the Fork PR's Verdicts (snapshot)", () => {
+  // The bundled example set (#15 §2), as a repo folder.
+  const repo = mkdtempSync(join(tmpdir(), "whynorun-example-"));
+  const workflows = join(repo, ".github", "workflows");
+  mkdirSync(workflows, { recursive: true });
+  for (const name of ["ci.yml", "deploy.yml", "triage.yml"])
+    copyFileSync(
+      fileURLToPath(
+        new URL(`../../playground/src/example/${name}`, import.meta.url),
+      ),
+      join(workflows, name),
+    );
+  try {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    // `--changed` names a file listing the diff, so stdin holds src/app.ts.
+    const code = main(
+      [
+        "show",
+        "--repo",
+        repo,
+        "--event",
+        "pull_request",
+        "--actor",
+        "fork",
+        "--date",
+        "2026-12-03",
+        "--changed",
+        "-",
+      ],
+      () => "src/app.ts\n",
+    );
+    expect(code).toBe(0);
+    expect(
+      lastBlock(stdout.mock.calls.map((c) => c[0]).join("")),
+    ).toMatchSnapshot();
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("show --actor with an unknown Actor kind exits 2 and names the kinds", () => {
