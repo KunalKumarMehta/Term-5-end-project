@@ -29,6 +29,7 @@ import {
   type CauseLinks,
 } from "./Explanation";
 import { PasteDialog } from "./PasteDialog";
+import { fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
 
@@ -94,7 +95,11 @@ const isJob = (key: string) => key.split(" › ").length === 2;
 
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
-  const [origin, setOrigin] = useState<"example" | "pasted">();
+  const [origin, setOrigin] = useState<"example" | "pasted" | "uploaded">();
+  // The files as the example or an upload loaded them, to tell when they've been edited.
+  const [base, setBase] = useState<readonly WorkflowFile[]>();
+  // The last upload's inline error, or its loaded · ignored summary (#12 §5).
+  const [uploadNote, setUploadNote] = useState<ReactNode>();
   const [active, setActive] = useState<string>();
   const [scenario, setScenario] = useState(BLANK);
   const [label, setLabel] = useState("Scenario 1");
@@ -116,6 +121,7 @@ export function App() {
   const [highlight, setHighlight] = useState<Span>();
   const sheet = useRef<HTMLElement>(null);
   const sheetScroll = useRef(0);
+  const picker = useRef<HTMLInputElement>(null);
 
   // What the last run left on screen and what was last announced, read by the next run.
   const last = useRef<{
@@ -193,7 +199,10 @@ export function App() {
 
   const addFile = (file: WorkflowFile) => {
     // Pasting into the example edits it; pasting into nothing starts a pasted set.
-    if (files.length === 0) setOrigin("pasted");
+    if (files.length === 0) {
+      setOrigin("pasted");
+      setBase(undefined);
+    }
     setFiles((fs) =>
       fs.some((f) => f.path === file.path)
         ? fs.map((f) => (f.path === file.path ? file : f))
@@ -239,7 +248,7 @@ export function App() {
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
-  const edited = origin === "example" && !sameFiles(files, EXAMPLE_FILES);
+  const edited = base !== undefined && !sameFiles(files, base);
 
   /** The confirm-first rule (#12 §1): asks only when something would be lost. */
   const ask = (next: Confirm) => {
@@ -257,7 +266,7 @@ export function App() {
   /** What replacing the Workflow set would lose: edits, or files the Maintainer pasted. */
   const setLosses = () =>
     edited
-      ? ["It replaces your edits to the example files."]
+      ? [`It replaces your edits to the ${origin} files.`]
       : origin === "pasted" && files.length > 0
         ? [
             `It replaces your ${files.length} pasted file${files.length === 1 ? "" : "s"}.`,
@@ -268,6 +277,8 @@ export function App() {
   const replaceFiles = (next: readonly WorkflowFile[]) => {
     last.current.replaced = true;
     setFiles([...next]);
+    setBase(next);
+    setUploadNote(undefined);
   };
 
   const loadExample = () =>
@@ -305,6 +316,88 @@ export function App() {
       },
     });
 
+  /** Upload and folder drop replace the whole set, under the confirm-first rule (#12 §1, §5). */
+  const upload = async (reading: Promise<Upload>) => {
+    setUploadNote(undefined);
+    const read = await reading;
+    if ("error" in read) {
+      setUploadNote(
+        <p className="error" role="alert">
+          {read.error === "unreadable" ? (
+            <>
+              Couldn&rsquo;t read <code>{read.path}</code>: it isn&rsquo;t
+              readable UTF-8 text, so nothing changed.
+            </>
+          ) : read.error === "test" ? (
+            <>
+              <code>{read.name}</code> is a Test file. Opening Test files
+              isn&rsquo;t supported yet, so nothing changed.
+            </>
+          ) : (
+            <>
+              No <code>.yml</code>/<code>.yaml</code> files directly in{" "}
+              <code>.github/workflows/</code>. WhyNoRun reads only those, as
+              GitHub does.
+            </>
+          )}
+        </p>,
+      );
+      return;
+    }
+    const { files: next, ignored } = read;
+    const n = `${next.length} file${next.length === 1 ? "" : "s"}`;
+    ask({
+      title: "Replace the Workflow set?",
+      losses: setLosses(),
+      action: "Upload",
+      run: () => {
+        replaceFiles(next);
+        setOrigin("uploaded");
+        setActive(undefined);
+        if (ignored.length > 0)
+          setUploadNote(
+            <details className="ignored">
+              <summary>
+                {next.length} loaded · {ignored.length} ignored (other types or
+                subfolders)
+              </summary>
+              <ul>
+                {ignored.map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+              </ul>
+            </details>,
+          );
+        setToast({
+          id: Date.now(),
+          node: `Uploaded ${n}${ignored.length > 0 ? ` (${ignored.length} ignored)` : ""}`,
+        });
+      },
+    });
+  };
+
+  // One drop zone covers the whole page, the editor included (#12 §5).
+  useEffect(() => {
+    const over = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      // The entries must be taken while the drop event lasts.
+      const entries = [...e.dataTransfer.items].flatMap(
+        (item) => item.webkitGetAsEntry() ?? [],
+      );
+      void upload(fromDropped(entries));
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  });
+
   /** Sets one Scenario input from the form, which touches the Scenario. */
   const setInput = (path: string[], value: unknown) => {
     setScenario((s) => setScenarioValue(s, path, value));
@@ -341,7 +434,7 @@ export function App() {
       <button type="button" onClick={() => setPasting(true)}>
         Paste
       </button>
-      <button type="button" disabled>
+      <button type="button" onClick={() => picker.current!.click()}>
         Upload
       </button>
       <button type="button" disabled>
@@ -419,9 +512,9 @@ export function App() {
               ? "No Workflow set"
               : origin === "example"
                 ? `Example${edited ? " · edited" : ""}`
-                : `Workflow set: ${files.length} pasted file${files.length === 1 ? "" : "s"}`}
+                : `Workflow set: ${files.length} ${origin} file${files.length === 1 ? "" : "s"}${edited ? " · edited" : ""}`}
           </span>
-          {edited && (
+          {edited && origin === "example" && (
             <button type="button" onClick={reset}>
               Reset
             </button>
@@ -429,6 +522,20 @@ export function App() {
           <button type="button" onClick={() => setPasting(true)}>
             Paste
           </button>
+          <button type="button" onClick={() => picker.current!.click()}>
+            Upload
+          </button>
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              void upload(fromPicked(e.target.files ?? []));
+              e.target.value = ""; // Picking the same files again still uploads.
+            }}
+          />
+          {uploadNote}
         </div>
       </header>
 

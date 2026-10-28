@@ -365,3 +365,9 @@ dialog form {
     font-weight: 600;
   }
 }
+
+/* An upload's message or summary takes its own line under the Workflow set source. */
+.source > .error,
+.source > .ignored {
+  flex-basis: 100%;
+}
