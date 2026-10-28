@@ -50,11 +50,17 @@ function samePossible(a: Verdict, b: Verdict): boolean {
 
 const basename = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
+/** A job key is `<file> › <jobId>`. */
+const isJob = (key: string) => key.split(" › ").length === 2;
+
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [active, setActive] = useState<string>();
   const [eventName, setEventName] = useState("push");
   const [date, setDate] = useState("");
+  // Assumptions, keyed by job key ("job X fails").
+  const [assume, setAssume] = useState<Record<string, string>>({});
+  const [failPick, setFailPick] = useState("");
   const [verdicts, setVerdicts] = useState<Verdict[]>();
   const [failed, setFailed] = useState(false);
   const [pane, setPane] = useState<Pane>("yaml");
@@ -85,6 +91,7 @@ export function App() {
         next = simulate(files, {
           event: { name: eventName },
           repo: { date },
+          assume,
         }).verdicts;
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
@@ -106,7 +113,7 @@ export function App() {
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [files, eventName, date, announce]);
+  }, [files, eventName, date, assume, announce]);
 
   useEffect(() => {
     if (!toast) return;
@@ -163,6 +170,9 @@ export function App() {
   const unsupported = verdicts?.find(
     (v) => v.key === "event" && v.value === "unsupported",
   );
+  const unassumed = (verdicts ?? [])
+    .filter((v) => isJob(v.key) && !Object.hasOwn(assume, v.key))
+    .map((v) => v.key);
 
   let results: ReactNode;
   if (files.length === 0)
@@ -197,7 +207,8 @@ export function App() {
     results = (
       <ul className="verdicts">
         {verdicts.map((v) => (
-          <li key={v.key}>
+          // Sorted by key, so each job row follows its GitHub workflow's row.
+          <li key={v.key} className={isJob(v.key) ? "job" : undefined}>
             <span className="key">{v.key}</span> <Value verdict={v} />{" "}
             <span className="root">root {v.causes[0]?.rule}</span>
           </li>
@@ -296,6 +307,55 @@ export function App() {
                 onClick={() => setDate(new Date().toLocaleDateString("en-CA"))}
               >
                 Today
+              </button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Assumptions</legend>
+            {Object.keys(assume).length === 0 ? (
+              <p className="hint">None.</p>
+            ) : (
+              <ul className="assumptions">
+                {Object.entries(assume).map(([key, value]) => (
+                  <li key={key}>
+                    job <code>{key}</code> {value}{" "}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${key} ${value}`}
+                      onClick={() =>
+                        setAssume((a) =>
+                          Object.fromEntries(
+                            Object.entries(a).filter(([k]) => k !== key),
+                          ),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label htmlFor="assume-fails">Assume this job fails</label>
+            <div className="row">
+              <select
+                id="assume-fails"
+                value={unassumed.includes(failPick) ? failPick : ""}
+                onChange={(e) => setFailPick(e.target.value)}
+              >
+                <option value="">Choose a job</option>
+                {unassumed.map((key) => (
+                  <option key={key}>{key}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!unassumed.includes(failPick)}
+                onClick={() =>
+                  setAssume((a) => ({ ...a, [failPick]: "fails" }))
+                }
+              >
+                Add
               </button>
             </div>
           </fieldset>

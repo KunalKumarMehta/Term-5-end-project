@@ -31,7 +31,10 @@ const showOutput = [
   ...PLATFORM_BASELINE.map((line) => `- ${line}`),
   "",
   "ci.yml: runs (root EV-0, line 3)",
+  "ci.yml › release: skipped (root JG-3, line 12)",
+  "ci.yml › test: runs (root WN-2, line 6)",
   "docs.yml: skipped (root EV-0, line 2)",
+  "docs.yml › build: no-run (root EV-0, line 2)",
   "",
 ].join("\n");
 
@@ -50,7 +53,7 @@ test("an unknown command is misuse: exits 2 with usage on stderr", () => {
   expect(stderr).toMatch(/^usage: whynorun show --event/);
 });
 
-test("show in a fixture repo prints the version, the Platform baseline and one line per GitHub workflow", () => {
+test("show in a fixture repo prints the version, the Platform baseline and one line per GitHub workflow and per job", () => {
   process.chdir(fixture);
   expect(run("show", "--event", "push", "--date", "2026-12-03")).toEqual({
     code: 0,
