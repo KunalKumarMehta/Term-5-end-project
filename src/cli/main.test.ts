@@ -31,7 +31,10 @@ const showOutput = [
   ...PLATFORM_BASELINE.map((line) => `- ${line}`),
   "",
   "ci.yml: runs (root EV-0, line 3)",
+  "ci.yml › release: skipped (root JG-3, line 12)",
+  "ci.yml › test: runs (root WN-2, line 6)",
   "docs.yml: skipped (root EV-0, line 2)",
+  "docs.yml › build: no-run (root EV-0, line 2)",
   "",
 ].join("\n");
 
@@ -50,7 +53,7 @@ test("an unknown command is misuse: exits 2 with usage on stderr", () => {
   expect(stderr).toMatch(/^usage: whynorun show --event/);
 });
 
-test("show in a fixture repo prints the version, the Platform baseline and one line per GitHub workflow", () => {
+test("show in a fixture repo prints the version, the Platform baseline and one line per GitHub workflow and per job", () => {
   process.chdir(fixture);
   expect(run("show", "--event", "push", "--date", "2026-12-03")).toEqual({
     code: 0,
@@ -99,7 +102,7 @@ test("show prints a broken file's Diagnostic at file:line in place of its Verdic
   );
   expect(code).toBe(0);
   expect(stdout).toMatch(
-    /\n\n\.github\/workflows\/broken\.yml:3: Unexpected value 'branchez'\nci\.yml: runs \(root EV-0, line 3\)\ndocs\.yml: skipped \(root EV-0, line 2\)\n$/,
+    /\n\n\.github\/workflows\/broken\.yml:3: Unexpected value 'branchez'\nci\.yml: runs \(root EV-0, line 3\)\nci\.yml › test: runs \(root WN-2, line 6\)\ndocs\.yml: skipped \(root EV-0, line 2\)\ndocs\.yml › build: no-run \(root EV-0, line 2\)\n$/,
   );
 });
 
@@ -182,13 +185,20 @@ test("show --ref with a tag ref skips a GitHub workflow with only a branches: fi
   );
   expect(code).toBe(0);
   expect(verdictLines(stdout)).toBe(
-    "release.yml: skipped (root BR-3, line 4)\n",
+    "release.yml: skipped (root BR-3, line 4)\n" +
+      "release.yml › build: no-run (root BR-3, line 4)\n",
   );
 });
 
 test.each([
-  ["main", "release.yml: runs (root BR-4, line 6)\n"],
-  ["dev", "release.yml: skipped (root BR-4, line 6)\n"],
+  [
+    "main",
+    "release.yml: runs (root BR-4, line 6)\nrelease.yml › build: runs (root WN-2, line 8)\n",
+  ],
+  [
+    "dev",
+    "release.yml: skipped (root BR-4, line 6)\nrelease.yml › build: no-run (root BR-4, line 6)\n",
+  ],
 ])(
   "show --event pull_request --base %s matches the base branch",
   (base, line) => {
@@ -246,6 +256,8 @@ test("show --actor with an unknown Actor kind exits 2 and names the kinds", () =
 const paths = fileURLToPath(new URL("fixtures/paths", import.meta.url));
 const prArgs = ["show", "--repo", paths, "--event", "pull_request"];
 const prDate = ["--date", "2026-12-03"];
+const runs =
+  "ci.yml: runs (root PA-2, line 5)\nci.yml › build: runs (root WN-2, line 7)\n";
 
 test("show --changed - reads the changed files from stdin, one per line", () => {
   const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -254,9 +266,7 @@ test("show --changed - reads the changed files from stdin, one per line", () => 
     () => "docs/README.md\r\nsrc/app.ts\n",
   );
   expect(code).toBe(0);
-  expect(verdictLines(stdout.mock.calls.map((c) => c[0]).join(""))).toBe(
-    "ci.yml: runs (root PA-2, line 5)\n",
-  );
+  expect(verdictLines(stdout.mock.calls.map((c) => c[0]).join(""))).toBe(runs);
 });
 
 test("show --changed <file> reads the changed files from that file", () => {
@@ -268,13 +278,16 @@ test("show --changed <file> reads the changed files from that file", () => {
     ...prDate,
   );
   expect(code).toBe(0);
-  expect(verdictLines(stdout)).toBe("ci.yml: runs (root PA-2, line 5)\n");
+  expect(verdictLines(stdout)).toBe(runs);
 });
 
 test("show without --changed takes an empty diff, so a paths: filter skips (PA-3)", () => {
   const { code, stdout } = run(...prArgs, ...prDate);
   expect(code).toBe(0);
-  expect(verdictLines(stdout)).toBe("ci.yml: skipped (root PA-3, line 4)\n");
+  expect(verdictLines(stdout)).toBe(
+    "ci.yml: skipped (root PA-3, line 4)\n" +
+      "ci.yml › build: no-run (root PA-3, line 4)\n",
+  );
 });
 
 test("show --changed with a file it can't read exits 2 and names it", () => {

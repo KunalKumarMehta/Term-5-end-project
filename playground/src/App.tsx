@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  isLoaded,
   setScenarioValue,
   simulate,
   type ActorKind,
@@ -29,6 +30,7 @@ import {
   prose,
   type CauseLinks,
 } from "./Explanation";
+import { Grid, Value, same, type Column } from "./Grid";
 import { PasteDialog } from "./PasteDialog";
 import { fromDropped, fromPicked, type Upload } from "./upload";
 
@@ -47,14 +49,9 @@ function changedCount(before: Verdict[], after: Verdict[]): number {
   for (const v of after) {
     const was = old.get(v.key);
     old.delete(v.key);
-    if (!was || was.value !== v.value || !samePossible(was, v)) n++;
+    if (!same(was, v)) n++;
   }
   return n + old.size;
-}
-
-function samePossible(a: Verdict, b: Verdict): boolean {
-  const key = (v: Verdict) => JSON.stringify([...(v.possible ?? [])].sort());
-  return key(a) === key(b);
 }
 
 const sameFiles = (a: readonly WorkflowFile[], b: readonly WorkflowFile[]) =>
@@ -91,6 +88,9 @@ function diagnosticNews(
   });
 }
 
+/** A job key is `<file> › <jobId>`. */
+const isJob = (key: string) => key.split(" › ").length === 2;
+
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [origin, setOrigin] = useState<"example" | "pasted" | "uploaded">();
@@ -99,12 +99,20 @@ export function App() {
   // The last upload's inline error, or its loaded · ignored summary (#12 §5).
   const [uploadNote, setUploadNote] = useState<ReactNode>();
   const [active, setActive] = useState<string>();
-  const [scenario, setScenario] = useState(BLANK);
-  const [label, setLabel] = useState("Scenario 1");
+  // One Scenario, or two with Compare on (#9 §8).
+  const [scenarios, setScenarios] = useState<Scenario[]>([BLANK]);
+  const [labels, setLabels] = useState(["Scenario 1"]);
+  // The Scenario the form shows, and the last label it refused (#12 §6).
+  const [form, setForm] = useState(0);
+  const [labelError, setLabelError] = useState<string>();
+  const [diffOnly, setDiffOnly] = useState(false);
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
-  const [verdicts, setVerdicts] = useState<Verdict[]>();
+  // The job picked in the Assumptions section, before Add.
+  const [failPick, setFailPick] = useState("");
+  // Each Scenario's Verdicts; undefined while it has no date.
+  const [runs, setRuns] = useState<(Verdict[] | undefined)[]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [target, setTarget] = useState<Target>();
   const [failed, setFailed] = useState(false);
@@ -112,8 +120,8 @@ export function App() {
   const [pasting, setPasting] = useState(false);
   const [toast, setToast] = useState<{ id: number; node: ReactNode }>();
   const [status, setStatus] = useState("");
-  // The subject key of the open Explanation, and the YAML lines a file:line link showed.
-  const [open, setOpen] = useState<string>();
+  // The open Explanation's subject key and Scenario, and the YAML lines a file:line link showed.
+  const [open, setOpen] = useState<{ key: string; i: number }>();
   const [highlight, setHighlight] = useState<Span>();
   const sheet = useRef<HTMLElement>(null);
   const sheetScroll = useRef(0);
@@ -121,72 +129,87 @@ export function App() {
 
   // What the last run left on screen and what was last announced, read by the next run.
   const last = useRef<{
-    verdicts?: Verdict[];
+    runs: (Verdict[] | undefined)[];
     counts: Map<string, number>;
     failed: boolean;
     /** Set by a wholesale replacement, whose first run stays silent. */
     replaced?: boolean;
-  }>({ counts: new Map(), failed: false });
+  }>({ runs: [], counts: new Map(), failed: false });
 
   const announce = useCallback((message: string) => {
     setStatus((prev) => (message === "" || message === prev ? prev : message));
   }, []);
 
+  const compare = scenarios.length === 2;
+  const scenario = scenarios[form]!;
+  const label = labels[form]!;
   const eventName = scenario.event.name;
   const date = scenario.repo.date;
 
   useEffect(() => {
-    if (scenario.event.name.trim() === "") return; // The field shows why; the last results stay.
+    // The field shows why; that Scenario's last results stay.
+    if (scenarios.every((s) => s.event.name.trim() === "")) return;
     const timer = setTimeout(() => {
       if (files.length === 0) {
-        last.current = { counts: new Map(), failed: false };
-        setVerdicts(undefined);
+        last.current = { runs: [], counts: new Map(), failed: false };
+        setRuns([]);
         setDiagnostics([]);
         setFailed(false);
         return;
       }
-      const dated = scenario.repo.date !== "";
-      // The Changed files field keeps the blank line being typed; simulate() gets only paths.
-      const changed = scenario.event.changed;
-      let input = changed
-        ? setScenarioValue(
-            scenario,
-            ["event", "changed"],
-            changed.filter((path) => path !== ""),
-          )
-        : scenario;
-      if (!dated) input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
-      let result;
+      const { runs: before, counts: was, replaced } = last.current;
+      const next: (Verdict[] | undefined)[] = [];
+      let diagnostics: Diagnostic[] = [];
       try {
-        result = simulate(files, input);
+        for (const [i, s] of scenarios.entries()) {
+          if (s.event.name.trim() === "") {
+            next.push(before[i]);
+            continue;
+          }
+          const dated = s.repo.date !== "";
+          // The Changed files field keeps the blank line being typed; simulate() gets only paths.
+          const changed = s.event.changed;
+          let input = changed
+            ? setScenarioValue(
+                s,
+                ["event", "changed"],
+                changed.filter((path) => path !== ""),
+              )
+            : s;
+          if (!dated)
+            input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
+          const result = simulate(files, input);
+          diagnostics = result.diagnostics;
+          next.push(dated ? result.verdicts : undefined);
+        }
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
         last.current.failed = true;
         setFailed(true);
         return;
       }
-      const next = dated ? result.verdicts : undefined;
-      const counts = countByPath(result.diagnostics);
-      const { verdicts: before, counts: was, replaced } = last.current;
+      const counts = countByPath(diagnostics);
       const news = diagnosticNews(was, counts);
       // Files with Diagnostics on either side are counted by their own news, not as Verdicts.
       const broken = new Set([...was.keys(), ...counts.keys()].map(basename));
       const kept = (vs: Verdict[]) =>
         vs.filter((v) => !broken.has(v.key.split(" › ")[0]!));
-      // Runs where either side had no Verdicts stay silent.
-      if (before?.length && next?.length) {
-        const n = changedCount(kept(before), kept(next));
-        if (n > 0)
-          news.unshift(`Results updated: ${plural(n, "Verdict")} changed`);
-      }
+      // Per-Scenario keys; runs where either side had no Verdicts stay silent.
+      let n = 0;
+      next.forEach((after, i) => {
+        const b = before[i];
+        if (b?.length && after?.length) n += changedCount(kept(b), kept(after));
+      });
+      if (n > 0)
+        news.unshift(`Results updated: ${plural(n, "Verdict")} changed`);
       if (!replaced) announce(news.join(" "));
-      last.current = { verdicts: next, counts, failed: false };
-      setVerdicts(next);
-      setDiagnostics(result.diagnostics);
+      last.current = { runs: next, counts, failed: false };
+      setRuns(next);
+      setDiagnostics(diagnostics);
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [files, scenario, announce]);
+  }, [files, scenarios, announce]);
 
   useEffect(() => {
     if (!toast) return;
@@ -228,24 +251,27 @@ export function App() {
       sheet.current.scrollTop = sheetScroll.current;
   }, [pane]);
 
-  const openExplanation = (key: string) => {
+  const openExplanation = (key: string, i = 0) => {
     sheetScroll.current = 0;
     if (sheet.current) sheet.current.scrollTop = 0;
-    setOpen(key);
+    setOpen({ key, i });
   };
 
-  const closeExplanation = (key: string) => {
+  const closeExplanation = ({ key, i }: { key: string; i: number }) => {
     setOpen(undefined);
     requestAnimationFrame(() =>
       document
-        .querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)
+        .querySelector<HTMLElement>(
+          `[data-key="${CSS.escape(key)}"][data-scenario="${i}"]`,
+        )
         ?.focus(),
     );
   };
 
-  /** Shows the pane a field lives in, then focuses the field. */
-  const focusField = (id: string) => {
+  /** Shows the pane and Scenario tab a field lives in, then focuses the field. */
+  const focusField = (id: string, i = form) => {
     setPane("scenario");
+    setForm(i);
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
@@ -289,7 +315,7 @@ export function App() {
         ...setLosses(),
         ...(touched
           ? [
-              `${label} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
+              `${labels[0]} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
             ]
           : []),
       ],
@@ -299,8 +325,8 @@ export function App() {
         setOrigin("example");
         setActive(undefined);
         if (!touched) {
-          setScenario(EXAMPLE_SCENARIO);
-          setLabel(EXAMPLE_LABEL);
+          setScenarios((ss) => [EXAMPLE_SCENARIO, ...ss.slice(1)]);
+          setLabels((ls) => [EXAMPLE_LABEL, ...ls.slice(1)]);
         }
         setToast({ id: Date.now(), node: "Loaded the example" });
       },
@@ -399,34 +425,67 @@ export function App() {
     };
   });
 
-  /** Sets one Scenario input from the form, which touches the Scenario. */
-  const setInput = (path: string[], value: unknown) => {
-    setScenario((s) => setScenarioValue(s, path, value));
-    setTouched(true);
+  /** Changes the Scenario the form shows; editing Scenario 1 touches it. */
+  const setScenario = (change: (s: Scenario) => Scenario) => {
+    setScenarios((ss) => ss.map((s, i) => (i === form ? change(s) : s)));
+    if (form === 0) setTouched(true);
   };
+
+  /** Sets one Scenario input from the form. */
+  const setInput = (path: string[], value: unknown) =>
+    setScenario((s) => setScenarioValue(s, path, value));
 
   /** Sets an optional Event field; emptied, it is unset so its default applies. */
   const setEventField = (
     field: "type" | "ref" | "base" | "message",
     value: string,
-  ) => {
+  ) =>
     setScenario((s) => {
       const event = { ...s.event, [field]: value };
       if (value === "") delete event[field];
       return { ...s, event };
     });
-    setTouched(true);
+
+  /** Compare on copies Scenario 1 into Scenario 2 and opens its tab; off drops Scenario 2. */
+  const setCompare = (on: boolean) => {
+    setScenarios((ss) => (on ? [ss[0]!, ss[0]!] : [ss[0]!]));
+    setLabels((ls) => (on ? [ls[0]!, "Scenario 2"] : [ls[0]!]));
+    setForm(on ? 1 : 0);
+    setLabelError(undefined);
+    if (open?.i === 1) setOpen(undefined);
   };
 
-  const links: CauseLinks = {
+  /** #12 §6: labels stay unique, and a cleared one becomes "Scenario N". Returns the label kept. */
+  const rename = (typed: string): string => {
+    const next = typed.trim() || `Scenario ${form + 1}`;
+    if (labels.some((l, i) => i !== form && l === next)) {
+      setLabelError(`${next} already uses this label.`);
+      return label;
+    }
+    setLabelError(undefined);
+    setLabels((ls) => ls.map((l, i) => (i === form ? next : l)));
+    return next;
+  };
+
+  // Assumptions, keyed by job key ("job X fails").
+  const assume = scenario.assume ?? {};
+  const removeAssumption = (key: string) =>
+    setScenario((s) => ({
+      ...s,
+      assume: Object.fromEntries(
+        Object.entries(s.assume ?? {}).filter(([k]) => k !== key),
+      ),
+    }));
+
+  const linksFor = (i: number): CauseLinks => ({
     files,
-    focusField,
+    focusField: (id) => focusField(id, i),
     showLines: (span) => {
       setActive(span.path);
       setPane("yaml");
       setHighlight({ ...span }); // A fresh object, so a second click shows the lines again.
     },
-  };
+  });
 
   const actions = (
     <div className="actions">
@@ -446,9 +505,35 @@ export function App() {
   );
 
   const activeFile = files.find((f) => f.path === active) ?? files[0];
+  const verdicts = runs[0];
   const unsupported = verdicts?.find(
     (v) => v.key === "event" && v.value === "unsupported",
   );
+  // The jobs the form's Scenario could assume to fail.
+  const unassumed = (runs[form] ?? [])
+    .filter((v) => isJob(v.key) && !Object.hasOwn(assume, v.key))
+    .map((v) => v.key);
+
+  // Addendum C: a Scenario is blocked by a missing date, else by being unsupported.
+  const columns: Column[] = scenarios.map((s, i) => {
+    const event = runs[i]?.find(
+      (v) => v.key === "event" && v.value === "unsupported",
+    );
+    if (s.repo.date === "")
+      return {
+        label: labels[i]!,
+        blocked: "has no simulation date",
+        header: <DatePrompt onClick={() => focusField("sim-date", i)} />,
+      };
+    if (event)
+      return {
+        label: labels[i]!,
+        verdicts: [event],
+        blocked: "is unsupported",
+        header: <UnsupportedPanel verdict={event} {...linksFor(i)} />,
+      };
+    return { label: labels[i]!, verdicts: runs[i] };
+  });
 
   let results: ReactNode;
   if (files.length === 0)
@@ -458,35 +543,44 @@ export function App() {
         {actions}
       </div>
     );
-  else if (date === "")
+  else if (compare)
+    results = (
+      <Grid
+        columns={columns}
+        files={files
+          .filter((f) => isLoaded(f.path))
+          .map((f) => basename(f.path))
+          .sort()}
+        diagnosed={new Set(diagnostics.map((d) => basename(d.path)))}
+        diffOnly={diffOnly}
+        setDiffOnly={setDiffOnly}
+        open={open}
+        onOpen={openExplanation}
+      />
+    );
+  else if (columns[0]!.blocked === "has no simulation date")
     results = (
       <p className="whole-tab">
-        <a
-          href="#sim-date"
-          onClick={(e) => {
-            e.preventDefault();
-            focusField("sim-date");
-          }}
-        >
-          Set the simulation date to see Verdicts
-        </a>
+        <DatePrompt onClick={() => focusField("sim-date", 0)} />
       </p>
     );
   else if (verdicts === undefined) results = null;
   else if (unsupported)
-    results = <UnsupportedPanel verdict={unsupported} {...links} />;
+    results = <UnsupportedPanel verdict={unsupported} {...linksFor(0)} />;
   else if (verdicts.length === 0)
     results = <p>No Verdicts: every file has Diagnostics (see above).</p>;
   else
     results = (
       <ul className="verdicts">
         {verdicts.map((v) => (
-          <li key={v.key}>
+          // Sorted by key, so each job row follows its GitHub workflow's row.
+          <li key={v.key} className={isJob(v.key) ? "job" : undefined}>
             <button
               type="button"
               className="verdict"
               data-key={v.key}
-              aria-expanded={open === v.key}
+              data-scenario={0}
+              aria-expanded={open?.key === v.key}
               onClick={() => openExplanation(v.key)}
             >
               <span className="key">{v.key}</span> <Value verdict={v} />{" "}
@@ -497,7 +591,9 @@ export function App() {
       </ul>
     );
 
-  const blocked = files.length === 0 || date === "";
+  // Whether the whole tab is a no-set or no-date state, with no results to call stale.
+  const wholeTab =
+    files.length === 0 || (!compare && columns[0]!.blocked !== undefined);
   const counts = countByPath(diagnostics);
 
   return (
@@ -523,6 +619,14 @@ export function App() {
           <button type="button" onClick={() => picker.current!.click()}>
             Upload
           </button>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={compare}
+              onChange={(e) => setCompare(e.target.checked)}
+            />
+            Compare
+          </label>
           <input
             ref={picker}
             type="file"
@@ -586,10 +690,42 @@ export function App() {
 
         <section className="pane" data-id="scenario" aria-label="Scenario">
           <div role="tablist" aria-label="Scenarios" className="tabs">
-            <button type="button" role="tab" aria-selected>
-              {label}
-            </button>
+            {labels.map((l, i) => (
+              <button
+                key={i}
+                type="button"
+                role="tab"
+                aria-selected={i === form}
+                onClick={() => {
+                  setForm(i);
+                  setLabelError(undefined);
+                }}
+              >
+                {l}
+              </button>
+            ))}
           </div>
+          <label htmlFor="scenario-label">Scenario label</label>
+          <input
+            // Uncontrolled, so a label is checked only once it's committed.
+            key={`${form}:${label}`}
+            id="scenario-label"
+            defaultValue={label}
+            maxLength={100}
+            aria-invalid={labelError !== undefined}
+            aria-describedby="scenario-label-error"
+            onChange={() => setLabelError(undefined)}
+            onBlur={(e) =>
+              (e.currentTarget.value = rename(e.currentTarget.value))
+            }
+            onKeyDown={(e) => {
+              if (e.key === "Enter")
+                e.currentTarget.value = rename(e.currentTarget.value);
+            }}
+          />
+          <p id="scenario-label-error" className="error" role="alert">
+            {labelError}
+          </p>
           <fieldset>
             <legend>Event</legend>
             <label htmlFor="event-name">Event name</label>
@@ -703,6 +839,47 @@ export function App() {
               </button>
             </div>
           </fieldset>
+          <fieldset>
+            <legend>Assumptions</legend>
+            {Object.keys(assume).length === 0 ? (
+              <p className="hint">None.</p>
+            ) : (
+              <ul className="assumptions">
+                {Object.entries(assume).map(([key, value]) => (
+                  <li key={key}>
+                    job <code>{key}</code> {value}{" "}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${key} ${value}`}
+                      onClick={() => removeAssumption(key)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label htmlFor="assume-fails">Assume this job fails</label>
+            <div className="row">
+              <select
+                id="assume-fails"
+                value={unassumed.includes(failPick) ? failPick : ""}
+                onChange={(e) => setFailPick(e.target.value)}
+              >
+                <option value="">Choose a job</option>
+                {unassumed.map((key) => (
+                  <option key={key}>{key}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!unassumed.includes(failPick)}
+                onClick={() => setInput(["assume", failPick], "fails")}
+              >
+                Add
+              </button>
+            </div>
+          </fieldset>
         </section>
 
         <section className="pane" data-id="results" aria-label="Results">
@@ -734,20 +911,23 @@ export function App() {
               ))}
             </ul>
           )}
-          {failed && !blocked && <p className="banner">{INTERNAL_ERROR}</p>}
-          <div className={failed && !blocked ? "stale" : undefined}>
+          {failed && !wholeTab && <p className="banner">{INTERNAL_ERROR}</p>}
+          <div className={failed && !wholeTab ? "stale" : undefined}>
             {results}
           </div>
-          {open !== undefined && !blocked && !unsupported && (
-            <Explanation
-              subject={open}
-              verdict={verdicts?.find((v) => v.key === open)}
-              onClose={() => closeExplanation(open)}
-              sheet={sheet}
-              onScroll={(top) => (sheetScroll.current = top)}
-              {...links}
-            />
-          )}
+          {open !== undefined &&
+            files.length > 0 &&
+            !columns[open.i]?.blocked && (
+              <Explanation
+                subject={open.key}
+                scenario={compare ? labels[open.i] : undefined}
+                verdict={runs[open.i]?.find((v) => v.key === open.key)}
+                onClose={() => closeExplanation(open)}
+                sheet={sheet}
+                onScroll={(top) => (sheetScroll.current = top)}
+                {...linksFor(open.i)}
+              />
+            )}
         </section>
       </main>
 
@@ -809,24 +989,17 @@ export function App() {
   );
 }
 
-const TONES: Record<string, string> = {
-  runs: "good",
-  passes: "good",
-  fails: "bad",
-  cancelled: "bad",
-  "fails and blocks merge": "bad",
-  pending: "wait",
-  "pending and blocks merge": "wait",
-  "may not block": "wait",
-  uncertain: "uncertain",
-};
-
-function Value({ verdict }: { verdict: Verdict }) {
+function DatePrompt({ onClick }: { onClick: () => void }) {
   return (
-    <span className="value" data-tone={TONES[verdict.value] ?? "neutral"}>
-      {verdict.value}
-      {verdict.possible && ` (${verdict.possible.join(", ")})`}
-    </span>
+    <a
+      href="#sim-date"
+      onClick={(e) => {
+        e.preventDefault();
+        onClick();
+      }}
+    >
+      Set the simulation date to see Verdicts
+    </a>
   );
 }
 

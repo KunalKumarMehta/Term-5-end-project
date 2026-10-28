@@ -5,7 +5,7 @@ const row = (page: Page, key: string) =>
   results(page)
     .locator(".verdicts")
     .getByRole("listitem")
-    .filter({ hasText: key });
+    .filter({ has: page.locator(".key").getByText(key, { exact: true }) });
 
 test.beforeEach(async ({ page }) => {
   await page.goto("./");

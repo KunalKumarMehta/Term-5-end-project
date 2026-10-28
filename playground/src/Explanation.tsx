@@ -138,6 +138,7 @@ function Excerpt({
  */
 export function Explanation({
   subject,
+  scenario,
   verdict,
   onClose,
   sheet,
@@ -145,13 +146,15 @@ export function Explanation({
   ...links
 }: {
   subject: string;
+  /** With Compare on, the label of the Scenario the Verdict belongs to. */
+  scenario?: string;
   verdict: Verdict | undefined;
   onClose: () => void;
   sheet: Ref<HTMLElement>;
   onScroll: (top: number) => void;
 } & CauseLinks) {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), [subject]);
+  useEffect(() => heading.current?.focus(), [subject, scenario]);
 
   return (
     <section
@@ -162,6 +165,7 @@ export function Explanation({
     >
       <div className="row">
         <h2 ref={heading} tabIndex={-1}>
+          {scenario && <>{scenario}: </>}
           <span className="key">{subject}</span>
           {verdict && <> {verdict.value}</>}
         </h2>

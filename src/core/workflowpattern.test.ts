@@ -129,9 +129,9 @@ test.each(
       },
     );
     expect(diagnostics).toEqual([]);
-    expect(verdicts.map((v) => v.value)).toEqual([
-      skipped ? "skipped" : "runs",
-    ]);
+    expect(
+      verdicts.filter((v) => v.key === "ci.yml").map((v) => v.value),
+    ).toEqual([skipped ? "skipped" : "runs"]);
   },
 );
 
@@ -150,5 +150,7 @@ test.each(
     { event: { name: "push", ref }, repo: { date: "2026-12-03" } },
   );
   expect(diagnostics).toEqual([]);
-  expect(verdicts.map((v) => v.value)).toEqual([skipped ? "skipped" : "runs"]);
+  expect(
+    verdicts.filter((v) => v.key === "ci.yml").map((v) => v.value),
+  ).toEqual([skipped ? "skipped" : "runs"]);
 });
