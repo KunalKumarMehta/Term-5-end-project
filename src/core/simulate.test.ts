@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { RULES, simulate as coreSimulate, type Event } from "./index";
 
@@ -109,6 +110,29 @@ test.each<[string, Event]>([
     ]);
   },
 );
+
+// The bundled example Workflow set behind Load example (#15 §2), byte for byte.
+const example = ["ci.yml", "deploy.yml", "triage.yml"].map((name) =>
+  wf(
+    name,
+    readFileSync(
+      new URL(`../../playground/src/example/${name}`, import.meta.url),
+      "utf8",
+    ),
+  ),
+);
+
+test("the example Workflow set on a member's push to main: ci.yml and deploy.yml run, triage.yml is skipped", () => {
+  const { verdicts } = simulate(example, {
+    event: { name: "push", ref: "main" },
+    repo: { date },
+  });
+  expect(verdicts.map((v) => [v.key, v.value, v.causes[0]!.rule])).toEqual([
+    ["ci.yml", "runs", "EV-0"],
+    ["deploy.yml", "runs", "EV-0"],
+    ["triage.yml", "skipped", "EV-0"],
+  ]);
+});
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {
