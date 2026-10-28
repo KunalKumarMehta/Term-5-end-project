@@ -1,0 +1,17 @@
+name: Triage
+
+on: pull_request_target
+
+permissions:
+  pull-requests: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      # Placeholders: this file is simulation data, never a working pipeline.
+      - run: echo "Run the PR's own lint config here"
+      - run: echo "Label the pull request here"

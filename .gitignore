@@ -12,3 +12,8 @@ playground/dist/
 test-results/
 playwright-report/
 *.tsbuildinfo
+
+# Generated from schemas/ by scripts/gen-types.mjs; the validator is committed so every
+# build and test has it without running the generator first.
+src/core/generated/*
+!src/core/generated/validate-scenario.ts

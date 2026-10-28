@@ -1,5 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["."],
+  "compilerOptions": { "resolveJsonModule": true },
+  "include": [".", "../../schemas/*.json"],
   "exclude": ["**/*.test.ts"]
 }

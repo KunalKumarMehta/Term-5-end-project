@@ -29,7 +29,9 @@ jobs:
         with:
           node-version: 22
       - name: Smoke-run the CLI on Node 22
-        run: node dist/whynorun.mjs --version
+        run: |
+          node dist/whynorun.mjs --version
+          node dist/whynorun.mjs show --event push --date 2026-12-03 --repo src/cli/fixtures/repo
 
   e2e:
     runs-on: ubuntu-latest

@@ -1,0 +1,287 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const CI = `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+`;
+
+const CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https://api.github.com https://raw.githubusercontent.com; object-src 'none'; base-uri 'none'";
+
+async function paste(page: Page, text: string, path?: string) {
+  await page.getByRole("banner").getByRole("button", { name: "Paste" }).click();
+  const dialog = page.getByRole("dialog", { name: "Paste a GitHub workflow" });
+  if (path !== undefined) await dialog.getByLabel("Path").fill(path);
+  await dialog.getByLabel("YAML").fill(text);
+  await dialog.getByRole("button", { name: "Add file" }).click();
+}
+
+declare global {
+  interface Window {
+    violations: string[];
+    said: string[];
+  }
+}
+
+const results = (page: Page) => page.getByRole("region", { name: "Results" });
+
+// All Verdicts' GitHub workflow and job rows, leaving out access keys (#62).
+const runRows = (page: Page) =>
+  results(page)
+    .getByRole("listitem")
+    .filter({ hasNotText: / › (token\.|secrets)/ });
+
+test.beforeEach(async ({ page }) => {
+  // Record every CSP violation and every text the status region takes, from before load.
+  await page.addInitScript(() => {
+    const w = window;
+    w.violations = [];
+    w.said = [];
+    document.addEventListener("securitypolicyviolation", (e) =>
+      w.violations.push(`${e.violatedDirective} ${e.blockedURI}`),
+    );
+    document.addEventListener("DOMContentLoaded", () => {
+      const status = document.getElementById("status")!;
+      new MutationObserver(() => {
+        if (status.textContent) w.said.push(status.textContent);
+      }).observe(status, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    });
+  });
+  await page.goto("./");
+});
+
+test("a pasted push workflow runs with root EV-0, and schedule is unsupported, announced once, under the CSP", async ({
+  page,
+}) => {
+  await expect(
+    page.locator('meta[http-equiv="Content-Security-Policy"]'),
+  ).toHaveAttribute("content", CSP);
+  await expect(results(page)).toContainText("No Workflow set yet");
+  await expect(
+    results(page).getByRole("button", { name: "Import repo" }),
+  ).toBeDisabled();
+  for (const name of ["Load example", "Paste", "Upload"])
+    await expect(results(page).getByRole("button", { name })).toBeEnabled();
+
+  await paste(page, CI, ".github/workflows/ci.yml");
+  await expect(page.locator("#toasts")).toHaveText("Pasted ci.yml");
+
+  await page.getByLabel("Event name").fill("push");
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  const row = runRows(page);
+  await expect(row).toHaveText([
+    "ci.yml runs root EV-0",
+    "ci.yml › build runs root WN-2",
+  ]);
+
+  await page.getByLabel("Event name").fill("schedule");
+  await expect(results(page)).toContainText(
+    "Unsupported Scenario: Outside v1: WhyNoRun doesn't simulate this Event. (WN-3)",
+  );
+  // Longer than the 300 ms debounce, so a second announcement would have landed.
+  await page.waitForTimeout(1000);
+  // The event key came; the file, its job and the job's 18 access keys went.
+  expect(await page.evaluate(() => window.said)).toEqual([
+    "Results updated: 21 Verdicts changed",
+  ]);
+  expect(await page.evaluate(() => window.violations)).toEqual([]);
+});
+
+test("a typed path that clashes offers Replace it", async ({ page }) => {
+  await paste(page, CI, ".github/workflows/ci.yml");
+  await paste(page, "on: pull_request\n", ".github/workflows/ci.yml");
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText(
+    ".github/workflows/ci.yml is already in the Workflow set.",
+  );
+  await dialog.getByRole("button", { name: "Replace it" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("tab", { name: "ci.yml" })).toHaveCount(1);
+  await expect(
+    page.getByRole("textbox", { name: "YAML of .github/workflows/ci.yml" }),
+  ).toHaveText("on: pull_request");
+});
+
+test("a path outside .github/workflows/ is refused inline", async ({
+  page,
+}) => {
+  await paste(page, CI, "ci.yml");
+  await expect(page.getByRole("dialog")).toContainText(
+    "Use a path like .github/workflows/ci.yml",
+  );
+});
+
+test("a second default-named paste becomes untitled-2.yml", async ({
+  page,
+}) => {
+  await paste(page, CI);
+  await paste(page, CI);
+  await expect(page.getByRole("tablist", { name: "Files" })).toHaveText(
+    "untitled.ymluntitled-2.yml",
+  );
+});
+
+test("clearing the date blanks the results to the prompt, linked to the field", async ({
+  page,
+}) => {
+  await paste(page, CI);
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  await expect(runRows(page)).toHaveCount(2);
+
+  await page.getByLabel("Simulation date").fill("");
+  const prompt = results(page).getByRole("link", {
+    name: "Set the simulation date to see Verdicts",
+  });
+  await expect(prompt).toBeVisible();
+  await expect(runRows(page)).toHaveCount(0);
+  await prompt.click();
+  await expect(page.getByLabel("Simulation date")).toBeFocused();
+});
+
+test("an unsupported event shows the Unsupported panel, its inputs linked to their fields", async ({
+  page,
+}) => {
+  await paste(page, CI);
+  // A fork contributor pushing is an impossible combination (#6).
+  await page.getByLabel("Event name").fill("push");
+  await page.getByLabel("Actor kind").selectOption("fork");
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+
+  const panel = results(page);
+  await expect(panel).toContainText(
+    "Unsupported Scenario: Outside v1: WhyNoRun doesn't simulate this Event. (WN-3)",
+  );
+  await panel.getByRole("link", { name: "Actor kind = fork" }).click();
+  await expect(page.getByLabel("Actor kind")).toBeFocused();
+  await panel.getByRole("link", { name: "Event name = push" }).click();
+  await expect(page.getByLabel("Event name")).toBeFocused();
+});
+
+test("for a push, changing the ref flips a branch-filtered GitHub workflow between runs and skipped, each with its root", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    ".github/workflows/ci.yml",
+  );
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  const row = runRows(page);
+  // An empty ref is the default branch.
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
+
+  await page.getByLabel("Ref").fill("refs/heads/feature");
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-4",
+    "ci.yml › build no-run root BR-4",
+  ]);
+  await page.getByLabel("Ref").fill("refs/tags/v1.0.0");
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-3",
+    "ci.yml › build no-run root BR-3",
+  ]);
+  await page.getByLabel("Ref").fill("main");
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
+});
+
+test("a member's pull_request matches its base branch and activity type", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on:\n  pull_request:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    ".github/workflows/ci.yml",
+  );
+  await page.getByLabel("Event name").fill("pull_request");
+  await page.getByLabel("Simulation date").fill("2026-12-03");
+  const row = runRows(page);
+  await expect(row).toHaveText([
+    "ci.yml runs root BR-4",
+    "ci.yml › build runs root WN-2",
+  ]);
+  await page.getByLabel("Base branch").fill("dev");
+  await expect(row).toHaveText([
+    "ci.yml skipped root BR-4",
+    "ci.yml › build no-run root BR-4",
+  ]);
+  await page.getByLabel("Base branch").fill("");
+  await page.getByLabel("Activity type").fill("closed");
+  await expect(row).toHaveText([
+    "ci.yml skipped root EV-1",
+    "ci.yml › build no-run root EV-1",
+  ]);
+});
+
+test.describe("on a 390 px screen", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  const scrollsSideways = (page: Page) =>
+    page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth,
+    );
+
+  test("the bottom bar switches panes, the header stays and the page never scrolls sideways", async ({
+    page,
+  }) => {
+    const bar = page.getByRole("navigation", { name: "Panes" });
+    await paste(page, CI.repeat(3) + `# ${"a-very-long-line-".repeat(20)}\n`);
+
+    for (const [tab, pane] of [
+      ["Scenario", "Scenario"],
+      ["Results", "Results"],
+      ["YAML", "YAML"],
+    ]) {
+      await bar.getByRole("button", { name: tab }).click();
+      await expect(bar.getByRole("button", { name: tab })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(page.getByRole("region", { name: pane })).toBeVisible();
+      await expect(page.getByRole("region")).toHaveCount(1);
+      await expect(
+        page.getByRole("banner").getByRole("button", { name: "Paste" }),
+      ).toBeVisible();
+      expect(await scrollsSideways(page)).toBe(false);
+    }
+  });
+
+  test("switching panes keeps each pane's state", async ({ page }) => {
+    const bar = page.getByRole("navigation", { name: "Panes" });
+    await paste(page, CI, ".github/workflows/ci.yml");
+    const editor = page.getByRole("textbox", {
+      name: "YAML of .github/workflows/ci.yml",
+    });
+    await editor.click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("# edited");
+
+    await bar.getByRole("button", { name: "Scenario" }).click();
+    await page.getByLabel("Simulation date").fill("2026-12-03");
+    await bar.getByRole("button", { name: "Results" }).click();
+    await expect(runRows(page)).toHaveText([
+      "ci.yml runs root EV-0",
+      "ci.yml › build runs root WN-2",
+    ]);
+
+    await bar.getByRole("button", { name: "YAML" }).click();
+    await expect(editor).toContainText("# edited");
+    await bar.getByRole("button", { name: "Scenario" }).click();
+    await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-03");
+  });
+});

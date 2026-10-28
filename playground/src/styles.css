@@ -1,0 +1,540 @@
+:root {
+  --fg: #1f2328;
+  --muted: #59636e;
+  --bg: #ffffff;
+  --line: #d1d9e0;
+  --good: #1a7f37;
+  --bad: #cf222e;
+  --wait: #9a6700;
+  --neutral: #6e7781;
+  --uncertain: #8250df;
+  font-family: system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+
+#root {
+  display: contents;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+header,
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.source,
+.actions,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+footer {
+  border-top: 1px solid var(--line);
+  border-bottom: none;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.panes {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 3fr) minmax(0, 4fr);
+}
+
+.pane {
+  min-width: 0;
+  padding: 0.75rem 1rem;
+  border-right: 1px solid var(--line);
+}
+
+.pane:last-child {
+  border-right: none;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.tabs [aria-selected="true"] {
+  font-weight: 600;
+  border-bottom: 2px solid var(--fg);
+}
+
+.editor .cm-editor {
+  max-width: 100%;
+  border: 1px solid var(--line);
+}
+
+fieldset {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--line);
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+  font: inherit;
+}
+
+textarea {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+}
+
+.required,
+.optional {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* #9 §7: the Settle it box ends an Uncertain Verdict's Explanation. */
+.settle {
+  margin: 0.75rem 0 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 2px dashed var(--uncertain);
+}
+
+.settle h3 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.settle ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.explanation-panel .settle .row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875em;
+}
+
+.error {
+  margin: 0;
+  color: var(--bad);
+}
+
+.error:empty {
+  display: none;
+}
+
+.banner {
+  padding: 0.5rem;
+  border: 1px solid var(--bad);
+  color: var(--bad);
+}
+
+.diagnostics {
+  margin: 0 0 0.75rem;
+  padding-left: 1.75rem;
+}
+
+.diagnostics a {
+  color: inherit;
+}
+
+.count {
+  margin-left: 0.25rem;
+  padding: 0 0.35rem;
+  border-radius: 0.75rem;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.stale {
+  opacity: 0.5;
+}
+
+.verdicts {
+  list-style: none;
+  padding: 0;
+}
+
+.verdicts li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.verdicts li.job {
+  padding-left: 1.5rem;
+}
+
+.verdicts li.access {
+  padding-left: 3rem;
+}
+
+.assumptions {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.key {
+  font-family: ui-monospace, monospace;
+}
+
+.verdict {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+}
+
+.verdict:focus-visible {
+  outline: 2px solid var(--fg);
+}
+
+.verdict[aria-expanded="true"] {
+  font-weight: 600;
+}
+
+.explanation-panel {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.explanation-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.explanation-panel .row {
+  justify-content: space-between;
+}
+
+.explanation > li {
+  margin-bottom: 0.5rem;
+}
+
+.excerpt pre {
+  margin: 0.25rem 0;
+  padding: 0.25rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  background: #f6f8fa;
+}
+
+.excerpt .ln {
+  display: inline-block;
+  width: 3ch;
+  margin-right: 1ch;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+}
+
+.excerpt mark,
+.editor .cm-line.highlighted {
+  background: #fff8c5;
+}
+
+.root {
+  color: var(--muted);
+}
+
+.value {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  color: #fff;
+}
+
+.value[data-tone="good"] {
+  background: var(--good);
+}
+
+.value[data-tone="bad"] {
+  background: var(--bad);
+}
+
+.value[data-tone="wait"] {
+  background: var(--wait);
+}
+
+.value[data-tone="neutral"] {
+  background: var(--neutral);
+}
+
+.value[data-tone="strong"] {
+  background: var(--fg);
+}
+
+.value[data-tone="mid"] {
+  color: var(--fg);
+  background: var(--line);
+}
+
+.value[data-tone="faint"] {
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.card {
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+}
+
+.card h3 {
+  margin: 0.25rem 0;
+  font-size: 1rem;
+}
+
+.card .run .verdict {
+  display: inline;
+  width: auto;
+}
+
+.card .hint {
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.value[data-tone="uncertain"] {
+  color: var(--uncertain);
+  border: 2px dashed var(--uncertain);
+}
+
+.unsupported {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--neutral);
+  background: #f6f8fa;
+}
+
+.toast {
+  position: fixed;
+  right: 1rem;
+  bottom: 4rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 0.25rem;
+}
+
+dialog {
+  width: min(40rem, calc(100vw - 2rem));
+}
+
+/* No padding on the dialog itself, so a click on the dialog element is on its backdrop. */
+dialog.confirm {
+  padding: 0;
+}
+
+dialog.confirm > div {
+  padding: 1rem;
+}
+
+dialog form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pane-bar {
+  display: none;
+}
+
+/* #12 §10: below about 900 px, one pane at a time behind a bottom tab bar. */
+@media (max-width: 899px) {
+  .panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pane {
+    border-right: none;
+  }
+
+  .panes[data-pane="yaml"] .pane:not([data-id="yaml"]),
+  .panes[data-pane="scenario"] .pane:not([data-id="scenario"]),
+  .panes[data-pane="results"] .pane:not([data-id="results"]) {
+    display: none;
+  }
+
+  /* The Explanation opens as a full-screen sheet that scrolls on its own (#12 §10). */
+  .explanation-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    margin: 0;
+    padding-bottom: 4rem;
+    overflow-y: auto;
+    border: none;
+  }
+
+  .pane-bar {
+    position: sticky;
+    z-index: 2;
+    bottom: 0;
+    display: flex;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+
+  .pane-bar button {
+    flex: 1;
+    padding: 0.75rem;
+  }
+
+  .pane-bar [aria-pressed="true"] {
+    font-weight: 600;
+  }
+}
+
+/* An upload's message or summary takes its own line under the Workflow set source. */
+.source > .error,
+.source > .ignored {
+  flex-basis: 100%;
+}
+
+/* The All Verdicts grid scrolls sideways inside its own box, never the page (#12 §10). */
+.grid-box {
+  overflow-x: auto;
+}
+
+.grid {
+  border-collapse: collapse;
+}
+
+.grid th,
+.grid td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grid .key {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.grid .group th {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.grid .differs {
+  background: #fff8c5;
+}
+
+.grid .gutter {
+  width: 1.5rem;
+}
+
+.grid .verdict {
+  width: auto;
+}
+
+/* A cell names its Scenario only once the Scenarios stack. */
+.grid .tag {
+  display: none;
+}
+
+@media (max-width: 899px) {
+  /* With Compare on, the two Scenarios stack within each row (#12 §10). */
+  .grid,
+  .grid thead,
+  .grid tbody {
+    display: block;
+  }
+
+  .grid tr {
+    display: grid;
+    grid-template-columns: 1.5rem max-content;
+    min-width: 100%;
+    width: max-content;
+  }
+
+  .grid tr > :nth-child(n + 3) {
+    grid-column: 2;
+  }
+
+  .grid .group th,
+  .grid .diagnosed td {
+    grid-column: 1 / -1;
+  }
+
+  .grid .tag {
+    display: inline;
+    margin-right: 0.5rem;
+    color: var(--muted);
+  }
+}
+
+/* #9 §6: each Repo fact's source tag; assumed is italic with a dotted underline. */
+.source-tag {
+  color: var(--muted);
+  font-size: 0.75em;
+  text-transform: uppercase;
+}
+
+.source-tag.assumed {
+  font-style: italic;
+  text-decoration: underline dotted;
+}
+
+input.assumed,
+select.assumed {
+  border-bottom: 2px dotted var(--muted);
+  font-style: italic;
+}
+
+.assumed-cause {
+  color: var(--muted);
+}
