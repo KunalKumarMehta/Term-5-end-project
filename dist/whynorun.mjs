@@ -14860,7 +14860,7 @@ function validate11(data, { instancePath = "", parentData, parentDataProperty, r
   validate11.errors = vErrors;
   return errors === 0;
 }
-var schema23 = { "title": "FollowUpEvent", "description": "A second Event that arrives while the first Event's run (A) is still in progress or pending.", "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/definitions/name" }, "type": { "$ref": "#/definitions/type" }, "actor": { "$ref": "#/definitions/actor" }, "approval": { "$ref": "#/definitions/approval" }, "ref": { "$ref": "#/definitions/ref" }, "base": { "$ref": "#/definitions/base" }, "changed": { "$ref": "#/definitions/changed" }, "message": { "$ref": "#/definitions/message" }, "payload": { "$ref": "#/definitions/payload" }, "login": { "$ref": "#/definitions/login" }, "runA": { "description": "Run A's state when this Event arrives.", "enum": ["in-progress", "pending"] }, "pendingRuns": { "description": "How many runs already wait in a queue: max group.", "type": "integer", "minimum": 0 } } };
+var schema23 = { "title": "FollowUpEvent", "description": "A second Event that arrives while the first Event's run (A) is still in progress or pending.", "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/definitions/name" }, "type": { "$ref": "#/definitions/type" }, "actor": { "$ref": "#/definitions/actor" }, "approval": { "$ref": "#/definitions/approval" }, "ref": { "$ref": "#/definitions/ref" }, "base": { "$ref": "#/definitions/base" }, "changed": { "$ref": "#/definitions/changed" }, "message": { "$ref": "#/definitions/message" }, "payload": { "$ref": "#/definitions/payload" }, "login": { "$ref": "#/definitions/login" }, "runA": { "description": "Run A's state when this Event arrives.", "enum": ["in-progress", "pending"] }, "pendingRuns": { "description": "How many runs already wait in a queue: max group.", "type": "integer", "minimum": 0, "maximum": 100 } } };
 function validate13(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -15058,8 +15058,8 @@ function validate13(data, { instancePath = "", parentData, parentDataProperty, r
         errors++;
       }
       if (typeof data12 == "number" && isFinite(data12)) {
-        if (data12 < 0 || isNaN(data12)) {
-          const err17 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+        if (data12 > 100 || isNaN(data12)) {
+          const err17 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/maximum", keyword: "maximum", params: { comparison: "<=", limit: 100 }, message: "must be <= 100" };
           if (vErrors === null) {
             vErrors = [err17];
           } else {
@@ -15067,14 +15067,23 @@ function validate13(data, { instancePath = "", parentData, parentDataProperty, r
           }
           errors++;
         }
+        if (data12 < 0 || isNaN(data12)) {
+          const err18 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+          if (vErrors === null) {
+            vErrors = [err18];
+          } else {
+            vErrors.push(err18);
+          }
+          errors++;
+        }
       }
     }
   } else {
-    const err18 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    const err19 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
     if (vErrors === null) {
-      vErrors = [err18];
+      vErrors = [err19];
     } else {
-      vErrors.push(err18);
+      vErrors.push(err19);
     }
     errors++;
   }
@@ -17002,26 +17011,28 @@ function concurrencyVerdicts(all) {
   return sides.map(verdict);
 }
 var each = (known) => known === void 0 ? [true, false] : [known];
-function survivors(prefix, file, jobs, scenario) {
+function survivors(trees, jobs, scenario) {
   const contexts = {
     github: githubContext(scenario),
     vars: { ...scenario.repo.vars },
     inputs: {},
     needs: {}
   };
-  return file.jobs.flatMap((job) => {
-    const key = `${prefix}${job.id.value}`;
-    if (jobs.find((v) => v.key === key)?.value !== "runs") return [];
-    try {
-      return evaluateCondition(job.if?.expression ?? "success()", contexts, {
-        success: false,
-        failure: false,
-        cancelled: true
-      }) ? [key] : [];
-    } catch {
-      return [];
-    }
-  });
+  return trees.flatMap(
+    ({ prefix, file }) => file.jobs.flatMap((job) => {
+      const key = `${prefix}${job.id.value}`;
+      if (jobs.find((v) => v.key === key)?.value !== "runs") return [];
+      try {
+        return evaluateCondition(job.if?.expression ?? "success()", contexts, {
+          success: false,
+          failure: false,
+          cancelled: true
+        }) ? [key] : [];
+      } catch {
+        return [];
+      }
+    })
+  );
 }
 function side(d, run, label) {
   const { declared, workflow } = d;
@@ -17085,6 +17096,7 @@ function side(d, run, label) {
     declared.group.span,
     () => evaluateTemplate(declared.group.text, contexts, resolve4)
   );
+  const groupEmpty = empty;
   const given = label === "B" || d.callee !== void 0 ? declared.cancel : void 0;
   const cancel = typeof given?.value === "string" ? read(
     given.span,
@@ -17093,10 +17105,13 @@ function side(d, run, label) {
   const possible = verdict.possible ?? [];
   const approval = verdict.causes[0]?.rule === "FK-4";
   const created = approval ? true : verdict.value !== "uncertain" ? CREATED.has(verdict.value) : possible.length > 0 && possible.every((p) => CREATED.has(p)) ? true : possible.length > 0 && !possible.some((p) => CREATED.has(p)) ? false : void 0;
-  const doubt = approval ? verdict.causes : d.matrix || readsMatrix ? [
+  const doubt = approval ? verdict.causes : readsMatrix ? [
     { rule: "CC-5", spans: [declared.group.span], inputs: [] },
     { rule: "CC-6", spans: [], inputs: [] }
-  ] : void 0;
+  ] : d.matrix ? (
+    // A constant group on a matrix job: one Event's legs share it (CC-6).
+    [{ rule: "CC-6", spans: [], inputs: [] }]
+  ) : void 0;
   return {
     d,
     run,
@@ -17108,7 +17123,7 @@ function side(d, run, label) {
     queue: declared.queue?.value === "max" ? "max" : "single",
     // The matrix is no value the Scenario lacks: its legs aren't expanded.
     needed: needed.filter((n) => !/^(matrix|strategy)\./i.test(n.path)),
-    empty,
+    empty: groupEmpty,
     ...doubt && { doubt }
   };
 }
@@ -17820,6 +17835,15 @@ function unsupported(scenario, on) {
     causes: [{ rule: "WN-3", spans: [], inputs }]
   };
 }
+var onFollowUp = (v) => ({
+  ...v,
+  causes: v.causes.map((c) => ({
+    ...c,
+    inputs: c.inputs.map(
+      (i) => i.path.startsWith("event.") ? { ...i, path: `followUp.${i.path.slice("event.".length)}` } : i
+    )
+  }))
+});
 function evaluate2(parsed, scenario) {
   const { event, repo } = scenario;
   const files = new Map(parsed.map((p) => [p.key, p]));
@@ -17971,11 +17995,21 @@ function evaluate2(parsed, scenario) {
           workflow: file.name ?? `.github/workflows/${key}`,
           inputs: "inputs" in d ? d.inputs : void 0,
           matrix: "matrix" in d && d.matrix === true,
-          survivors: d.subject === key ? survivors(`${key} \u203A `, file, jobs, scenario) : [],
+          survivors: d.subject === key ? survivors(
+            [
+              { prefix: `${key} \u203A `, file },
+              ...callees.map(({ job, callee }) => ({
+                prefix: `${key} \u203A ${job.id.value}/`,
+                file: callee
+              }))
+            ],
+            jobs,
+            scenario
+          ) : [],
           a: { scenario, verdict: of(workflow, jobs) },
           b: followed && {
             scenario: followed,
-            verdict: outsideB ? { key: subject, ...outsideB } : of(workflowB, jobsB)
+            verdict: outsideB ? { key: subject, ...outsideB } : onFollowUp(of(workflowB, jobsB))
           }
         });
       }
