@@ -6,7 +6,12 @@ import {
   unreadable,
   type Producer,
 } from "./checks";
-import { concurrencyVerdicts, isConcurrency, type Run } from "./concurrency";
+import {
+  concurrencyVerdicts,
+  isConcurrency,
+  queueDiagnostics,
+  type Run,
+} from "./concurrency";
 import { jobVerdicts } from "./jobs";
 import { namesOf } from "./names";
 import {
@@ -160,7 +165,11 @@ export function simulate(
   const present = new Set(parsed.map((p) => p.key));
   for (const p of parsed)
     if (p.diagnostics.length === 0)
-      p.diagnostics = [...filterDiagnostics(p), ...callDiagnostics(p, present)];
+      p.diagnostics = [
+        ...filterDiagnostics(p),
+        ...queueDiagnostics(p),
+        ...callDiagnostics(p, present),
+      ];
   // RU-4: a caller of a callee with its own Diagnostics, one level only (#12 addendum A).
   const broken = new Set(
     parsed.filter((p) => p.diagnostics.length > 0).map((p) => p.key),

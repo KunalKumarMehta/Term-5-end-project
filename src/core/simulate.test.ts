@@ -3938,6 +3938,43 @@ test("a Follow-up event outside v1 makes run B unsupported (WN-3), and run A run
   ]);
 });
 
+// Concurrency (#77): queue: max, survivors, cross-file groups and what stays Uncertain.
+const deployOn = (concurrency: string, on = "push") =>
+  `on: ${on}\nconcurrency:\n${concurrency}jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n`;
+
+test("queue: max with cancel-in-progress: true is a CC-3 Diagnostic on the queue: line, quoting GitHub's error; the parser doesn't flag it, and the file gets no Verdicts", () => {
+  const { verdicts, diagnostics } = simulate(
+    [
+      wf(
+        "deploy.yml",
+        deployOn("  group: deploy\n  cancel-in-progress: true\n  queue: max\n"),
+      ),
+      wf(
+        "jobs.yml",
+        "on: push\njobs:\n  ship:\n    concurrency:\n      group: ship\n      queue: max\n      cancel-in-progress: true\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n",
+      ),
+    ],
+    { event: mainPush, followUp: mainPush, repo: { date } },
+  );
+  expect(verdicts).toEqual([]);
+  const message =
+    "The combination of `queue: max` and `cancel-in-progress: true` is not allowed and will result in a workflow validation error.";
+  expect(diagnostics).toEqual([
+    expect.objectContaining({
+      rule: "CC-3",
+      path: ".github/workflows/deploy.yml",
+      line: 5,
+      message,
+    }),
+    expect.objectContaining({
+      rule: "CC-3",
+      path: ".github/workflows/jobs.yml",
+      line: 6,
+      message,
+    }),
+  ]);
+});
+
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {
     expect(rule.text).not.toBe("");

@@ -97,6 +97,8 @@ export interface Concurrency {
   group: { text: string; span: Span };
   /** `cancel-in-progress` as written: a boolean, or a `${{ }}` string. */
   cancel?: { value: unknown; span: Span };
+  /** `queue` as written: `single` (the default) or `max` (CC-3). */
+  queue?: { value: unknown; span: Span };
 }
 
 /** A `permissions:` block as written: the parser drops it, so it's read from the YAML (PERM-11). */
@@ -345,12 +347,14 @@ function indexOn(
       ? { value: value.value, span: via ?? span(value) }
       : at("group");
     const cancel = at("cancel-in-progress");
+    const queue = at("queue");
     return {
       group: {
         text: String(group?.value ?? ""),
         span: group?.span ?? via ?? span(pair.key as Node),
       },
       ...(cancel && { cancel }),
+      ...(queue && { queue }),
     };
   };
 

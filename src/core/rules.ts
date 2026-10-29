@@ -472,6 +472,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "CC-3",
+    text: "`queue: max` lets up to 100 jobs or runs wait `pending` in a concurrency group, in the order each started waiting; once the queue is full, any more are cancelled. `queue: max` with `cancel-in-progress: true` is a workflow validation error.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs",
+    confidence: "High",
+  },
+  {
     id: "CC-4",
     text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",

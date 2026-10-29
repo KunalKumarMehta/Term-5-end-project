@@ -6,6 +6,8 @@ import { githubContext, readGithub } from "./jobs";
 import {
   RuntimeValueNeeded,
   evaluateTemplate,
+  type Diagnostic,
+  type ParsedWorkflow,
   evaluateValue,
   type Concurrency,
   type Resolve,
@@ -16,6 +18,28 @@ import { FROM_EVENT, settleable, type Scenario } from "./scenario";
 /** Whether a Verdict key is a run of a concurrency pair. */
 export const isConcurrency = (key: string): boolean =>
   / › concurrency\.[AB]$/.test(key);
+
+/**
+ * `queue: max` with `cancel-in-progress: true`, which GitHub rejects and the parser doesn't
+ * flag (CC-3, #2): a Diagnostic on the `queue:` line in GitHub's own words.
+ */
+export function queueDiagnostics(parsed: ParsedWorkflow): Diagnostic[] {
+  return [
+    parsed.concurrency,
+    ...[...parsed.jobSpans.values()].map((j) => j.concurrency),
+  ].flatMap((c) =>
+    c?.queue?.value === "max" && c.cancel?.value === true
+      ? [
+          {
+            ...c.queue.span,
+            rule: "CC-3",
+            message:
+              "The combination of `queue: max` and `cancel-in-progress: true` is not allowed and will result in a workflow validation error.",
+          },
+        ]
+      : [],
+  );
+}
 
 /** One run of the pair: its Scenario, with the run or job Verdict that creates its item. */
 export interface Run {
