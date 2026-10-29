@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { eventForm } from "./forms";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const explanation = (page: Page) =>
@@ -75,10 +76,7 @@ test("an Uncertain Verdict with an empty settle says nothing you can enter decid
     page,
     "on:\n  push:\n    branches: ['refs/heads/main']\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n",
   );
-  await page
-    .getByRole("group", { name: "Event", exact: true })
-    .getByLabel("Ref")
-    .fill("main");
+  await eventForm(page).getByLabel("Ref").fill("main");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   await listed(page, "ci.yml").click();
   await expect(settleIt(page)).toHaveText(
@@ -159,10 +157,7 @@ test("a typed event policy that isn't allowed is refused inline and leaves the S
     page,
     "on: pull_request_target\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n",
   );
-  await page
-    .getByRole("group", { name: "Event", exact: true })
-    .getByLabel("Event name")
-    .fill("pull_request_target");
+  await eventForm(page).getByLabel("Event name").fill("pull_request_target");
   await page.getByLabel("Created before 2026-09-17").selectOption("no");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   await listed(page, "ci.yml").click();

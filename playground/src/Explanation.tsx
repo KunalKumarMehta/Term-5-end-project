@@ -68,8 +68,28 @@ const FIELDS: Record<string, { id: string; label: string }> = {
   "event.message": { id: "event-message", label: "Head commit message" },
   "event.login": { id: "event-login", label: "Actor login" },
   "followUp.name": { id: "follow-up-name", label: "Follow-up event name" },
+  "followUp.type": { id: "follow-up-type", label: "Follow-up activity type" },
   "followUp.actor": { id: "follow-up-actor", label: "Follow-up actor kind" },
+  "followUp.approval": {
+    id: "follow-up-approval",
+    label: "Follow-up approval",
+  },
+  "followUp.ref": { id: "follow-up-ref", label: "Follow-up ref" },
+  "followUp.base": { id: "follow-up-base", label: "Follow-up base branch" },
+  "followUp.changed": {
+    id: "follow-up-changed",
+    label: "Follow-up changed files",
+  },
+  "followUp.message": {
+    id: "follow-up-message",
+    label: "Follow-up head commit message",
+  },
+  "followUp.login": { id: "follow-up-login", label: "Follow-up actor login" },
   "followUp.runA": { id: "follow-up-run-a", label: "Run A when B arrives" },
+  "followUp.pendingRuns": {
+    id: "follow-up-pending-runs",
+    label: "Runs already pending",
+  },
   "repo.date": { id: "sim-date", label: "Simulation date" },
   "repo.visibility": { id: "repo-visibility", label: "Visibility" },
   "repo.predates": { id: "repo-predates", label: "Created before 2026-09-17" },

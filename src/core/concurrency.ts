@@ -90,7 +90,7 @@ interface Side {
   empty: boolean;
   /** Whether the group reads `matrix` or `strategy`, so each leg has its own (CC-5). */
   readsMatrix: boolean;
-  /** Why GitHub's docs can't tell what this item does: approval (FK-4) or a matrix (CC-5). */
+  /** Why GitHub's docs can't tell what this item does: approval (FK-4) or a matrix (CC-5, CC-6). */
   doubt?: Cause[];
 }
 
@@ -417,8 +417,7 @@ const each = (known: boolean | undefined) =>
  * and one still true, such as `always()`, carries on (CC-9).
  */
 export function survivors(
-  prefix: string,
-  file: ParsedWorkflow,
+  trees: { prefix: string; file: ParsedWorkflow }[],
   jobs: Verdict[],
   scenario: Scenario,
 ): string[] {
@@ -428,23 +427,25 @@ export function survivors(
     inputs: {},
     needs: {},
   };
-  return file.jobs.flatMap((job) => {
-    const key = `${prefix}${job.id.value}`;
-    if (jobs.find((v) => v.key === key)?.value !== "runs") return [];
-    try {
-      // shortcut: an `if:` reading a value the Scenario lacks is left out; list it as
-      // uncertain if a Maintainer needs it.
-      return evaluateCondition(job.if?.expression ?? "success()", contexts, {
-        success: false,
-        failure: false,
-        cancelled: true,
-      })
-        ? [key]
-        : [];
-    } catch {
-      return [];
-    }
-  });
+  return trees.flatMap(({ prefix, file }) =>
+    file.jobs.flatMap((job) => {
+      const key = `${prefix}${job.id.value}`;
+      if (jobs.find((v) => v.key === key)?.value !== "runs") return [];
+      try {
+        // shortcut: an `if:` reading a value the Scenario lacks is left out; list it as
+        // uncertain if a Maintainer needs it.
+        return evaluateCondition(job.if?.expression ?? "success()", contexts, {
+          success: false,
+          failure: false,
+          cancelled: true,
+        })
+          ? [key]
+          : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
 }
 
 /** Evaluates the group and `cancel-in-progress` against one run's Event (CC-5). */
@@ -521,6 +522,8 @@ function side(d: Declaration, run: Run, label: "A" | "B"): Side {
   const group = read(declared.group.span, () =>
     evaluateTemplate(declared.group.text, contexts, resolve),
   );
+  // CC-5 is the group's: cancel-in-progress reading an empty property doesn't count.
+  const groupEmpty = empty;
   // The arriving run's setting decides whether it cancels (CC-2, CC-12); a callee's also
   // whether it cancels its own caller (CC-7).
   const given =
@@ -548,12 +551,15 @@ function side(d: Declaration, run: Run, label: "A" | "B"): Side {
           : undefined;
   const doubt: Cause[] | undefined = approval
     ? verdict.causes
-    : d.matrix || readsMatrix
+    : readsMatrix
       ? [
           { rule: "CC-5", spans: [declared.group.span], inputs: [] },
           { rule: "CC-6", spans: [], inputs: [] },
         ]
-      : undefined;
+      : d.matrix
+        ? // A constant group on a matrix job: one Event's legs share it (CC-6).
+          [{ rule: "CC-6", spans: [], inputs: [] }]
+        : undefined;
   return {
     d,
     run,
@@ -565,7 +571,7 @@ function side(d: Declaration, run: Run, label: "A" | "B"): Side {
     queue: declared.queue?.value === "max" ? "max" : "single",
     // The matrix is no value the Scenario lacks: its legs aren't expanded.
     needed: needed.filter((n) => !/^(matrix|strategy)\./i.test(n.path)),
-    empty,
+    empty: groupEmpty,
     ...(doubt && { doubt }),
   };
 }

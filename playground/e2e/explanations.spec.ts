@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { eventForm } from "./forms";
 
 const CI = `on: push
 jobs:
@@ -61,11 +62,7 @@ test("clicking a Verdict opens its cause chain with the root marked, the rule's 
   await expect(causes.first().locator("mark")).toHaveText("on: push");
 
   await causes.first().getByRole("link", { name: "Event name = push" }).click();
-  await expect(
-    page
-      .getByRole("group", { name: "Event", exact: true })
-      .getByLabel("Event name"),
-  ).toBeFocused();
+  await expect(eventForm(page).getByLabel("Event name")).toBeFocused();
 
   await panel.getByRole("button", { name: "Close" }).click();
   await expect(panel).toHaveCount(0);

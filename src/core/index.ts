@@ -326,6 +326,19 @@ function unsupported(
   };
 }
 
+/** Run B was simulated with the Follow-up event as its `event`: its inputs are `followUp.*` (#9 §7). */
+const onFollowUp = (v: Verdict): Verdict => ({
+  ...v,
+  causes: v.causes.map((c) => ({
+    ...c,
+    inputs: c.inputs.map((i) =>
+      i.path.startsWith("event.")
+        ? { ...i, path: `followUp.${i.path.slice("event.".length)}` }
+        : i,
+    ),
+  })),
+});
+
 type Parsed = ReturnType<typeof parseWorkflowFile> & {
   key: string;
   bytes: number;
@@ -517,14 +530,24 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
           matrix: "matrix" in d && d.matrix === true,
           survivors:
             d.subject === key
-              ? survivors(`${key} › `, file, jobs, scenario)
+              ? survivors(
+                  [
+                    { prefix: `${key} › `, file },
+                    ...callees.map(({ job, callee }) => ({
+                      prefix: `${key} › ${job.id.value}/`,
+                      file: callee,
+                    })),
+                  ],
+                  jobs,
+                  scenario,
+                )
               : [],
           a: { scenario, verdict: of(workflow, jobs) },
           b: followed && {
             scenario: followed,
             verdict: outsideB
               ? { key: subject, ...outsideB }
-              : of(workflowB as Verdict, jobsB),
+              : onFollowUp(of(workflowB as Verdict, jobsB)),
           },
         });
       }
