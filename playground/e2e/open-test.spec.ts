@@ -340,3 +340,106 @@ tests:
     "It drops your changes to the pins from one.test.yml.",
   );
 });
+
+const acceptAll = (page: Page) =>
+  results(page).getByRole("button", { name: "Accept all changes" });
+const blockedBy = (page: Page) => results(page).locator(".blocked-by");
+
+test("with the demo's fork-pr.test.yml open, after editing ci.yml so A isn't cancelled, Accept all rewrites the pins", async ({
+  page,
+}) => {
+  const text = await saveDemo(page);
+  await page.goto("./");
+  await loadExample(page);
+  await openTest(page, "fork-pr.test.yml", text);
+  await expect(marks(page)).toHaveText(Array(4).fill("✓ matches its pin"));
+  // Nothing to accept yet.
+  await expect(acceptAll(page)).toBeDisabled();
+
+  await pasteCi(
+    page,
+    ci.replace("cancel-in-progress: true", "cancel-in-progress: false"),
+  );
+  await expect(trayStatus(page)).toHaveText("2 would fail");
+  await expect(blockedBy(page)).toHaveCount(0);
+  await acceptAll(page).click();
+  await expect(toast(page)).toHaveText("Accepted 2 changed pins");
+  await expect(marks(page)).toHaveText(Array(4).fill("✓ matches its pin"));
+  await expect(trayStatus(page)).toHaveText("0 would fail");
+  await expect(acceptAll(page)).toBeDisabled();
+
+  const before = yaml(text).tests[0]!.pins;
+  const after = yaml((await save(page)).text).tests[0]!.pins;
+  expect(after["ci.yml › concurrency.A"]).toEqual({
+    ...before["ci.yml › concurrency.A"],
+    value: "runs",
+    root: "CC-1",
+  });
+  expect(after["check › build"]).toEqual(before["check › build"]);
+  expect(Object.keys(after)).toEqual(Object.keys(before));
+
+  // Accepted pins have changed, so opening the file again asks first (#14 §10).
+  await openTest(page, "fork-pr.test.yml", text);
+  await expect(confirm(page)).toContainText(
+    "It drops your changes to the pins from fork-pr.test.yml.",
+  );
+});
+
+test("with a pinned subject not found, Accept all is disabled and lists Blocked by: …, each one jumping to its cause", async ({
+  page,
+}) => {
+  const renamed = `version: 1
+tests:
+  - label: Fork PR
+    scenario:
+      event: ${FORK}
+      repo: { date: 2026-12-03 }
+      assume: { "ci.yml › test": fails }
+    pins:
+      ci.yml › build: { value: skipped }
+      ci.yml › test: { value: fails }
+`;
+  await page.goto("./");
+  await loadExample(page);
+  await openTest(page, "renamed.test.yml", renamed);
+  await expect(trayStatus(page)).toHaveText("1 would fail");
+  await expect(acceptAll(page)).toBeEnabled();
+
+  await pasteCi(page, ci.replace("\n  test:\n", "\n  unit:\n"));
+  await header(page).getByRole("button", { name: "Paste" }).click();
+  const paste = page.getByRole("dialog", { name: "Paste a GitHub workflow" });
+  await paste.getByLabel("Path").fill(".github/workflows/broken.yml");
+  await paste
+    .getByLabel("YAML")
+    .fill(
+      "on:\n  push:\n    branchez: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    );
+  await paste.getByRole("button", { name: "Add file" }).click();
+
+  await expect(acceptAll(page)).toBeDisabled();
+  await expect(blockedBy(page)).toHaveText(
+    "Blocked by: 1 pin not found, 1 Assumption not found, broken.yml has Diagnostics",
+  );
+  await blockedBy(page)
+    .getByRole("button", { name: "1 pin not found" })
+    .click();
+  await expect(
+    opened(page)
+      .getByRole("listitem")
+      .filter({ hasText: "ci.yml › test pin not found" }),
+  ).toBeFocused();
+  await blockedBy(page)
+    .getByRole("button", { name: "1 Assumption not found" })
+    .click();
+  await expect(
+    page
+      .getByRole("group", { name: "Assumptions" })
+      .getByText("assumed subject not found"),
+  ).toBeFocused();
+  await blockedBy(page)
+    .getByRole("button", { name: "broken.yml has Diagnostics" })
+    .click();
+  await expect(
+    page.getByRole("tab", { name: /^broken\.yml/, selected: true }),
+  ).toBeVisible();
+});

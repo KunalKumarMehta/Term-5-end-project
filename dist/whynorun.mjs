@@ -53,9 +53,9 @@ var require_identity = __commonJS({
     var NODE_TYPE = /* @__PURE__ */ Symbol.for("yaml.node.type");
     var isAlias3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
     var isDocument2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
-    var isMap4 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
+    var isMap5 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar5 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR2;
+    var isScalar6 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR2;
     var isSeq3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection2(node) {
       if (node && typeof node === "object")
@@ -77,7 +77,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar5(node) || isCollection2(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar6(node) || isCollection2(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -89,10 +89,10 @@ var require_identity = __commonJS({
     exports.isAlias = isAlias3;
     exports.isCollection = isCollection2;
     exports.isDocument = isDocument2;
-    exports.isMap = isMap4;
+    exports.isMap = isMap5;
     exports.isNode = isNode;
     exports.isPair = isPair2;
-    exports.isScalar = isScalar5;
+    exports.isScalar = isScalar6;
     exports.isSeq = isSeq3;
   }
 });
@@ -3415,7 +3415,7 @@ var require_Document = __commonJS({
     var applyReviver = require_applyReviver();
     var createNode = require_createNode();
     var directives = require_directives();
-    var Document = class _Document {
+    var Document2 = class _Document {
       constructor(value, replacer2, options) {
         this.commentBefore = null;
         this.comment = null;
@@ -3705,7 +3705,7 @@ var require_Document = __commonJS({
         return true;
       throw new Error("Expected a YAML collection as document contents");
     }
-    exports.Document = Document;
+    exports.Document = Document2;
   }
 });
 
@@ -4201,9 +4201,9 @@ var require_resolve_flow_collection = __commonJS({
     var blockMsg = "Block collections are not allowed within flow collections";
     var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
     function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onError, tag) {
-      const isMap4 = fc.start.source === "{";
-      const fcName = isMap4 ? "flow map" : "flow sequence";
-      const NodeClass = tag?.nodeClass ?? (isMap4 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
+      const isMap5 = fc.start.source === "{";
+      const fcName = isMap5 ? "flow map" : "flow sequence";
+      const NodeClass = tag?.nodeClass ?? (isMap5 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
       const coll = new NodeClass(ctx.schema);
       coll.flow = true;
       const atRoot = ctx.atRoot;
@@ -4239,7 +4239,7 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap4 && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap5 && ctx.options.strict && utilContainsNewline.containsNewline(key))
             onError(
               key,
               // checked by containsNewline()
@@ -4279,7 +4279,7 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap4 && !sep && !props.found) {
+        if (!isMap5 && !sep && !props.found) {
           const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
@@ -4302,7 +4302,7 @@ var require_resolve_flow_collection = __commonJS({
             startOnNewline: false
           });
           if (valueProps.found) {
-            if (!isMap4 && !props.found && ctx.options.strict) {
+            if (!isMap5 && !props.found && ctx.options.strict) {
               if (sep)
                 for (const st of sep) {
                   if (st === valueProps.found)
@@ -4334,7 +4334,7 @@ var require_resolve_flow_collection = __commonJS({
           const pair = new Pair.Pair(keyNode, valueNode);
           if (ctx.options.keepSourceTokens)
             pair.srcToken = collItem;
-          if (isMap4) {
+          if (isMap5) {
             const map = coll;
             if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
               onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4350,7 +4350,7 @@ var require_resolve_flow_collection = __commonJS({
           offset = valueNode ? valueNode.range[2] : valueProps.end;
         }
       }
-      const expectedEnd = isMap4 ? "}" : "]";
+      const expectedEnd = isMap5 ? "}" : "]";
       const [ce, ...ee] = fc.end;
       let cePos = offset;
       if (ce?.source === expectedEnd)
@@ -5070,13 +5070,13 @@ var require_compose_node = __commonJS({
 var require_compose_doc = __commonJS({
   "node_modules/yaml/dist/compose/compose-doc.js"(exports) {
     "use strict";
-    var Document = require_Document();
+    var Document2 = require_Document();
     var composeNode = require_compose_node();
     var resolveEnd = require_resolve_end();
     var resolveProps = require_resolve_props();
     function composeDoc(options, directives, { offset, start, value, end }, onError) {
       const opts = Object.assign({ _directives: directives }, options);
-      const doc = new Document.Document(void 0, opts);
+      const doc = new Document2.Document(void 0, opts);
       const ctx = {
         atKey: false,
         atRoot: true,
@@ -5115,7 +5115,7 @@ var require_composer = __commonJS({
     "use strict";
     var node_process = __require("process");
     var directives = require_directives();
-    var Document = require_Document();
+    var Document2 = require_Document();
     var errors = require_errors();
     var identity = require_identity();
     var composeDoc = require_compose_doc();
@@ -5304,7 +5304,7 @@ ${end.comment}` : end.comment;
           this.doc = null;
         } else if (forceDoc) {
           const opts = Object.assign({ _directives: this.directives }, this.options);
-          const doc = new Document.Document(void 0, opts);
+          const doc = new Document2.Document(void 0, opts);
           if (this.atDirectives)
             this.onError(endOffset, "MISSING_CHAR", "Missing directives-end indicator line");
           doc.range = [0, endOffset, endOffset];
@@ -5637,7 +5637,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR2 = "";
     var isCollection2 = (token) => !!token && "items" in token;
-    var isScalar5 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar6 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -5721,7 +5721,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR2;
     exports.isCollection = isCollection2;
-    exports.isScalar = isScalar5;
+    exports.isScalar = isScalar6;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -7226,7 +7226,7 @@ var require_public_api = __commonJS({
   "node_modules/yaml/dist/public-api.js"(exports) {
     "use strict";
     var composer = require_composer();
-    var Document = require_Document();
+    var Document2 = require_Document();
     var errors = require_errors();
     var log = require_log();
     var identity = require_identity();
@@ -7309,7 +7309,7 @@ var require_public_api = __commonJS({
       }
       if (identity.isDocument(value) && !_replacer)
         return value.toString(options);
-      return new Document.Document(value, _replacer, options).toString(options);
+      return new Document2.Document(value, _replacer, options).toString(options);
     }
     exports.parse = parse;
     exports.parseAllDocuments = parseAllDocuments;
@@ -7323,7 +7323,7 @@ var require_dist = __commonJS({
   "node_modules/yaml/dist/index.js"(exports) {
     "use strict";
     var composer = require_composer();
-    var Document = require_Document();
+    var Document2 = require_Document();
     var Schema = require_Schema();
     var errors = require_errors();
     var Alias = require_Alias();
@@ -7339,7 +7339,7 @@ var require_dist = __commonJS({
     var publicApi = require_public_api();
     var visit = require_visit();
     exports.Composer = composer.Composer;
-    exports.Document = Document.Document;
+    exports.Document = Document2.Document;
     exports.Schema = Schema.Schema;
     exports.YAMLError = errors.YAMLError;
     exports.YAMLParseError = errors.YAMLParseError;
@@ -8450,7 +8450,8 @@ import {
   appendFileSync,
   globSync,
   readdirSync,
-  readFileSync
+  readFileSync,
+  writeFileSync
 } from "node:fs";
 import { join as join2, resolve as resolve3 } from "node:path";
 import { parseArgs } from "node:util";
@@ -18326,6 +18327,63 @@ function findingText(finding) {
       return `Scenario unsupported (root WN-3): ${finding.reason}`;
   }
 }
+var OPTIONAL = /* @__PURE__ */ new Set(["possible", "group", "continuing"]);
+function updatePin(pin, verdict) {
+  const was = pin.value;
+  const next = {};
+  for (const field of FIELDS) {
+    const now = current(verdict, field);
+    if (!Object.hasOwn(pin, field)) {
+      const applies = field === "possible" ? was !== void 0 && was !== "uncertain" && verdict.value === "uncertain" : was === "no-run" && verdict.value !== "no-run";
+      if (OPTIONAL.has(field) && applies && now !== void 0)
+        Object.assign(next, { [field]: now });
+    } else if (same(field, pin[field], now))
+      Object.assign(next, { [field]: pin[field] });
+    else if (now !== void 0 || !OPTIONAL.has(field))
+      Object.assign(next, { [field]: now ?? null });
+  }
+  return next;
+}
+var blocksUpdate = (finding) => finding.status !== "match" && finding.status !== "changed";
+function updatedPins(test, result) {
+  const verdicts = new Map(result.verdicts.map((v) => [v.key, v]));
+  return Object.fromEntries(
+    compareTest(test, result).flatMap(
+      (f) => f.status === "changed" ? [[f.key, updatePin(test.pins[f.key], verdicts.get(f.key))]] : []
+    )
+  );
+}
+function updateTestFile(text, file, results) {
+  const doc = (0, import_yaml3.parseDocument)(text, { version: "1.2", schema: "core" });
+  const edits = [];
+  file.tests.forEach((test, i) => {
+    for (const [key, pin] of Object.entries(updatedPins(test, results[i]))) {
+      const at = doc.getIn(["tests", i, "pins", key], true);
+      const [from, to] = at.range;
+      const node = (0, import_yaml3.isMap)(at) ? at.clone() : doc.createNode(pin);
+      if (!(0, import_yaml3.isMap)(at)) node.flow = true;
+      const was = test.pins[key];
+      for (const field of FIELDS) {
+        const now = pin[field];
+        if (!Object.hasOwn(pin, field)) node.delete(field);
+        else if (Object.hasOwn(was, field) && same(field, was[field], now)) {
+        } else {
+          const old = node.get(field, true);
+          if ((0, import_yaml3.isScalar)(old) && !Array.isArray(now)) old.value = now;
+          else node.set(field, doc.createNode(now));
+        }
+      }
+      node.comment = node.commentBefore = void 0;
+      const indent = from - (text.lastIndexOf("\n", from - 1) + 1);
+      const written = new import_yaml3.Document(node, { version: "1.2" }).toString({ lineWidth: 0 }).trimEnd().replaceAll("\n", `
+${" ".repeat(indent)}`);
+      const tail = /\s*$/.exec(text.slice(from, to))[0];
+      edits.push({ from, to, text: written + tail });
+    }
+  });
+  if (edits.length === 0) return void 0;
+  return edits.sort((a, b) => b.from - a.from).reduce((t, e) => t.slice(0, e.from) + e.text + t.slice(e.to), text);
+}
 
 // src/core/names.ts
 var isMatrix = (job) => job.strategy !== void 0 && (!isMapping(job.strategy) || job.strategy.find("matrix") !== void 0);
@@ -19341,7 +19399,7 @@ var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref
                      [--flow access|all]
        whynorun show --from <test file> [--scenario <label>] [--repo <dir>]
                      [--flow access|checks|concurrency|all]
-       whynorun test [--json] [patterns\u2026]
+       whynorun test [--json] [--update] [patterns\u2026]
        whynorun --version
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
@@ -19392,15 +19450,15 @@ function readTestFile(path) {
 }
 var byCodeUnit = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function runTests(args) {
-  let positionals, json;
+  let positionals, json, update;
   try {
     ({
       positionals,
-      values: { json }
+      values: { json, update }
     } = parseArgs({
       args,
       allowPositionals: true,
-      options: { json: { type: "boolean" } }
+      options: { json: { type: "boolean" }, update: { type: "boolean" } }
     }));
   } catch (err) {
     return misuse(err.message);
@@ -19448,7 +19506,28 @@ function runTests(args) {
     })
   );
   const failing = runs.filter((r) => r.failed.length > 0);
-  const code = diagnostics.length > 0 || failing.length > 0 ? 1 : 0;
+  let code = diagnostics.length > 0 || failing.length > 0 ? 1 : 0;
+  let updated;
+  if (update && code === 1 && diagnostics.length === 0 && !failing.some((r) => r.failed.some(blocksUpdate))) {
+    const writes = files.flatMap(({ path, file }) => {
+      const text = updateTestFile(
+        readFileSync(path, "utf8"),
+        file,
+        runs.filter((r) => r.path === path).map((r) => r.result)
+      );
+      return text === void 0 ? [] : [{ path, text }];
+    });
+    for (const { path, text } of writes)
+      try {
+        writeFileSync(path, text);
+      } catch (err) {
+        return unusable([
+          `${path}: can't write it (${err.code})`
+        ]);
+      }
+    updated = writes.map((w) => w.path);
+    code = 0;
+  }
   if (process.env.GITHUB_ACTIONS === "true" && code === 1) {
     for (const d of diagnostics) annotate(d.path, d.line, d.message);
     for (const r of failing)
@@ -19487,7 +19566,8 @@ function runTests(args) {
       `${r.path}: ${r.test.label}`,
       ...r.failed.map(findingText),
       ...r.note ? [`note: ${r.note}`] : []
-    ])
+    ]),
+    ...updated ? [updated.map((path) => `updated ${path}`)] : update && code === 1 ? [["whynorun: --update wrote nothing: fix what blocks it above first"]] : []
   ];
   process.stdout.write(
     [

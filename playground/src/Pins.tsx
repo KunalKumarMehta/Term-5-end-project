@@ -105,13 +105,23 @@ export function OpenedTest({
               );
             if (f.status === "Scenario unsupported")
               return (
-                <li key={`${t.label}:unsupported`} className="error">
+                <li
+                  key={`${t.label}:unsupported`}
+                  id={`unsupported:${t.label}`}
+                  tabIndex={-1}
+                  className="error"
+                >
                   {t.label}: Scenario unsupported (root WN-3): {f.reason}
                 </li>
               );
             if (f.status !== "pinned subject not found") return null;
             return (
-              <li key={`${t.label}:${f.key}`} className="error">
+              <li
+                key={`${t.label}:${f.key}`}
+                id={`not-found:${t.label}:${f.key}`}
+                tabIndex={-1}
+                className="error"
+              >
                 {t.label}: <code>{f.key}</code> pin not found
                 {f.candidates.length > 0 && <> · re-point to </>}
                 {f.candidates.map((c) => (
