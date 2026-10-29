@@ -1,8 +1,10 @@
 import {
+  chmodSync,
   copyFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -1250,4 +1252,23 @@ test("test --update exits 2 and writes nothing when any Test file is invalid", (
   });
   expect(run("test", "--update").code).toBe(2);
   expect(readFileSync(".github/whynorun/a.test.yml", "utf8")).toBe(changed);
+});
+
+test("test --update exits 2 and writes nothing when any Test file it would rewrite can't be written", () => {
+  const changed = forkPr("      ci.yml › build: { value: skipped }\n");
+  const files = {
+    ".github/whynorun/a.test.yml": changed,
+    ".github/whynorun/b.test.yml": changed,
+  };
+  testRepo(example(), files);
+  chmodSync(".github/whynorun/b.test.yml", 0o444);
+
+  const { code, stderr } = run("test", "--update");
+  expect(code).toBe(2);
+  expect(stderr).toContain(".github/whynorun/b.test.yml: can't write it");
+  for (const [path, text] of Object.entries(files))
+    expect(readFileSync(path, "utf8")).toBe(text);
+  expect(readdirSync(".github/whynorun").sort()).toEqual(
+    Object.keys(files).map((p) => p.split("/").pop()),
+  );
 });

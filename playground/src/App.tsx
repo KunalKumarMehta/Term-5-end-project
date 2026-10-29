@@ -67,7 +67,15 @@ import {
   type Imported,
   type ImportedFacts,
 } from "./importRepo";
-import { PENDING, decodeLink, encodeLink, isLink, type Opening } from "./link";
+import {
+  COULDNT,
+  MAX_LINK,
+  PENDING,
+  decodeLink,
+  encodeLink,
+  isLink,
+  type Opening,
+} from "./link";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { InvalidTestDialog, TestPicker } from "./OpenTest";
 import { PasteDialog } from "./PasteDialog";
@@ -80,7 +88,7 @@ import {
 } from "./Pins";
 import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
 import { ShareDialog } from "./Share";
-import { fromDropped, fromPicked, type Upload } from "./upload";
+import { download, fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
 
@@ -801,7 +809,7 @@ export function App() {
   };
 
   // #14 §8–9: the share popover's link, and a link's banner: bad, loading or failed.
-  const [share, setShare] = useState<{ url?: string }>();
+  const [share, setShare] = useState<{ url?: string; error?: string }>();
   const [linkNote, setLinkNote] = useState<{
     text: string;
     retry?: { opening: Opening; what: string };
@@ -810,11 +818,20 @@ export function App() {
 
   const copyLink = () => {
     setShare({});
-    void encodeLink(latest.current!, open).then((fragment) =>
-      setShare({
-        url: location.origin + location.pathname + location.search + fragment,
-      }),
-    );
+    void encodeLink(latest.current!, open).then(async (fragment) => {
+      const url =
+        location.origin + location.pathname + location.search + fragment;
+      // Past 65,000 the popover refuses it; otherwise, never a link its own checks refuse.
+      const back =
+        url.length > MAX_LINK ? undefined : await decodeLink(fragment);
+      setShare(
+        back && "error" in back
+          ? {
+              error: `Can't share this as a link: ${back.error.replace(COULDNT, "")}`,
+            }
+          : { url },
+      );
+    });
   };
 
   /** #14 §9 steps 4–6: cancels a running import, loads the link's set, and only then replaces. */
@@ -1726,12 +1743,14 @@ export function App() {
       node: `Accepted ${plural(changedPins, "changed pin")}`,
     });
   };
-  // The tray saves one Test file with an entry per Scenario that has a pinned Verdict.
+  // The tray saves one Test file with an entry per Scenario that has a pinned Verdict,
+  // leaving out any Scenario `whynorun test` would reject: unnamed, or with no date.
   const tests = scenarios.flatMap((s, i) => {
     const pinnedVerdicts = (runs[i] ?? []).filter((v) => pinned(i, v.key));
     const loaded = loadedPins(i);
     return (pinnedVerdicts.length === 0 && !Object.keys(loaded ?? {}).length) ||
-      unnamed(s)
+      unnamed(s) ||
+      s.repo.date === ""
       ? []
       : [
           {
@@ -1874,15 +1893,13 @@ export function App() {
               {unreadable.reason}{" "}
               <button
                 type="button"
-                onClick={() => {
-                  const a = document.createElement("a");
-                  a.href = URL.createObjectURL(
-                    new Blob([unreadable.raw], { type: "application/json" }),
-                  );
-                  a.download = "whynorun-draft.json";
-                  a.click();
-                  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-                }}
+                onClick={() =>
+                  download(
+                    "whynorun-draft.json",
+                    unreadable.raw,
+                    "application/json",
+                  )
+                }
               >
                 Download
               </button>{" "}
@@ -2413,6 +2430,11 @@ export function App() {
       {saving && (
         <SaveDialog
           tests={tests}
+          first={
+            unnamed(scenarios[0]!)
+              ? tests[0]!
+              : { label: labels[0]!, scenario: scenarios[0]! }
+          }
           opened={
             opened && {
               name: opened.name,
@@ -2436,6 +2458,7 @@ export function App() {
       {share && (
         <ShareDialog
           url={share.url}
+          error={share.error}
           reference={
             origin === "imported" && edited
               ? `${imported!.owner}/${imported!.repo}@${imported!.sha.slice(0, 7)}`

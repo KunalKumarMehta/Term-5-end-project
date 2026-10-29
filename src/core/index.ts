@@ -62,6 +62,7 @@ export {
   updatePin,
   updatedPins,
   updateTestFile,
+  withCandidates,
   writeTestFile,
   type Change,
   type Finding,

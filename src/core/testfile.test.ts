@@ -5,8 +5,10 @@ import {
   loadScenario,
   parseTestFile,
   simulate,
+  updatedPins,
   writeTestFile,
   type Scenario,
+  type Test,
 } from "./index";
 
 // The bundled example Workflow set behind Load example (#15 §2).
@@ -179,7 +181,7 @@ const uncancelled = example.map((f) =>
     : f,
 );
 
-test("re-saving a loaded pin keeps its own field list: a matching pin as written, a changed one under test --update's add and drop rule", () => {
+test("re-saving a loaded pin writes it as pinned, its own field list and values: only Accept all changes a pinned value (story 107)", () => {
   const opened = parseTestFile(
     "fork-pr.test.yml",
     writeTestFile([
@@ -211,9 +213,9 @@ test("re-saving a loaded pin keeps its own field list: a matching pin as written
 
   expect(resaved.tests[0]!.pins).toEqual({
     "check › build": { value: "passes", possible: null },
-    // value rewritten, the matching fields as written, root never re-added.
+    // A now runs, but Save doesn't accept it: the pin still says cancelled.
     "ci.yml › concurrency.A": {
-      value: "runs",
+      value: "cancelled",
       possible: null,
       group: "ci-feature",
       continuing: null,
@@ -221,12 +223,21 @@ test("re-saving a loaded pin keeps its own field list: a matching pin as written
   });
 });
 
-test("a loaded pin gains possible when it turns Uncertain and drops it when it's decided again, and one whose subject is gone is written as loaded", () => {
+// Accept all: a test's changed pins as test --update rewrites them, over the loaded ones.
+const accept = (scenario: Scenario, pins: Test["pins"]) => ({
+  ...pins,
+  ...updatedPins(
+    { label: "Fork PR", scenario, pins },
+    simulate(example, scenario),
+  ),
+});
+
+test("Accept all gives a loaded pin possible when it turns Uncertain and drops it when it's decided again; Save writes that, and a pin whose subject is gone as loaded", () => {
   const scenario: Scenario = { ...forkPr, assume: {} };
-  const loaded = {
+  const loaded = accept(scenario, {
     "ci.yml › e2e": { value: "runs" },
     "ci.yml › gone": { value: "runs", root: "WN-2" },
-  };
+  });
   const file = parseTestFile(
     "e2e.test.yml",
     writeTestFile([
@@ -254,7 +265,7 @@ test("a loaded pin gains possible when it turns Uncertain and drops it when it's
         label: "Fork PR",
         scenario: forkPr,
         pinned: pinned(forkPr, ["ci.yml › e2e"]),
-        loaded: file.tests[0]!.pins,
+        loaded: accept(forkPr, file.tests[0]!.pins),
       },
     ]),
   ).file!;
