@@ -140,7 +140,7 @@ export function toDraft(held: Held, saved: Date): Draft | undefined {
 }
 
 /** Back to what the playground holds. Restored Scenarios count as touched (#14 §3). */
-function fromDraft(draft: Draft, file?: TestFile): Held {
+export function fromDraft(draft: Draft, file?: TestFile): Held {
   const { files, origin, edited, originals } = draft.set;
   // The form keeps a missing date as an empty field (#12 §3, #14 §6.4).
   const scenarios = draft.scenarios.map(({ scenario: s }) =>
