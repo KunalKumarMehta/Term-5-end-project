@@ -1,12 +1,13 @@
-// Test files (#10, ADR 0002): parsing, validation and pin comparison, shared by the CLI and
-// the playground, so no Node APIs.
-import { LineCounter, parseDocument } from "yaml";
+// Test files (#10, ADR 0002): parsing, validation, pin comparison and writing, shared by the
+// CLI and the playground, so no Node APIs.
+import { LineCounter, parseDocument, stringify } from "yaml";
 import { isAccess } from "./access";
 import { isCheck } from "./checks";
 import { isConcurrency } from "./concurrency";
 import type { Pin, Test, TestFile } from "./generated/test-file";
 import validate from "./generated/validate-test-file";
 import type { SimulationResult, Verdict } from "./index";
+import { withDefaults, type Scenario } from "./scenario";
 
 export type { Pin, Test, TestFile } from "./generated/test-file";
 
@@ -276,4 +277,44 @@ export function findingText(finding: Finding): string {
     case "Scenario unsupported":
       return `Scenario unsupported (root WN-3): ${finding.reason}`;
   }
+}
+
+/** The editor schema line every Test file the playground writes starts with, from 1.0.0 (#14 §1). */
+export const SCHEMA_LINE =
+  "# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/whynorun@1/schemas/test-file.schema.json";
+
+/** A new pin: every field that applies, null where the Verdict has none (#10 §3). */
+function pinOf(verdict: Verdict): Pin {
+  const pin: Pin = {
+    value: verdict.value,
+    possible: verdict.possible ?? null,
+    root: verdict.causes[0]?.rule ?? null,
+  };
+  if (isConcurrency(verdict.key)) {
+    pin.group = verdict.group ?? null;
+    pin.continuing = verdict.continuing ?? null;
+  }
+  return pin;
+}
+
+/**
+ * Writes one Test file: `version: 1`, then one `{ label, scenario, pins }` entry per test,
+ * each Scenario with every default written out so a later release can't change it (#10 §1–3).
+ */
+export function writeTestFile(
+  tests: { label: string; scenario: Scenario; pinned: Verdict[] }[],
+): string {
+  const file: TestFile = {
+    version: 1,
+    tests: tests.map(({ label, scenario, pinned }) => ({
+      label,
+      // A plain copy: withDefaults keeps the Maintainer's maps null-prototype.
+      scenario: JSON.parse(
+        JSON.stringify(withDefaults(scenario).scenario),
+      ) as Scenario,
+      pins: Object.fromEntries(pinned.map((v) => [v.key, pinOf(v)])),
+    })),
+  };
+  // The YAML 1.2 core schema the loader reads with, so a string "true" stays quoted (#10 §1).
+  return `${SCHEMA_LINE}\n${stringify(file, { version: "1.2", schema: "core", lineWidth: 0 })}`;
 }

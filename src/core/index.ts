@@ -56,6 +56,7 @@ export {
   compareTest,
   findingText,
   parseTestFile,
+  writeTestFile,
   type Change,
   type Finding,
   type Pin,
