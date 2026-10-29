@@ -7,6 +7,8 @@ export interface Confirm {
   /** The button that goes ahead, such as "Load example". */
   action: string;
   run: () => void;
+  /** What Keep my draft does besides keeping it, such as forgetting a pending link. */
+  keep?: () => void;
 }
 
 interface Props {
