@@ -164,4 +164,63 @@ test("a Workflow set with no concurrency: says no run waits for or cancels anoth
   await expect(results(page)).toContainText(
     "No GitHub workflow or job here declares concurrency:, so no run waits for or cancels another.",
   );
+  await expect(results(page)).not.toContainText("Not checked");
+});
+
+const QUEUE_MAX =
+  "on: pull_request\nconcurrency:\n  group: ci\n  queue: max\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n";
+
+test("for a queue: max group, the Follow-up event's pending-run count moves run B between pending, its place likely, not certain (CC-6), and cancelled once the queue is full (CC-3)", async ({
+  page,
+}) => {
+  await paste(page, QUEUE_MAX);
+  await results(page).getByRole("tab", { name: "Concurrency" }).click();
+  const count = followUp(page).getByLabel("Runs already pending");
+  await expect(count).toHaveValue("0");
+  const b = row(page, "ci.yml › concurrency.B");
+  await expect(b).toContainText("pending");
+  await expect(b).toContainText("likely #1 in the queue, not certain (CC-6)");
+  await expect(row(page, "ci.yml › concurrency.A")).toContainText("runs");
+
+  await count.fill("100");
+  await expect(b).toContainText("cancelled");
+  await b.getByRole("button", { name: "cancelled" }).click();
+  await expect(causes(page)).toContainText("root CC-3");
+
+  await count.fill("99");
+  await expect(b).toContainText("pending");
+  await expect(b).toContainText("likely #100 in the queue");
+});
+
+test("run A's jobs that keep running after it is cancelled are listed as continuing (CC-9)", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on: pull_request\nconcurrency:\n  group: ci\n  cancel-in-progress: true\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n  report:\n    if: always()\n    runs-on: ubuntu-latest\n    steps:\n      - run: report\n",
+  );
+  await results(page).getByRole("tab", { name: "Concurrency" }).click();
+  const a = row(page, "ci.yml › concurrency.A");
+  await expect(a).toContainText("cancelled");
+  await expect(a.getByRole("list", { name: "continuing" })).toHaveText(
+    "ci.yml › report",
+  );
+  await expect(row(page, "ci.yml › concurrency.B")).toContainText(
+    "uncertain (pending, runs)",
+  );
+});
+
+test("with no concurrency: declared, the Concurrency tab says what it couldn't check: files with Diagnostics and remote reusable workflows (WN-6)", async ({
+  page,
+}) => {
+  await paste(
+    page,
+    "on: push\njobs:\n  a:\n    uses: octo/lib/.github/workflows/x.yml@v1\n",
+    "deploy.yml",
+  );
+  await paste(page, "on: push\njobs: [\n");
+  await results(page).getByRole("tab", { name: "Concurrency" }).click();
+  await expect(results(page)).toContainText(
+    "No GitHub workflow or job here declares concurrency:, so no run waits for or cancels another. Not checked: files with Diagnostics and remote reusable workflows (WN-6).",
+  );
 });

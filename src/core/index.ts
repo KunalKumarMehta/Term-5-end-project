@@ -6,9 +6,15 @@ import {
   unreadable,
   type Producer,
 } from "./checks";
-import { concurrencyVerdicts, isConcurrency, type Run } from "./concurrency";
+import {
+  concurrencyVerdicts,
+  isConcurrency,
+  queueDiagnostics,
+  survivors,
+  type Declaration,
+} from "./concurrency";
 import { jobVerdicts } from "./jobs";
-import { namesOf } from "./names";
+import { isMatrix, namesOf } from "./names";
 import {
   parseWorkflowFile,
   type Diagnostic,
@@ -81,6 +87,8 @@ export interface Verdict {
   group?: string;
   /** Only on a concurrency Verdict: its group as written. */
   groupSource?: string;
+  /** Only on a cancelled run A: the job keys that keep running (CC-9 survivors). */
+  continuing?: string[];
 }
 
 export interface SettleHint {
@@ -160,7 +168,11 @@ export function simulate(
   const present = new Set(parsed.map((p) => p.key));
   for (const p of parsed)
     if (p.diagnostics.length === 0)
-      p.diagnostics = [...filterDiagnostics(p), ...callDiagnostics(p, present)];
+      p.diagnostics = [
+        ...filterDiagnostics(p),
+        ...queueDiagnostics(p),
+        ...callDiagnostics(p, present),
+      ];
   // RU-4: a caller of a callee with its own Diagnostics, one level only (#12 addendum A).
   const broken = new Set(
     parsed.filter((p) => p.diagnostics.length > 0).map((p) => p.key),
@@ -325,6 +337,7 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts: Verdict[] = [];
   const producers: Producer[] = [];
+  const declarations: Declaration[] = [];
   // With the merge queue on, a pull request's merge group runs a synthesised merge_group
   // Event, sharing the main Event's entries (#6, #8 §5).
   const queue: Scenario | undefined =
@@ -384,9 +397,9 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
     const workflow = run(scenario);
     // The local callees, one level deep, each with the caller job that runs it (#6).
     const callees = calls(file).flatMap(({ job, path }) => {
-      const callee =
-        path === undefined ? undefined : files.get(calleeKey(path)!);
-      return callee ? [{ job, callee }] : [];
+      const at = path === undefined ? undefined : calleeKey(path)!;
+      const callee = at === undefined ? undefined : files.get(at);
+      return callee ? [{ job, callee, path: at! }] : [];
     });
     // The file's jobs, then each local callee's under the caller job that ran them.
     const jobsWithCallees = (workflow: Verdict, scenario: Scenario) => {
@@ -433,40 +446,87 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
       const w = run(queue, true);
       queued.push(...producing(queue, jobsWithCallees(w, queue), w));
     }
-    // Each `concurrency:` declared, at workflow or job level, gets its pair (#6).
+    // Each `concurrency:` declared, at workflow or job level, gets its pair (#6); a local
+    // callee's, under its caller job (`<file> › <callerJob>/ › `), sees the caller's run (CC-7).
     const declared = [
-      ...(file.concurrency ? [{ id: undefined, at: file.concurrency }] : []),
+      ...(file.concurrency
+        ? [{ subject: key, at: file.concurrency, file: key }]
+        : []),
       ...file.jobs.flatMap((j) => {
         const at = file.jobSpans.get(j.id.value)?.concurrency;
-        return at ? [{ id: j.id.value, at }] : [];
+        return at
+          ? [
+              {
+                subject: `${key} › ${j.id.value}`,
+                at,
+                file: key,
+                job: j.id.value,
+                matrix: isMatrix(j),
+              },
+            ]
+          : [];
+      }),
+      ...callees.flatMap(({ job, callee, path }) => {
+        const via = { file: path, callee: job.id.value };
+        const inputs = inputsOf(job, callee);
+        return [
+          ...(callee.concurrency
+            ? [
+                {
+                  ...via,
+                  subject: `${key} › ${job.id.value}/`,
+                  at: callee.concurrency,
+                  inputs,
+                },
+              ]
+            : []),
+          ...callee.jobs.flatMap((j) => {
+            const at = callee.jobSpans.get(j.id.value)?.concurrency;
+            return at
+              ? [
+                  {
+                    ...via,
+                    subject: `${key} › ${job.id.value}/${j.id.value}`,
+                    at,
+                    inputs,
+                    matrix: isMatrix(j),
+                  },
+                ]
+              : [];
+          }),
+        ];
       }),
     ];
     if (declared.length > 0) {
       const workflowB = followed && !outsideB && run(followed);
-      const jobsB = workflowB
-        ? jobVerdicts(`${key} › `, file, workflowB, followed!)
-        : [];
-      const name = file.name ?? `.github/workflows/${key}`;
-      for (const { id, at } of declared) {
-        const subject = id === undefined ? key : `${key} › ${id}`;
-        const of = (vs: Verdict[]) => vs.find((v) => v.key === subject)!;
-        const b: Run | undefined = followed && {
-          scenario: followed,
-          verdict: outsideB
-            ? { key: subject, ...outsideB }
-            : id === undefined
-              ? (workflowB as Verdict)
-              : of(jobsB),
-        };
-        verdicts.push(
-          ...concurrencyVerdicts(
-            `${subject} › `,
-            at,
-            name,
-            { scenario, verdict: id === undefined ? workflow : of(jobs) },
-            b,
-          ),
-        );
+      const jobsB = workflowB ? jobsWithCallees(workflowB, followed!) : [];
+      for (const d of declared) {
+        // A callee's own `concurrency:` belongs to the caller job that runs it.
+        const subject = d.subject.replace(/\/$/, "");
+        const of = (w: Verdict, vs: Verdict[]) =>
+          subject === key ? w : vs.find((v) => v.key === subject)!;
+        declarations.push({
+          prefix: `${d.subject} › `,
+          declared: d.at,
+          file: d.file,
+          tree: key,
+          job: "job" in d ? d.job : undefined,
+          callee: "callee" in d ? d.callee : undefined,
+          workflow: file.name ?? `.github/workflows/${key}`,
+          inputs: "inputs" in d ? d.inputs : undefined,
+          matrix: "matrix" in d && d.matrix === true,
+          survivors:
+            d.subject === key
+              ? survivors(`${key} › `, file, jobs, scenario)
+              : [],
+          a: { scenario, verdict: of(workflow, jobs) },
+          b: followed && {
+            scenario: followed,
+            verdict: outsideB
+              ? { key: subject, ...outsideB }
+              : of(workflowB as Verdict, jobsB),
+          },
+        });
       }
     }
     verdicts.push(
@@ -481,6 +541,7 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
       ),
     );
   }
+  verdicts.push(...concurrencyVerdicts(declarations));
   verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;
 }

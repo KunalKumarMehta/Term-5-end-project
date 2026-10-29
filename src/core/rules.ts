@@ -472,6 +472,12 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "CC-3",
+    text: "`queue: max` lets up to 100 jobs or runs wait `pending` in a concurrency group, in the order each started waiting; once the queue is full, any more are cancelled. `queue: max` with `cancel-in-progress: true` is a workflow validation error.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs",
+    confidence: "High",
+  },
+  {
     id: "CC-4",
     text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
@@ -484,10 +490,40 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "CC-6",
+    text: "Pending items in a concurrency group are ordered by when each started waiting, which isn't guaranteed because start times vary, so a queued run's place is likely, not certain, and which of two items one event starts in one group arrives first is undocumented.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High",
+  },
+  {
+    id: "CC-7",
+    text: "A called (reusable) workflow sees its caller's `github.workflow`, so the same group in the caller and the called workflow, with `cancel-in-progress: true`, cancels the workflow that's already running: the run cancels itself.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+    confidence: "High",
+  },
+  {
     id: "CC-8",
     text: "A check waiting at the front of the queue on a full concurrency group shows the status `pending`.",
     url: "https://docs.github.com/en/pull-requests/reference/status-checks#check-statuses-and-conclusions",
     confidence: "High",
+  },
+  {
+    id: "CC-9",
+    text: "To cancel a run, GitHub re-evaluates the `if:` of every running job: a job whose condition is still true, such as `if: always()`, keeps running. No `if:` is treated as `success()`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
+    confidence: "High",
+  },
+  {
+    id: "CC-11",
+    text: "Whether a cancelled run whose jobs keep running under CC-9 still holds its concurrency group isn't documented, so the run waiting on that group is uncertain.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
+    confidence: "Low",
+  },
+  {
+    id: "CC-12",
+    text: "Concurrency groups are shared across the repository regardless of the workflow, and the arriving item's `cancel-in-progress` decides whether the running item is cancelled. Items of one group with different `queue` modes are undocumented, so their outcome is uncertain.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "Med",
   },
   {
     id: "WN-1",
