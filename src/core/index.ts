@@ -55,6 +55,7 @@ export type * from "./scenario";
 export {
   compareTest,
   findingText,
+  loadScenario,
   parseTestFile,
   shown,
   updatePin,
