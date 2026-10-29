@@ -35,6 +35,15 @@ import {
 import { Access, isAccess } from "./Access";
 import { Concurrency } from "./Concurrency";
 import { ConfirmDialog, type Confirm } from "./ConfirmDialog";
+import {
+  KEY as DRAFT_KEY,
+  discardDraft,
+  readDraft,
+  toDraft,
+  when,
+  writeDraft,
+  type Held,
+} from "./draft";
 import { Editor, type Target } from "./Editor";
 import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
 import {
@@ -67,6 +76,10 @@ type Pane = "yaml" | "scenario" | "results";
 
 const INTERNAL_ERROR =
   "WhyNoRun hit an internal error on this input; these results are from before your last change";
+
+const NOT_SAVING = "Not saving a draft in this browser";
+const SAVED_OVER = "Another WhyNoRun tab saved over this draft";
+const CLEARED = "Another WhyNoRun tab cleared the saved draft";
 
 const statusRegion = document.getElementById("status")!;
 const toastRegion = document.getElementById("toasts")!;
@@ -156,8 +169,10 @@ function unset(scenario: Scenario, path: string[]): Scenario {
 }
 
 /** The Test file Open test loaded, and what it put in the Scenarios and tray (#12 §9). */
-interface Opened {
+export interface Opened {
   name: string;
+  /** The file as opened, which the draft keeps so its unopened tests stay verbatim (#14 §2). */
+  text: string;
   file: TestFile;
   /** The tests opened as Scenario tabs, by index in the file. */
   chosen: number[];
@@ -172,29 +187,36 @@ const failing = (f: Finding) =>
   f.status !== "match" && f.status !== "file has Diagnostics";
 
 export function App() {
-  const [files, setFiles] = useState<WorkflowFile[]>([]);
-  const [origin, setOrigin] = useState<
-    "example" | "pasted" | "uploaded" | "imported"
-  >();
+  // A readable draft restores on load, with no confirm: nothing in memory is replaced (#14 §4).
+  const [boot] = useState(readDraft);
+  const held = boot.held;
+  const [files, setFiles] = useState<WorkflowFile[]>(held?.files ?? []);
+  const [origin, setOrigin] = useState(held?.origin);
   // The import behind an imported set; a Repo fact holding its value shows ⤓ imported (#9 §6).
-  const [imported, setImported] = useState<Imported>();
+  const [imported, setImported] = useState(held?.imported);
   // Whether the import form is open, and the files when its import started (#12 §1).
   const [importing, setImporting] = useState(false);
   const importStart = useRef<readonly WorkflowFile[]>([]);
   // The files as the example, an upload or an import loaded them, to tell when they've been edited.
-  const [base, setBase] = useState<readonly WorkflowFile[]>();
+  const [base, setBase] = useState(held?.base);
   // The last upload's inline error, or its loaded · ignored summary (#12 §5).
   const [uploadNote, setUploadNote] = useState<ReactNode>();
   const [active, setActive] = useState<string>();
   // One Scenario, or two with Compare on (#9 §8).
-  const [scenarios, setScenarios] = useState<Scenario[]>([BLANK]);
-  const [labels, setLabels] = useState(["Scenario 1"]);
+  const [scenarios, setScenarios] = useState<Scenario[]>(
+    held?.scenarios ?? [BLANK],
+  );
+  const [labels, setLabels] = useState(held?.labels ?? ["Scenario 1"]);
   // Each Scenario's pinned subject keys, in the order pinned (#9 §3).
-  const [pins, setPins] = useState<string[][]>([[]]);
+  const [pins, setPins] = useState<string[][]>(held?.pins ?? [[]]);
   const [saving, setSaving] = useState(false);
-  const [opened, setOpened] = useState<Opened>();
+  const [opened, setOpened] = useState(held?.opened);
   // A Test file with more than two tests, waiting for the picker, or one that's invalid.
-  const [choosing, setChoosing] = useState<{ name: string; file: TestFile }>();
+  const [choosing, setChoosing] = useState<{
+    name: string;
+    text: string;
+    file: TestFile;
+  }>();
   const [invalidTest, setInvalidTest] = useState<{
     name: string;
     errors: string[];
@@ -210,7 +232,7 @@ export function App() {
     "all",
   );
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
-  const [touched, setTouched] = useState(false);
+  const [touched, setTouched] = useState(held?.touched ?? false);
   const [confirm, setConfirm] = useState<Confirm>();
   // The job picked in the Assumptions section, before Add.
   const [failPick, setFailPick] = useState("");
@@ -243,7 +265,8 @@ export function App() {
     failed: boolean;
     /** Set by a wholesale replacement, whose first run stays silent. */
     replaced?: boolean;
-  }>({ runs: [], counts: new Map(), failed: false });
+    // A restore is one too (#14 §12).
+  }>({ runs: [], counts: new Map(), failed: false, replaced: !!held });
 
   const announce = useCallback((message: string) => {
     setStatus((prev) => (message === "" || message === prev ? prev : message));
@@ -385,6 +408,131 @@ export function App() {
 
   const edited = base !== undefined && !sameFiles(files, base);
 
+  // #14 §4: the draft's save time, a failed store, another tab's notice and an unreadable draft.
+  const [saved, setSaved] = useState(boot.saved);
+  const [notSaving, setNotSaving] = useState(false);
+  const [tabNotice, setTabNotice] = useState<string>();
+  const [unreadable, setUnreadable] = useState(boot.unreadable);
+  const latest = useRef<Held>(undefined);
+  useLayoutEffect(() => {
+    latest.current = {
+      files,
+      origin,
+      imported,
+      base,
+      edited,
+      scenarios,
+      labels,
+      pins,
+      touched,
+      opened,
+    };
+  });
+  const autosave = useRef({
+    // Changes this tab hasn't written, and whether another tab's notice holds them back.
+    dirty: false,
+    paused: false,
+    timer: undefined as ReturnType<typeof setTimeout> | undefined,
+    failed: false,
+    // An unreadable draft under this version's key isn't overwritten until it's discarded.
+    blocked: boot.unreadable?.key === DRAFT_KEY,
+    watched: undefined as unknown[] | undefined,
+  });
+
+  const writeNow = useCallback(() => {
+    const a = autosave.current;
+    clearTimeout(a.timer);
+    const h = latest.current!;
+    // A Scenario whose Event name is being typed can't be read back, so it waits for the name.
+    if (a.blocked || h.scenarios.some(unnamed)) return;
+    const now = new Date();
+    const draft = toDraft(h, now);
+    a.dirty = false;
+    a.paused = false;
+    setTabNotice(undefined);
+    if (writeDraft(draft)) {
+      setNotSaving(false);
+      setSaved(draft && now);
+      return;
+    }
+    setNotSaving(true);
+    setSaved(undefined);
+    if (!a.failed) announce(NOT_SAVING);
+    a.failed = true;
+  }, [announce]);
+
+  // Each change marks this tab's work unwritten, and writes 500 ms after the last one.
+  useEffect(() => {
+    const a = autosave.current;
+    const now = [
+      files,
+      base,
+      imported,
+      scenarios,
+      labels,
+      pins,
+      touched,
+      opened,
+    ];
+    const was = a.watched;
+    a.watched = now;
+    if (!was || now.every((v, i) => Object.is(v, was[i]))) return;
+    a.dirty = true;
+    a.paused = false;
+    clearTimeout(a.timer);
+    a.timer = setTimeout(writeNow, 500);
+  }, [
+    files,
+    base,
+    imported,
+    scenarios,
+    labels,
+    pins,
+    touched,
+    opened,
+    writeNow,
+  ]);
+
+  useEffect(() => {
+    const flush = () => {
+      const a = autosave.current;
+      if (a.dirty && !a.paused) writeNow();
+    };
+    const hidden = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    // Only this key, or null for another page's clear() (#14 §4).
+    const storage = (e: StorageEvent) => {
+      if (e.storageArea !== localStorage) return;
+      if (e.key !== DRAFT_KEY && e.key !== null) return;
+      const a = autosave.current;
+      a.paused = true;
+      clearTimeout(a.timer);
+      const notice =
+        e.key === null || e.newValue === null ? CLEARED : SAVED_OVER;
+      setTabNotice(notice);
+      announce(notice);
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    window.addEventListener("storage", storage);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("storage", storage);
+    };
+  }, [writeNow, announce]);
+
+  // #14 §12: one announcement at load, once the first render has settled.
+  useEffect(() => {
+    const said = boot.saved
+      ? `Restored your draft, saved ${when(boot.saved)}`
+      : boot.unreadable?.reason;
+    if (!said) return;
+    const timer = setTimeout(() => announce(said), 0);
+    return () => clearTimeout(timer);
+  }, [boot, announce]);
+
   /** The confirm-first rule (#12 §1): asks only when something would be lost. */
   const ask = (next: Confirm) => {
     if (next.losses.length > 0) setConfirm(next);
@@ -455,6 +603,35 @@ export function App() {
       run: () => {
         replaceFiles(base!);
         setToast({ id: Date.now(), node: `Reset to ${origin} files` });
+      },
+    });
+
+  /** #14 §11: clears the set, the Scenarios, the tray and the opened Test file, and the draft. */
+  const startOver = () =>
+    ask({
+      title: "Start over?",
+      losses: [...setLosses(), ...openLosses()],
+      action: "Start over",
+      run: () => {
+        last.current.replaced = true;
+        setFiles([]);
+        setOrigin(undefined);
+        setImported(undefined);
+        setBase(undefined);
+        setUploadNote(undefined);
+        setActive(undefined);
+        setScenarios([BLANK]);
+        setLabels(["Scenario 1"]);
+        setPins([[]]);
+        setOpened(undefined);
+        setTouched(false);
+        setForm(0);
+        setLabelError(undefined);
+        setRepoDraft(undefined);
+        setOpen(undefined);
+        writeDraft(undefined);
+        setSaved(undefined);
+        setToast({ id: Date.now(), node: "Started over" });
       },
     });
 
@@ -542,7 +719,12 @@ export function App() {
   };
 
   /** Opens the chosen tests as the Scenario tabs, replacing the Scenarios and tray (#12 §9). */
-  const openTests = (name: string, file: TestFile, chosen: number[]) =>
+  const openTests = (
+    name: string,
+    text: string,
+    file: TestFile,
+    chosen: number[],
+  ) =>
     ask({
       title: `Open ${name}?`,
       losses: openLosses(),
@@ -559,6 +741,7 @@ export function App() {
         setPins(keys);
         setOpened({
           name,
+          text,
           file,
           chosen,
           scenarios: opening,
@@ -587,9 +770,10 @@ export function App() {
     const parsed = parseTestFile(name, text);
     if (parsed.errors) return setInvalidTest({ name, errors: parsed.errors });
     if (parsed.file.tests.length > 2)
-      return setChoosing({ name, file: parsed.file });
+      return setChoosing({ name, text, file: parsed.file });
     openTests(
       name,
+      text,
       parsed.file,
       parsed.file.tests.map((_, i) => i),
     );
@@ -1296,6 +1480,14 @@ export function App() {
               Reset
             </button>
           )}
+          {notSaving ? (
+            <span className="hint">{NOT_SAVING}</span>
+          ) : (
+            saved && <span className="hint">Draft · saved {when(saved)}</span>
+          )}
+          <button type="button" onClick={startOver}>
+            Start over
+          </button>
           <button type="button" onClick={() => setImporting(true)}>
             {origin === "imported" ? "Re-import" : "Import repo"}
           </button>
@@ -1339,6 +1531,43 @@ export function App() {
             }}
           />
           {uploadNote}
+          {tabNotice && (
+            <p className="banner">
+              {tabNotice}{" "}
+              <button type="button" onClick={writeNow}>
+                Save this tab&rsquo;s work
+              </button>
+            </p>
+          )}
+          {unreadable && (
+            <p className="banner">
+              {unreadable.reason}{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(
+                    new Blob([unreadable.raw], { type: "application/json" }),
+                  );
+                  a.download = "whynorun-draft.json";
+                  a.click();
+                  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+                }}
+              >
+                Download
+              </button>{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  discardDraft(unreadable.key);
+                  autosave.current.blocked = false;
+                  setUnreadable(undefined);
+                }}
+              >
+                Discard
+              </button>
+            </p>
+          )}
           {importing && (
             <ImportForm
               initial={
@@ -1860,8 +2089,11 @@ export function App() {
       )}
       {choosing && (
         <TestPicker
-          {...choosing}
-          onPick={(chosen) => openTests(choosing.name, choosing.file, chosen)}
+          name={choosing.name}
+          file={choosing.file}
+          onPick={(chosen) =>
+            openTests(choosing.name, choosing.text, choosing.file, chosen)
+          }
           onClose={() => setChoosing(undefined)}
         />
       )}
