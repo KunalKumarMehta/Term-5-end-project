@@ -3866,6 +3866,43 @@ test("a group reading a github.event value the Scenario lacks leaves run A uncer
   ]);
 });
 
+test("with no cancel-in-progress, run B is uncertain [pending, runs] on the group's github.event value: its own goes on the Follow-up event, then run A's on the main Event", () => {
+  const files = [
+    wf(
+      "ci.yml",
+      "on: pull_request\nconcurrency: pr-${{ github.event.pull_request.number }}\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n",
+    ),
+  ];
+  const pr = { name: "pull_request", ref: "feature", changed: ["a"] };
+  const scenario: Scenario = {
+    event: pr,
+    followUp: { ...pr, type: "synchronize" },
+    repo: { date },
+  };
+  const path = "github.event.pull_request.number";
+  const b = (s: Scenario) =>
+    simulate(files, s).verdicts.find(
+      (v) => v.key === "ci.yml › concurrency.B",
+    )!;
+  expect(b(scenario)).toMatchObject({
+    value: "uncertain",
+    possible: ["pending", "runs"],
+    settle: [path],
+    hints: [
+      { path, text: `\`${path}\` on the Follow-up event`, on: "followUp" },
+    ],
+  });
+  const half = settleValue(scenario, path, 7, "followUp");
+  expect(b(half)).toMatchObject({
+    value: "uncertain",
+    group: "pr-7",
+    settle: [path],
+    hints: [{ path, text: `\`${path}\` on the Event` }],
+  });
+  expect(b(half).hints![0]!.on).toBeUndefined();
+  expect(b(settleValue(half, path, 7)).value).toBe("pending");
+});
+
 test("a job-level concurrency: gets its own pair under the job key; github.run_id differs between run A and run B, so they never share a group", () => {
   const files = [
     wf(

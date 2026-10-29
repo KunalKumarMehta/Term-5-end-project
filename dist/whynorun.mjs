@@ -16823,20 +16823,25 @@ function concurrencyVerdicts(prefix, declared, workflow, a, b) {
         inputs: []
       }))
     ];
-    const own = (x, all) => [
+    const paths = (x) => [
       ...x.created === void 0 ? x.run.verdict.settle ?? [] : [],
       ...x.needed.map((n) => n.path).filter(settleable)
-    ].filter((p) => all || !/^(github\.)?event\./.test(p));
-    const settle = [
-      .../* @__PURE__ */ new Set([...own(s, true), ...other ? own(other, false) : []])
-    ];
-    const hints = settle.map(
-      (path) => [s, other].flatMap((x) => x?.run.verdict.hints ?? []).find((h) => h.path === path) ?? {
-        path,
-        text: path.startsWith("vars.") ? `repository variable \`${path.slice(5)}\`` : `\`${path}\` on the ${s.label === "B" ? "Follow-up event" : "Event"}`,
-        candidates: []
-      }
+    ].map((path) => ({ path, x }));
+    const listed = [...paths(s), ...other ? paths(other) : []].filter(
+      (p, i2, all) => all.findIndex((q) => q.path === p.path) === i2
     );
+    const settle = listed.map((p) => p.path);
+    const hints = listed.map(({ path, x }) => {
+      const followUp = x.label === "B" && /^(github\.)?event\./.test(path);
+      return {
+        ...x.run.verdict.hints?.find((h) => h.path === path) ?? {
+          path,
+          text: path.startsWith("vars.") ? `repository variable \`${path.slice(5)}\`` : `\`${path}\` on the ${followUp ? "Follow-up event" : "Event"}`,
+          candidates: []
+        },
+        ...followUp && { on: "followUp" }
+      };
+    });
     return {
       ...base,
       value: "uncertain",

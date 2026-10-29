@@ -153,27 +153,30 @@ export function concurrencyVerdicts(
         inputs: [],
       })),
     ];
-    // A path the other run's Event holds would be stored on this run's Event: leave it out.
-    const own = (x: Side, all: boolean) =>
+    const paths = (x: Side) =>
       [
         ...(x.created === undefined ? (x.run.verdict.settle ?? []) : []),
         ...x.needed.map((n) => n.path).filter(settleable),
-      ].filter((p) => all || !/^(github\.)?event\./.test(p));
-    const settle = [
-      ...new Set([...own(s, true), ...(other ? own(other, false) : [])]),
-    ];
-    const hints: SettleHint[] = settle.map(
-      (path) =>
-        [s, other]
-          .flatMap((x) => x?.run.verdict.hints ?? [])
-          .find((h) => h.path === path) ?? {
+      ].map((path) => ({ path, x }));
+    // A path both runs read is listed once, for this run's Event; settled, the other's shows.
+    const listed = [...paths(s), ...(other ? paths(other) : [])].filter(
+      (p, i, all) => all.findIndex((q) => q.path === p.path) === i,
+    );
+    const settle = listed.map((p) => p.path);
+    // #9 §7: a value run B's Event holds goes on the Follow-up event.
+    const hints = listed.map(({ path, x }): SettleHint => {
+      const followUp = x.label === "B" && /^(github\.)?event\./.test(path);
+      return {
+        ...(x.run.verdict.hints?.find((h) => h.path === path) ?? {
           path,
           text: path.startsWith("vars.")
             ? `repository variable \`${path.slice(5)}\``
-            : `\`${path}\` on the ${s.label === "B" ? "Follow-up event" : "Event"}`,
+            : `\`${path}\` on the ${followUp ? "Follow-up event" : "Event"}`,
           candidates: [],
-        },
-    );
+        }),
+        ...(followUp && { on: "followUp" as const }),
+      };
+    });
     return {
       ...base,
       value: "uncertain",

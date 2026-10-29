@@ -89,6 +89,8 @@ export interface SettleHint {
   text: string;
   /** The literals the expression compares the path with: the one-click values. */
   candidates: unknown[];
+  /** Set when an Event value goes on the Follow-up event: run B's (#9 §7). */
+  on?: "followUp";
 }
 
 /** An Assumption whose key matches no subject: "assumed subject not found". */
