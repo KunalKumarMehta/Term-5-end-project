@@ -1135,3 +1135,119 @@ ${pins}`,
   expect(({} as Record<string, unknown>).x).toBeUndefined();
   expect(Object.getPrototypeOf({})).toBe(Object.prototype);
 });
+
+test("test --update rewrites only the changed pins in place, keeping comments, and a deleted root stays deleted", () => {
+  const path = ".github/whynorun/fork-pr.test.yml";
+  const pinned = `# Pinned when the PR came from a member; it now comes from a fork.
+version: 1
+tests:
+  - label: Fork PR # the demo's
+    scenario:
+      event: { name: pull_request, actor: fork, ref: feature, base: main }
+      repo: { date: 2026-12-03 }
+    pins:
+      # The job itself still runs.
+      ci.yml › test: { value: runs, root: WN-2 }
+      ci.yml › test › secrets:
+        value: available # a member gets them
+      ci.yml › release › secrets: { value: available, root: FK-0 } # keep me
+`;
+  testRepo(testsFixture("changed"), { [path]: pinned });
+  expect(run("test", "--update")).toEqual({
+    code: 0,
+    stdout: [
+      `whynorun ${version}`,
+      "",
+      ".github/whynorun/fork-pr.test.yml: Fork PR",
+      "ci.yml › test › secrets: available → empty",
+      "ci.yml › release › secrets: available → empty (root FK-0 → FK-2)",
+      "",
+      `updated ${path}`,
+      "",
+    ].join("\n"),
+    stderr: "",
+  });
+  expect(readFileSync(path, "utf8")).toBe(
+    pinned
+      .replace("value: available # a member", "value: empty # a member")
+      .replace(
+        "{ value: available, root: FK-0 } # keep me",
+        "{ value: empty, root: FK-2 } # keep me",
+      ),
+  );
+  // Accepted, the file now passes.
+  expect(run("test").code).toBe(0);
+});
+
+test("test --update drops possible when the new Verdict lacks it, and adds it only when a pin moves from decided to Uncertain", () => {
+  const path = ".github/whynorun/fork-pr.test.yml";
+  testRepo(example(), {
+    [path]: forkPr(
+      [
+        "      ci.yml › e2e: { value: runs }",
+        "      ci.yml › changes: { value: runs, possible: [runs] }",
+        "      ci.yml › concurrency.B: { value: pending, root: CC-1 }",
+        "",
+      ].join("\n"),
+    ),
+  });
+  expect(run("test", "--update").code).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe(
+    forkPr(
+      [
+        "      ci.yml › e2e: { value: uncertain, possible: [ runs, skipped ] }",
+        "      ci.yml › changes: { value: runs }",
+        "      ci.yml › concurrency.B: { value: runs, root: CC-2 }",
+        "",
+      ].join("\n"),
+    ),
+  );
+});
+
+test("test --update writes nothing and exits 1 when any pinned or assumed subject isn't found, there's a Diagnostic or a Scenario is unsupported", () => {
+  const changed = forkPr("      ci.yml › build: { value: skipped }\n");
+  const blockers: Record<string, string> = {
+    "pin not found": forkPr(
+      "      ci.yml › build: { value: skipped }\n      ci.yml › tests: { value: runs }\n",
+    ),
+    "assumption not found": forkPr(
+      "      ci.yml › build: { value: skipped }\n",
+      '      assume: { "ci.yml › change › outputs.src": "true" }\n',
+    ),
+    unsupported: one(
+      "{ event: { name: schedule }, repo: { date: 2026-12-03 } }",
+    ),
+  };
+  for (const [name, blocker] of Object.entries(blockers)) {
+    const files = {
+      ".github/whynorun/a.test.yml": changed,
+      ".github/whynorun/b.test.yml": blocker,
+    };
+    testRepo(example(), files);
+    const { code, stdout } = run("test", "--update");
+    expect(code, name).toBe(1);
+    expect(stdout, name).toContain(
+      "\nwhynorun: --update wrote nothing: fix what blocks it above first\n",
+    );
+    for (const [path, text] of Object.entries(files))
+      expect(readFileSync(path, "utf8"), name).toBe(text);
+  }
+
+  const broken = fileURLToPath(
+    new URL("fixtures/broken-repo", import.meta.url),
+  );
+  const a = pushTest("      ci.yml: { value: skipped }\n");
+  testRepo(broken, { ".github/whynorun/a.test.yml": a });
+  expect(run("test", "--update").code).toBe(1);
+  expect(readFileSync(".github/whynorun/a.test.yml", "utf8")).toBe(a);
+});
+
+test("test --update exits 2 and writes nothing when any Test file is invalid", () => {
+  const changed = forkPr("      ci.yml › build: { value: skipped }\n");
+  testRepo(example(), {
+    ".github/whynorun/a.test.yml": changed,
+    ".github/whynorun/b.test.yml": "version: 1\ntests: []\n",
+  });
+  expect(run("test", "--update").code).toBe(2);
+  expect(readFileSync(".github/whynorun/a.test.yml", "utf8")).toBe(changed);
+});

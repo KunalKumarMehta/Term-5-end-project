@@ -53,11 +53,14 @@ export {
 } from "./scenario";
 export type * from "./scenario";
 export {
+  blocksUpdate,
   compareTest,
   findingText,
   parseTestFile,
   shown,
   updatePin,
+  updatedPins,
+  updateTestFile,
   writeTestFile,
   type Change,
   type Finding,

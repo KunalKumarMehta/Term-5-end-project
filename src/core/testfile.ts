@@ -1,6 +1,15 @@
 // Test files (#10, ADR 0002): parsing, validation, pin comparison and writing, shared by the
 // CLI and the playground, so no Node APIs.
-import { LineCounter, parseDocument, stringify } from "yaml";
+import {
+  Document,
+  LineCounter,
+  isMap,
+  isScalar,
+  parseDocument,
+  stringify,
+  type Node,
+  type YAMLMap,
+} from "yaml";
 import { isAccess } from "./access";
 import { isCheck } from "./checks";
 import { isConcurrency } from "./concurrency";
@@ -326,6 +335,76 @@ export function updatePin(pin: Pin, verdict: Verdict): Pin {
       Object.assign(next, { [field]: now ?? null });
   }
   return next;
+}
+
+/** What stops `test --update` and Accept all writing anything: all or nothing (#10 §6). */
+export const blocksUpdate = (finding: Finding): boolean =>
+  finding.status !== "match" && finding.status !== "changed";
+
+/** `test --update` for one test: each changed pin as {@link updatePin} rewrites it, by key. */
+export function updatedPins(
+  test: Test,
+  result: SimulationResult,
+): Record<string, Pin> {
+  const verdicts = new Map(result.verdicts.map((v) => [v.key, v]));
+  return Object.fromEntries(
+    compareTest(test, result).flatMap((f) =>
+      f.status === "changed"
+        ? [[f.key, updatePin(test.pins[f.key]!, verdicts.get(f.key)!)]]
+        : [],
+    ),
+  );
+}
+
+/**
+ * `test --update` for one Test file (#10 §6): only its changed pins are rewritten, each edited
+ * through the `yaml` Document API and spliced back over its own text, so comments and the rest
+ * of the file stay byte for byte. `results` are its tests' simulations, in order. Undefined
+ * when no pin changed. Callers check {@link blocksUpdate} across every file first, so nothing
+ * is written when anything blocks.
+ */
+export function updateTestFile(
+  text: string,
+  file: TestFile,
+  results: SimulationResult[],
+): string | undefined {
+  const doc = parseDocument(text, { version: "1.2", schema: "core" });
+  const edits: { from: number; to: number; text: string }[] = [];
+  file.tests.forEach((test, i) => {
+    for (const [key, pin] of Object.entries(updatedPins(test, results[i]!))) {
+      const at = doc.getIn(["tests", i, "pins", key], true) as Node;
+      const [from, to] = at.range!;
+      // An alias or the like is replaced by a flow map of its own.
+      const node = isMap(at) ? at.clone() : (doc.createNode(pin) as YAMLMap);
+      if (!isMap(at)) node.flow = true;
+      const was = test.pins[key]!;
+      for (const field of FIELDS) {
+        const now = pin[field];
+        if (!Object.hasOwn(pin, field)) node.delete(field);
+        else if (Object.hasOwn(was, field) && same(field, was[field], now)) {
+          // As written.
+        } else {
+          const old = node.get(field, true);
+          // A scalar keeps its own comment and quoting.
+          if (isScalar(old) && !Array.isArray(now)) old.value = now;
+          else node.set(field, doc.createNode(now));
+        }
+      }
+      // The comments around the pin stay in the text, outside its range.
+      node.comment = node.commentBefore = undefined;
+      const indent = from - (text.lastIndexOf("\n", from - 1) + 1);
+      const written = new Document(node, { version: "1.2" })
+        .toString({ lineWidth: 0 })
+        .trimEnd()
+        .replaceAll("\n", `\n${" ".repeat(indent)}`);
+      const tail = /\s*$/.exec(text.slice(from, to))![0];
+      edits.push({ from, to, text: written + tail });
+    }
+  });
+  if (edits.length === 0) return undefined;
+  return edits
+    .sort((a, b) => b.from - a.from)
+    .reduce((t, e) => t.slice(0, e.from) + e.text + t.slice(e.to), text);
 }
 
 /** A test to write: its pinned Verdicts, and the pins it was loaded with, if any. */

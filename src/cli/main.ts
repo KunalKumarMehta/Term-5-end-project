@@ -3,6 +3,7 @@ import {
   globSync,
   readdirSync,
   readFileSync,
+  writeFileSync,
   type Dirent,
 } from "node:fs";
 import { join, resolve } from "node:path";
@@ -11,6 +12,7 @@ import { LineCounter, isMap, isScalar, parseDocument } from "yaml";
 import { shown } from "../core/testfile";
 import {
   PLATFORM_BASELINE,
+  blocksUpdate,
   compareTest,
   findingText,
   isAccess,
@@ -18,6 +20,7 @@ import {
   isConcurrency,
   parseTestFile,
   simulate,
+  updateTestFile,
   validateScenario,
   type ActorKind,
   type Change,
@@ -38,7 +41,7 @@ const USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <r
                      [--flow access|all]
        whynorun show --from <test file> [--scenario <label>] [--repo <dir>]
                      [--flow access|checks|concurrency|all]
-       whynorun test [--json] [patterns…]
+       whynorun test [--json] [--update] [patterns…]
        whynorun --version
 `;
 
@@ -102,15 +105,15 @@ const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** `whynorun test [patterns…]`: every pattern a glob from the cwd (#10 §4–7, #13 §4). */
 function runTests(args: string[]): number {
-  let positionals, json;
+  let positionals, json, update;
   try {
     ({
       positionals,
-      values: { json },
+      values: { json, update },
     } = parseArgs({
       args,
       allowPositionals: true,
-      options: { json: { type: "boolean" } },
+      options: { json: { type: "boolean" }, update: { type: "boolean" } },
     }));
   } catch (err) {
     return misuse((err as Error).message);
@@ -168,7 +171,35 @@ function runTests(args: string[]): number {
     }),
   );
   const failing = runs.filter((r) => r.failed.length > 0);
-  const code = diagnostics.length > 0 || failing.length > 0 ? 1 : 0;
+  let code = diagnostics.length > 0 || failing.length > 0 ? 1 : 0;
+
+  // `--update` (#10 §6): all or nothing, so anything that blocks it anywhere writes nothing.
+  let updated: string[] | undefined;
+  if (
+    update &&
+    code === 1 &&
+    diagnostics.length === 0 &&
+    !failing.some((r) => r.failed.some(blocksUpdate))
+  ) {
+    const writes = files.flatMap(({ path, file }) => {
+      const text = updateTestFile(
+        readFileSync(path, "utf8"),
+        file,
+        runs.filter((r) => r.path === path).map((r) => r.result),
+      );
+      return text === undefined ? [] : [{ path, text }];
+    });
+    for (const { path, text } of writes)
+      try {
+        writeFileSync(path, text);
+      } catch (err) {
+        return unusable([
+          `${path}: can't write it (${(err as NodeJS.ErrnoException).code})`,
+        ]);
+      }
+    updated = writes.map((w) => w.path);
+    code = 0;
+  }
 
   if (process.env.GITHUB_ACTIONS === "true" && code === 1) {
     for (const d of diagnostics) annotate(d.path, d.line, d.message);
@@ -212,6 +243,11 @@ function runTests(args: string[]): number {
       ...r.failed.map(findingText),
       ...(r.note ? [`note: ${r.note}`] : []),
     ]),
+    ...(updated
+      ? [updated.map((path) => `updated ${path}`)]
+      : update && code === 1
+        ? [["whynorun: --update wrote nothing: fix what blocks it above first"]]
+        : []),
   ];
   process.stdout.write(
     [
