@@ -16,6 +16,7 @@ import {
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
+import { tagText, type Source } from "./RepoFacts";
 
 export const OWNER_REPO_ERROR = "Use the form owner/repo, e.g. acme/app";
 
@@ -109,7 +110,7 @@ export interface CauseLinks {
   files: WorkflowFile[];
   focusField: (id: string) => void;
   /** A Repo fact's source tag (#9 §6); undefined for inputs that carry none. */
-  source: (path: string) => "assumed" | "set" | undefined;
+  source: (path: string) => Source | undefined;
   showLines: (span: Span) => void;
 }
 
@@ -183,7 +184,9 @@ export function Causes({
                     {tag && (
                       <>
                         {" "}
-                        <span className={`source-tag ${tag}`}>{tag}</span>
+                        <span className={`source-tag ${tag}`}>
+                          {tagText(tag)}
+                        </span>
                       </>
                     )}
                   </li>

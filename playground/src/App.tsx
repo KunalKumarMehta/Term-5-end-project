@@ -40,9 +40,11 @@ import {
   type CauseLinks,
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
+import { ImportForm } from "./ImportForm";
+import type { Imported, ImportedFacts } from "./importRepo";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { PasteDialog } from "./PasteDialog";
-import { RepoFacts, sourceOf, type Fact } from "./RepoFacts";
+import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
@@ -124,8 +126,15 @@ function unset(scenario: Scenario, path: string[]): Scenario {
 
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
-  const [origin, setOrigin] = useState<"example" | "pasted" | "uploaded">();
-  // The files as the example or an upload loaded them, to tell when they've been edited.
+  const [origin, setOrigin] = useState<
+    "example" | "pasted" | "uploaded" | "imported"
+  >();
+  // The import behind an imported set; a Repo fact holding its value shows ⤓ imported (#9 §6).
+  const [imported, setImported] = useState<Imported>();
+  // Whether the import form is open, and the files when its import started (#12 §1).
+  const [importing, setImporting] = useState(false);
+  const importStart = useRef<readonly WorkflowFile[]>([]);
+  // The files as the example, an upload or an import loaded them, to tell when they've been edited.
   const [base, setBase] = useState<readonly WorkflowFile[]>();
   // The last upload's inline error, or its loaded · ignored summary (#12 §5).
   const [uploadNote, setUploadNote] = useState<ReactNode>();
@@ -361,6 +370,7 @@ export function App() {
       run: () => {
         replaceFiles(EXAMPLE_FILES);
         setOrigin("example");
+        setImported(undefined);
         setActive(undefined);
         if (!touched) {
           setScenarios((ss) => [EXAMPLE_SCENARIO, ...ss.slice(1)]);
@@ -370,16 +380,74 @@ export function App() {
       },
     });
 
+  // Restores the example's or the import's files (#9 §5).
   const reset = () =>
     ask({
-      title: "Reset to the example files?",
+      title: `Reset to the ${origin} files?`,
       losses: setLosses(),
       action: "Reset",
       run: () => {
-        replaceFiles(EXAMPLE_FILES);
-        setToast({ id: Date.now(), node: "Reset to example files" });
+        replaceFiles(base!);
+        setToast({ id: Date.now(), node: `Reset to ${origin} files` });
       },
     });
+
+  /**
+   * #86: every file has arrived, so the import replaces the set under the confirm rule. A
+   * Re-import (same repo) refreshes only the facts that still hold the import's values, in
+   * every Scenario; a new import fills them all (#9 §5).
+   */
+  const finishImport = (got: Imported, focused: boolean) => {
+    setImporting(false);
+    const before =
+      origin === "imported" &&
+      imported?.owner === got.owner &&
+      imported.repo === got.repo
+        ? imported.facts
+        : undefined;
+    const sha7 = got.sha.slice(0, 7);
+    const next: Confirm = {
+      title: !sameFiles(files, importStart.current)
+        ? "Replace the edits you made during the import?"
+        : before
+          ? "Re-import?"
+          : "Import the repo?",
+      losses: setLosses(),
+      action: before ? "Re-import" : "Import",
+      run: () => {
+        replaceFiles(got.files);
+        setOrigin("imported");
+        setActive(undefined);
+        setScenarios((ss) =>
+          ss.map((s) => {
+            const repo = { ...s.repo };
+            for (const field of Object.keys(
+              got.facts,
+            ) as (keyof ImportedFacts)[])
+              if (!before || repo[field] === before[field])
+                Object.assign(repo, { [field]: got.facts[field] });
+            return { ...s, repo };
+          }),
+        );
+        setImported(got);
+        setToast({
+          id: Date.now(),
+          node: before
+            ? `Re-imported @ ${sha7}`
+            : `Imported ${got.owner}/${got.repo} @ ${sha7} · ${got.files.length} loaded${got.ignored.length > 0 ? ` · ${got.ignored.length} ignored` : ""}`,
+        });
+      },
+    };
+    if (next.losses.length > 0) return setConfirm(next);
+    next.run();
+    // #12 addendum E: from Cancel to the first file tab, as the form that started it is gone.
+    if (focused)
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>('[aria-label="Files"] [role="tab"]')
+          ?.focus(),
+      );
+  };
 
   /** Upload and folder drop replace the whole set, under the confirm-first rule (#12 §1, §5). */
   const upload = async (reading: Promise<Upload>) => {
@@ -418,6 +486,8 @@ export function App() {
       run: () => {
         replaceFiles(next);
         setOrigin("uploaded");
+        // No import backs the facts any more, so they show as set (#9 §5).
+        setImported(undefined);
         setActive(undefined);
         if (ignored.length > 0)
           setUploadNote(
@@ -565,12 +635,17 @@ export function App() {
   // Assumptions, keyed by job key ("job X fails").
   const assume = scenario.assume ?? {};
   const eventApprovalSource = sourceOf(scenario, "event.approval");
+  const repositorySource = sourceOf(
+    scenario,
+    "repo.repository",
+    imported?.facts,
+  );
   const remove = (path: string[]) => setScenario((s) => unset(s, path));
 
   const linksFor = (i: number): CauseLinks => ({
     files,
     focusField: (id) => focusField(id, i),
-    source: (path) => sourceOf(scenarios[i]!, path),
+    source: (path) => sourceOf(scenarios[i]!, path, imported?.facts),
     showLines: (span) => {
       setActive(span.path);
       setPane("yaml");
@@ -733,7 +808,7 @@ export function App() {
       <button type="button" onClick={() => picker.current!.click()}>
         Upload
       </button>
-      <button type="button" disabled>
+      <button type="button" onClick={() => setImporting(true)}>
         Import repo
       </button>
     </div>
@@ -918,13 +993,18 @@ export function App() {
               ? "No Workflow set"
               : origin === "example"
                 ? `Example${edited ? " · edited" : ""}`
-                : `Workflow set: ${files.length} ${origin} file${files.length === 1 ? "" : "s"}${edited ? " · edited" : ""}`}
+                : origin === "imported"
+                  ? `${imported!.owner}/${imported!.repo} @ ${imported!.sha.slice(0, 7)} (${imported!.ref})${edited ? " · edited since import" : ""}`
+                  : `Workflow set: ${files.length} ${origin} file${files.length === 1 ? "" : "s"}${edited ? " · edited" : ""}`}
           </span>
-          {edited && origin === "example" && (
+          {edited && (origin === "example" || origin === "imported") && (
             <button type="button" onClick={reset}>
               Reset
             </button>
           )}
+          <button type="button" onClick={() => setImporting(true)}>
+            {origin === "imported" ? "Re-import" : "Import repo"}
+          </button>
           <button type="button" onClick={() => setPasting(true)}>
             Paste
           </button>
@@ -950,6 +1030,26 @@ export function App() {
             }}
           />
           {uploadNote}
+          {importing && (
+            <ImportForm
+              initial={
+                origin === "imported"
+                  ? {
+                      name: `${imported!.owner}/${imported!.repo}`,
+                      ref: imported!.ref,
+                    }
+                  : undefined
+              }
+              announce={(message) => {
+                // Each import speaks, even one that repeats the last: emptied, the region changes.
+                setStatus("");
+                requestAnimationFrame(() => announce(message));
+              }}
+              onStart={() => (importStart.current = files)}
+              onImported={finishImport}
+              onClose={() => setImporting(false)}
+            />
+          )}
         </div>
       </header>
 
@@ -1126,13 +1226,30 @@ export function App() {
                 Today
               </button>
             </div>
-            <RepoFacts scenario={scenario} onChange={setRepoFact} />
+            <RepoFacts
+              scenario={scenario}
+              imported={imported}
+              onChange={setRepoFact}
+            />
             {requiredChecks}
             <label htmlFor="repo-repository">
               <code>owner/repo</code>{" "}
               <span className="optional">(optional)</span>
-              {scenario.repo.repository !== undefined && (
-                <span className="source-tag set"> set</span>
+              {repositorySource && (
+                <>
+                  {" "}
+                  <span
+                    id="repo-repository-source"
+                    className={`source-tag ${repositorySource}`}
+                    title={
+                      repositorySource === "imported"
+                        ? titleOf(imported!)
+                        : undefined
+                    }
+                  >
+                    {tagText(repositorySource)}
+                  </span>
+                </>
               )}
             </label>
             <input
