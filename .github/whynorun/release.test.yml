@@ -1,0 +1,15 @@
+# Only a full vX.Y.Z tag publishes: moving the v1 tag publishes nothing (#13 §6).
+version: 1
+tests:
+  - label: Release tag push
+    scenario:
+      event: { name: push, ref: refs/tags/v1.2.3 }
+      repo: { date: 2026-12-03 }
+    pins:
+      release.yml › publish: { value: runs, root: WN-2 }
+  - label: Moving v1
+    scenario:
+      event: { name: push, ref: refs/tags/v1 }
+      repo: { date: 2026-12-03 }
+    pins:
+      release.yml › publish: { value: no-run, root: BR-4 }

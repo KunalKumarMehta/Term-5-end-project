@@ -1,0 +1,18 @@
+# A path-filtered required check stays "Pending and blocks merge" on a PR it skips,
+# so ci.yml has no paths: filter and a docs-only PR leaves both checks passing (#13 §6).
+version: 1
+tests:
+  - label: Docs-only PR
+    scenario:
+      event:
+        name: pull_request
+        ref: docs
+        base: main
+        changed: [README.md, docs/adr/0001-outcome-independent-verdict-keys.md]
+      repo: { date: 2026-12-03, required: [test, e2e] }
+    pins:
+      # The jobs run, so a paths: filter that skips them is annotated on its own line.
+      ci.yml › test: { value: runs, root: WN-2 }
+      ci.yml › e2e: { value: runs, root: WN-2 }
+      check › test: { value: passes, root: RQ-4 }
+      check › e2e: { value: passes, root: RQ-4 }
