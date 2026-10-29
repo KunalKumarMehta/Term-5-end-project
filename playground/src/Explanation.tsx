@@ -67,6 +67,9 @@ const FIELDS: Record<string, { id: string; label: string }> = {
   "event.changed": { id: "event-changed", label: "Changed files" },
   "event.message": { id: "event-message", label: "Head commit message" },
   "event.login": { id: "event-login", label: "Actor login" },
+  "followUp.name": { id: "follow-up-name", label: "Follow-up event name" },
+  "followUp.actor": { id: "follow-up-actor", label: "Follow-up actor kind" },
+  "followUp.runA": { id: "follow-up-run-a", label: "Run A when B arrives" },
   "repo.date": { id: "sim-date", label: "Simulation date" },
   "repo.visibility": { id: "repo-visibility", label: "Visibility" },
   "repo.predates": { id: "repo-predates", label: "Created before 2026-09-17" },
@@ -225,7 +228,12 @@ function Excerpt({
  * Stores a settle path's value in the Scenario the Verdict belongs to; returns why it
  * refused, leaving the Scenario unchanged.
  */
-export type OnSettle = (path: string, value: unknown) => string | undefined;
+export type OnSettle = (
+  path: string,
+  value: unknown,
+  /** The Event an Event value goes on: run B's is the Follow-up event. */
+  on?: "followUp",
+) => string | undefined;
 
 /** #9 §7: the box at the end of an Uncertain Verdict's Explanation. */
 function SettleIt({
@@ -283,7 +291,7 @@ function SettlePath({
   );
   const submit = () => {
     if (repository && !isOwnerRepo(text)) return setError(OWNER_REPO_ERROR);
-    setError(onSettle(path, parse(path, text)));
+    setError(onSettle(path, parse(path, text), hint?.on));
   };
   const field = {
     id,
@@ -302,7 +310,7 @@ function SettlePath({
           <button
             key={literal(c)}
             type="button"
-            onClick={() => setError(onSettle(path, list ? [c] : c))}
+            onClick={() => setError(onSettle(path, list ? [c] : c, hint?.on))}
           >
             {literal(c)}
           </button>

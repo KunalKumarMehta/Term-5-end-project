@@ -51,7 +51,10 @@ test("Fork PR vs Member PR on the Access tab shows ◆ on token.pull-requests an
   const label = page.getByLabel("Scenario label");
   await label.fill("Member PR");
   await label.press("Enter");
-  await page.getByLabel("Actor kind").selectOption("member");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Actor kind")
+    .selectOption("member");
 
   for (const [subject, fork, member] of [
     ["pull-requests", "read", "write"],

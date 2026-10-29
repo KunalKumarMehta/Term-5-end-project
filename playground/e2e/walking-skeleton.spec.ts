@@ -32,7 +32,7 @@ const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const runRows = (page: Page) =>
   results(page)
     .getByRole("listitem")
-    .filter({ hasNotText: / › (token\.|secrets)/ });
+    .filter({ hasNotText: / › (token\.|secrets|concurrency\.)/ });
 
 test.beforeEach(async ({ page }) => {
   // Record every CSP violation and every text the status region takes, from before load.
@@ -73,7 +73,10 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
   await paste(page, CI, ".github/workflows/ci.yml");
   await expect(page.locator("#toasts")).toHaveText("Pasted ci.yml");
 
-  await page.getByLabel("Event name").fill("push");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Event name")
+    .fill("push");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = runRows(page);
   await expect(row).toHaveText([
@@ -81,7 +84,10 @@ test("a pasted push workflow runs with root EV-0, and schedule is unsupported, a
     "ci.yml › build runs root WN-2",
   ]);
 
-  await page.getByLabel("Event name").fill("schedule");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Event name")
+    .fill("schedule");
   await expect(results(page)).toContainText(
     "Unsupported Scenario: Outside v1: WhyNoRun doesn't simulate this Event. (WN-3)",
   );
@@ -151,8 +157,14 @@ test("an unsupported event shows the Unsupported panel, its inputs linked to the
 }) => {
   await paste(page, CI);
   // A fork contributor pushing is an impossible combination (#6).
-  await page.getByLabel("Event name").fill("push");
-  await page.getByLabel("Actor kind").selectOption("fork");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Event name")
+    .fill("push");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Actor kind")
+    .selectOption("fork");
   await page.getByLabel("Simulation date").fill("2026-12-03");
 
   const panel = results(page);
@@ -160,9 +172,17 @@ test("an unsupported event shows the Unsupported panel, its inputs linked to the
     "Unsupported Scenario: Outside v1: WhyNoRun doesn't simulate this Event. (WN-3)",
   );
   await panel.getByRole("link", { name: "Actor kind = fork" }).click();
-  await expect(page.getByLabel("Actor kind")).toBeFocused();
+  await expect(
+    page
+      .getByRole("group", { name: "Event", exact: true })
+      .getByLabel("Actor kind"),
+  ).toBeFocused();
   await panel.getByRole("link", { name: "Event name = push" }).click();
-  await expect(page.getByLabel("Event name")).toBeFocused();
+  await expect(
+    page
+      .getByRole("group", { name: "Event", exact: true })
+      .getByLabel("Event name"),
+  ).toBeFocused();
 });
 
 test("for a push, changing the ref flips a branch-filtered GitHub workflow between runs and skipped, each with its root", async ({
@@ -181,17 +201,26 @@ test("for a push, changing the ref flips a branch-filtered GitHub workflow betwe
     "ci.yml › build runs root WN-2",
   ]);
 
-  await page.getByLabel("Ref").fill("refs/heads/feature");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Ref")
+    .fill("refs/heads/feature");
   await expect(row).toHaveText([
     "ci.yml skipped root BR-4",
     "ci.yml › build no-run root BR-4",
   ]);
-  await page.getByLabel("Ref").fill("refs/tags/v1.0.0");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Ref")
+    .fill("refs/tags/v1.0.0");
   await expect(row).toHaveText([
     "ci.yml skipped root BR-3",
     "ci.yml › build no-run root BR-3",
   ]);
-  await page.getByLabel("Ref").fill("main");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Ref")
+    .fill("main");
   await expect(row).toHaveText([
     "ci.yml runs root BR-4",
     "ci.yml › build runs root WN-2",
@@ -206,20 +235,32 @@ test("a member's pull_request matches its base branch and activity type", async 
     "on:\n  pull_request:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
     ".github/workflows/ci.yml",
   );
-  await page.getByLabel("Event name").fill("pull_request");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Event name")
+    .fill("pull_request");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   const row = runRows(page);
   await expect(row).toHaveText([
     "ci.yml runs root BR-4",
     "ci.yml › build runs root WN-2",
   ]);
-  await page.getByLabel("Base branch").fill("dev");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Base branch")
+    .fill("dev");
   await expect(row).toHaveText([
     "ci.yml skipped root BR-4",
     "ci.yml › build no-run root BR-4",
   ]);
-  await page.getByLabel("Base branch").fill("");
-  await page.getByLabel("Activity type").fill("closed");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Base branch")
+    .fill("");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Activity type")
+    .fill("closed");
   await expect(row).toHaveText([
     "ci.yml skipped root EV-1",
     "ci.yml › build no-run root EV-1",

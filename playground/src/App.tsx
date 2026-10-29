@@ -25,6 +25,7 @@ import {
   type WorkflowFile,
 } from "../../src/core";
 import { Access, isAccess } from "./Access";
+import { Concurrency } from "./Concurrency";
 import { ConfirmDialog, type Confirm } from "./ConfirmDialog";
 import { Editor, type Target } from "./Editor";
 import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
@@ -70,6 +71,10 @@ const sameFiles = (a: readonly WorkflowFile[], b: readonly WorkflowFile[]) =>
 
 // The form keeps an empty date as "", and shows Verdicts only once one is set (#12 §3).
 const BLANK: Scenario = { event: { name: "push" }, repo: { date: "" } };
+
+/** An Event name being typed: the field shows why, and the Scenario keeps its last results. */
+const unnamed = (s: Scenario) =>
+  s.event.name.trim() === "" || s.followUp?.name.trim() === "";
 
 // Diagnostics never depend on the Scenario, so this stands in for the date while it's empty.
 const ANY_DATE = "2000-01-01";
@@ -134,8 +139,10 @@ export function App() {
   // An owner/repo the check refused, shown while the Scenario keeps its last value (addendum B).
   const [repoDraft, setRepoDraft] = useState<string>();
   const [diffOnly, setDiffOnly] = useState(false);
-  // The results tab (#9 §1); Concurrency arrives with its ticket.
-  const [tab, setTab] = useState<"access" | "checks" | "all">("all");
+  // The results tab (#9 §1).
+  const [tab, setTab] = useState<"access" | "checks" | "concurrency" | "all">(
+    "all",
+  );
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
@@ -173,12 +180,11 @@ export function App() {
   const compare = scenarios.length === 2;
   const scenario = scenarios[form]!;
   const label = labels[form]!;
-  const eventName = scenario.event.name;
   const date = scenario.repo.date;
 
   useEffect(() => {
     // The field shows why; that Scenario's last results stay.
-    if (scenarios.every((s) => s.event.name.trim() === "")) return;
+    if (scenarios.every(unnamed)) return;
     const timer = setTimeout(() => {
       if (files.length === 0) {
         last.current = { runs: [], counts: new Map(), failed: false };
@@ -192,20 +198,22 @@ export function App() {
       let diagnostics: Diagnostic[] = [];
       try {
         for (const [i, s] of scenarios.entries()) {
-          if (s.event.name.trim() === "") {
+          if (unnamed(s)) {
             next.push(before[i]);
             continue;
           }
           const dated = s.repo.date !== "";
           // The Changed files field keeps the blank line being typed; simulate() gets only paths.
-          const changed = s.event.changed;
-          let input = changed
-            ? setScenarioValue(
-                s,
-                ["event", "changed"],
+          let input = s;
+          for (const on of ["event", "followUp"] as const) {
+            const changed = s[on]?.changed;
+            if (changed)
+              input = setScenarioValue(
+                input,
+                [on, "changed"],
                 changed.filter((path) => path !== ""),
-              )
-            : s;
+              );
+          }
           if (!dated)
             input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
           const result = simulate(files, input);
@@ -467,13 +475,14 @@ export function App() {
 
   /** Sets an optional Event field; emptied, it is unset so its default applies. */
   const setEventField = (
+    on: "event" | "followUp",
     field: "type" | "ref" | "base" | "message" | "login",
     value: string,
   ) =>
     setScenario((s) => {
-      const event = { ...s.event, [field]: value };
+      const event = { ...s[on]!, [field]: value };
       if (value === "") delete event[field];
-      return { ...s, event };
+      return { ...s, [on]: event };
     });
 
   /** Sets a Repo fact, which makes it set (#9 §6); emptied, it is unset so its default applies. */
@@ -508,11 +517,17 @@ export function App() {
   /**
    * #9 §7: settles a value in Scenario `i` only, which then re-simulates. A refused path or a
    * value the Scenario can't hold changes nothing and returns why, for the Settle it box.
+   * An Event value goes on the Event the Verdict reads: run B's is the Follow-up event.
    */
-  const settle = (i: number, path: string, value: unknown) => {
+  const settle = (
+    i: number,
+    path: string,
+    value: unknown,
+    on: "event" | "followUp" = "event",
+  ) => {
     let next: Scenario;
     try {
-      next = settleValue(scenarios[i]!, path, value);
+      next = settleValue(scenarios[i]!, path, value, on);
     } catch (e) {
       return (e as Error).message;
     }
@@ -549,7 +564,7 @@ export function App() {
 
   // Assumptions, keyed by job key ("job X fails").
   const assume = scenario.assume ?? {};
-  const approvalSource = sourceOf(scenario, "event.approval");
+  const eventApprovalSource = sourceOf(scenario, "event.approval");
   const remove = (path: string[]) => setScenario((s) => unset(s, path));
 
   const linksFor = (i: number): CauseLinks => ({
@@ -562,6 +577,150 @@ export function App() {
       setHighlight({ ...span }); // A fresh object, so a second click shows the lines again.
     },
   });
+
+  /** The Event's fields, or the Follow-up event's (#9 §1), under their own ids. */
+  const eventFields = (on: "event" | "followUp") => {
+    const ev = scenario[on]!;
+    const id = on === "event" ? "event" : "follow-up";
+    const legend = on === "event" ? "Event" : "Follow-up event";
+    const approvalSource = on === "event" ? eventApprovalSource : undefined;
+    return (
+      <>
+        <label htmlFor={`${id}-name`}>Event name</label>
+        <input
+          id={`${id}-name`}
+          list={`${id}-names`}
+          value={ev.name}
+          aria-invalid={ev.name.trim() === ""}
+          aria-describedby={`${id}-name-error`}
+          onChange={(e) => setInput([on, "name"], e.target.value)}
+        />
+        <datalist id={`${id}-names`}>
+          <option value="push" />
+          <option value="pull_request" />
+          <option value="pull_request_target" />
+          <option value="merge_group" />
+        </datalist>
+        <p id={`${id}-name-error`} className="error">
+          {ev.name.trim() === "" && "Enter an event name, such as push"}
+        </p>
+        <label htmlFor={`${id}-type`}>Activity type</label>
+        <input
+          id={`${id}-type`}
+          list={`${id}-types`}
+          placeholder="GitHub's defaults"
+          value={ev.type ?? ""}
+          onChange={(e) => setEventField(on, "type", e.target.value)}
+        />
+        <datalist id={`${id}-types`}>
+          <option value="opened" />
+          <option value="synchronize" />
+          <option value="reopened" />
+          <option value="labeled" />
+          <option value="closed" />
+        </datalist>
+        <label htmlFor={`${id}-actor`}>Actor kind</label>
+        <select
+          id={`${id}-actor`}
+          value={ev.actor ?? "member"}
+          onChange={(e) => setInput([on, "actor"], e.target.value as ActorKind)}
+        >
+          <option value="member">Member</option>
+          <option value="fork">Fork contributor</option>
+          <option value="dependabot">dependabot[bot]</option>
+        </select>
+        {ev.actor === "fork" && (
+          // #9 §6: only a fork contributor's run waits for approval.
+          <>
+            <label htmlFor={`${id}-approval`}>
+              Approval{" "}
+              {/* aria-hidden: the field reads it as its description, not in its name. */}
+              {approvalSource && (
+                <span
+                  id={`${id}-approval-source`}
+                  className={`source-tag ${approvalSource}`}
+                  aria-hidden
+                >
+                  {approvalSource}
+                </span>
+              )}
+            </label>
+            <select
+              id={`${id}-approval`}
+              className={approvalSource}
+              aria-describedby={approvalSource && `${id}-approval-source`}
+              value={ev.approval ?? "approved"}
+              onChange={(e) => setInput([on, "approval"], e.target.value)}
+            >
+              <option value="approved">approved</option>
+              <option value="awaiting">awaiting</option>
+            </select>
+          </>
+        )}
+        <label htmlFor={`${id}-ref`}>Ref</label>
+        <input
+          id={`${id}-ref`}
+          placeholder="the default branch"
+          aria-describedby={`${id}-ref-hint`}
+          value={ev.ref ?? ""}
+          onChange={(e) => setEventField(on, "ref", e.target.value)}
+        />
+        <p id={`${id}-ref-hint`} className="hint">
+          A branch, <code>refs/heads/…</code> or <code>refs/tags/…</code>
+        </p>
+        <label htmlFor={`${id}-base`}>Base branch</label>
+        <input
+          id={`${id}-base`}
+          placeholder="the default branch"
+          value={ev.base ?? ""}
+          onChange={(e) => setEventField(on, "base", e.target.value)}
+        />
+        <label htmlFor={`${id}-changed`}>Changed files</label>
+        <textarea
+          id={`${id}-changed`}
+          rows={3}
+          spellCheck={false}
+          aria-describedby={`${id}-changed-hint`}
+          value={(ev.changed ?? []).join("\n")}
+          onChange={(e) =>
+            setInput([on, "changed"], e.target.value.split("\n"))
+          }
+        />
+        <p id={`${id}-changed-hint`} className="hint">
+          One path per line, taken as the complete diff
+        </p>
+        <label htmlFor={`${id}-message`}>Head commit message</label>
+        <textarea
+          id={`${id}-message`}
+          rows={2}
+          value={ev.message ?? ""}
+          onChange={(e) => setEventField(on, "message", e.target.value)}
+        />
+        <label htmlFor={`${id}-login`}>
+          Actor login <span className="optional">(optional)</span>
+        </label>
+        <input
+          id={`${id}-login`}
+          aria-describedby={`${id}-login-hint`}
+          value={ev.login ?? ""}
+          onChange={(e) => setEventField(on, "login", e.target.value)}
+        />
+        <p id={`${id}-login-hint`} className="hint">
+          Matters only when a GitHub workflow compares <code>github.actor</code>{" "}
+          with a literal
+        </p>
+        <Entries
+          label={`${legend} payload values`}
+          entries={leaves(ev.payload ?? {}).map(([path, value]) => [
+            [on, "payload", ...path],
+            `github.event.${path.join(".")}`,
+            value,
+          ])}
+          remove={remove}
+        />
+      </>
+    );
+  };
 
   const actions = (
     <div className="actions">
@@ -645,6 +804,18 @@ export function App() {
     />
   );
 
+  const concurrency = (
+    <Concurrency
+      columns={columns}
+      states={scenarios.map(
+        (s) => s.followUp && (s.followUp.runA ?? "in-progress"),
+      )}
+      open={open}
+      onOpen={openExplanation}
+      onAddFollowUp={(i) => focusField("follow-up-add", i)}
+    />
+  );
+
   let results: ReactNode;
   if (files.length === 0)
     results = (
@@ -657,6 +828,8 @@ export function App() {
     results =
       tab === "checks" ? (
         mergeReadiness
+      ) : tab === "concurrency" ? (
+        concurrency
       ) : tab === "access" ? (
         <Access
           columns={columns}
@@ -690,6 +863,7 @@ export function App() {
   // With no required checks there may be no Verdicts, and the control must stay (addendum F).
   else if (tab === "checks") results = mergeReadiness;
   else if (verdicts.length === 0) results = <p>{noVerdicts}</p>;
+  else if (tab === "concurrency") results = concurrency;
   else if (tab === "access")
     results = (
       <Access
@@ -865,142 +1039,43 @@ export function App() {
           </p>
           <fieldset>
             <legend>Event</legend>
-            <label htmlFor="event-name">Event name</label>
-            <input
-              id="event-name"
-              list="event-names"
-              value={eventName}
-              aria-invalid={eventName.trim() === ""}
-              aria-describedby="event-name-error"
-              onChange={(e) => setInput(["event", "name"], e.target.value)}
-            />
-            <datalist id="event-names">
-              <option value="push" />
-              <option value="pull_request" />
-              <option value="pull_request_target" />
-              <option value="merge_group" />
-            </datalist>
-            <p id="event-name-error" className="error">
-              {eventName.trim() === "" && "Enter an event name, such as push"}
-            </p>
-            <label htmlFor="event-type">Activity type</label>
-            <input
-              id="event-type"
-              list="event-types"
-              placeholder="GitHub's defaults"
-              value={scenario.event.type ?? ""}
-              onChange={(e) => setEventField("type", e.target.value)}
-            />
-            <datalist id="event-types">
-              <option value="opened" />
-              <option value="synchronize" />
-              <option value="reopened" />
-              <option value="labeled" />
-              <option value="closed" />
-            </datalist>
-            <label htmlFor="event-actor">Actor kind</label>
-            <select
-              id="event-actor"
-              value={scenario.event.actor ?? "member"}
-              onChange={(e) =>
-                setInput(["event", "actor"], e.target.value as ActorKind)
-              }
-            >
-              <option value="member">Member</option>
-              <option value="fork">Fork contributor</option>
-              <option value="dependabot">dependabot[bot]</option>
-            </select>
-            {scenario.event.actor === "fork" && (
-              // #9 §6: only a fork contributor's run waits for approval.
+            {eventFields("event")}
+          </fieldset>
+          <fieldset id="follow-up">
+            <legend>Follow-up event</legend>
+            {scenario.followUp ? (
               <>
-                <label htmlFor="event-approval">
-                  Approval{" "}
-                  {/* aria-hidden: the field reads it as its description, not in its name. */}
-                  <span
-                    id="event-approval-source"
-                    className={`source-tag ${approvalSource}`}
-                    aria-hidden
-                  >
-                    {approvalSource}
-                  </span>
-                </label>
+                {eventFields("followUp")}
+                <label htmlFor="follow-up-run-a">Run A when B arrives</label>
                 <select
-                  id="event-approval"
-                  className={approvalSource}
-                  aria-describedby="event-approval-source"
-                  value={scenario.event.approval ?? "approved"}
+                  id="follow-up-run-a"
+                  value={scenario.followUp.runA ?? "in-progress"}
                   onChange={(e) =>
-                    setInput(["event", "approval"], e.target.value)
+                    setInput(["followUp", "runA"], e.target.value)
                   }
                 >
-                  <option value="approved">approved</option>
-                  <option value="awaiting">awaiting</option>
+                  <option value="in-progress">in progress</option>
+                  <option value="pending">pending</option>
                 </select>
+                <button type="button" onClick={() => remove(["followUp"])}>
+                  Remove Follow-up event
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  A second Event that arrives while run A is in progress or
+                  pending, for the Concurrency tab.
+                </p>
+                <button
+                  type="button"
+                  id="follow-up-add"
+                  onClick={() => setInput(["followUp"], scenario.event)}
+                >
+                  Add a Follow-up event
+                </button>
               </>
             )}
-            <label htmlFor="event-ref">Ref</label>
-            <input
-              id="event-ref"
-              placeholder="the default branch"
-              aria-describedby="event-ref-hint"
-              value={scenario.event.ref ?? ""}
-              onChange={(e) => setEventField("ref", e.target.value)}
-            />
-            <p id="event-ref-hint" className="hint">
-              A branch, <code>refs/heads/…</code> or <code>refs/tags/…</code>
-            </p>
-            <label htmlFor="event-base">Base branch</label>
-            <input
-              id="event-base"
-              placeholder="the default branch"
-              value={scenario.event.base ?? ""}
-              onChange={(e) => setEventField("base", e.target.value)}
-            />
-            <label htmlFor="event-changed">Changed files</label>
-            <textarea
-              id="event-changed"
-              rows={3}
-              spellCheck={false}
-              aria-describedby="event-changed-hint"
-              value={(scenario.event.changed ?? []).join("\n")}
-              onChange={(e) =>
-                setInput(["event", "changed"], e.target.value.split("\n"))
-              }
-            />
-            <p id="event-changed-hint" className="hint">
-              One path per line, taken as the complete diff
-            </p>
-            <label htmlFor="event-message">Head commit message</label>
-            <textarea
-              id="event-message"
-              rows={2}
-              value={scenario.event.message ?? ""}
-              onChange={(e) => setEventField("message", e.target.value)}
-            />
-            <label htmlFor="event-login">
-              Actor login <span className="optional">(optional)</span>
-            </label>
-            <input
-              id="event-login"
-              aria-describedby="event-login-hint"
-              value={scenario.event.login ?? ""}
-              onChange={(e) => setEventField("login", e.target.value)}
-            />
-            <p id="event-login-hint" className="hint">
-              Matters only when a GitHub workflow compares{" "}
-              <code>github.actor</code> with a literal
-            </p>
-            <Entries
-              label="Event payload values"
-              entries={leaves(scenario.event.payload ?? {}).map(
-                ([path, value]) => [
-                  ["event", "payload", ...path],
-                  `github.event.${path.join(".")}`,
-                  value,
-                ],
-              )}
-              remove={remove}
-            />
           </fieldset>
           <fieldset>
             <legend>Repo facts</legend>
@@ -1121,6 +1196,7 @@ export function App() {
               [
                 ["access", "Access"],
                 ["checks", "Merge readiness"],
+                ["concurrency", "Concurrency"],
                 ["all", "All Verdicts"],
               ] as const
             ).map(([id, name]) => (
@@ -1172,7 +1248,7 @@ export function App() {
                 onClose={() => closeExplanation(open)}
                 sheet={sheet}
                 onScroll={(top) => (sheetScroll.current = top)}
-                onSettle={(path, value) => settle(open.i, path, value)}
+                onSettle={(path, value, on) => settle(open.i, path, value, on)}
                 {...linksFor(open.i)}
               />
             )}
