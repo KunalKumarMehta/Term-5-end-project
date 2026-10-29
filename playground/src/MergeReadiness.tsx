@@ -85,36 +85,42 @@ export function RequiredChecks({
           </li>
         ))}
       </ul>
-      <label htmlFor={`${id}-add`}>Add a required check</label>
-      <input
-        id={`${id}-add`}
-        spellCheck={false}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
-          e.preventDefault();
-          add();
-        }}
-      />
-      <label htmlFor={`${id}-mode`}>Mode</label>
-      <select
-        id={`${id}-mode`}
-        value={strict ? "strict" : "loose"}
-        onChange={(e) => onChange("strict", e.target.value === "strict")}
-      >
-        <option value="loose">loose</option>
-        <option value="strict">strict (up to date before merging)</option>
-      </select>
-      <label htmlFor={`${id}-queue`}>Merge queue</label>
-      <select
-        id={`${id}-queue`}
-        value={mergeQueue ? "on" : "off"}
-        onChange={(e) => onChange("mergeQueue", e.target.value === "on")}
-      >
-        <option value="off">off</option>
-        <option value="on">on</option>
-      </select>
+      <span className="field">
+        <label htmlFor={`${id}-add`}>Add a required check</label>
+        <input
+          id={`${id}-add`}
+          spellCheck={false}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            add();
+          }}
+        />
+      </span>
+      <span className="field">
+        <label htmlFor={`${id}-mode`}>Mode</label>
+        <select
+          id={`${id}-mode`}
+          value={strict ? "strict" : "loose"}
+          onChange={(e) => onChange("strict", e.target.value === "strict")}
+        >
+          <option value="loose">loose</option>
+          <option value="strict">strict (up to date before merging)</option>
+        </select>
+      </span>
+      <span className="field">
+        <label htmlFor={`${id}-queue`}>Merge queue</label>
+        <select
+          id={`${id}-queue`}
+          value={mergeQueue ? "on" : "off"}
+          onChange={(e) => onChange("mergeQueue", e.target.value === "on")}
+        >
+          <option value="off">off</option>
+          <option value="on">on</option>
+        </select>
+      </span>
       <button type="button" onClick={onRequireProduced}>
         Require every produced check
       </button>

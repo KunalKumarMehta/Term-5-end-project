@@ -23,7 +23,7 @@ test("the README's status line names package.json's version", () => {
   const { version } = JSON.parse(
     readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { version: string };
-  expect(readme).toMatch(new RegExp(`^\\*\\*Status:\\*\\* ${version}: `, "m"));
+  expect(readme).toContain(`\n**Status:** ${version}: `);
 });
 
 test("the README's Platform baseline matches the core's export", () => {
