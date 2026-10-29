@@ -164,3 +164,141 @@ test("a saved Test file parses, and every pin matches the Verdicts it was writte
     expect(findings.filter((f) => f.status !== "match")).toEqual([]);
   }
 });
+
+// The example with run A no longer cancelled when run B arrives.
+const uncancelled = example.map((f) =>
+  f.path.endsWith("ci.yml")
+    ? {
+        ...f,
+        text: f.text.replace(
+          "cancel-in-progress: true",
+          "cancel-in-progress: false",
+        ),
+      }
+    : f,
+);
+
+test("re-saving a loaded pin keeps its own field list: a matching pin as written, a changed one under test --update's add and drop rule", () => {
+  const opened = parseTestFile(
+    "fork-pr.test.yml",
+    writeTestFile([
+      {
+        label: "Fork PR",
+        scenario: forkPr,
+        pinned: pinned(forkPr, ["check › build", "ci.yml › concurrency.A"]),
+      },
+    ]),
+  ).file!;
+  const loaded = opened.tests[0]!.pins;
+  // The Maintainer loosened both pins by deleting root (#10 §3).
+  delete loaded["check › build"]!.root;
+  delete loaded["ci.yml › concurrency.A"]!.root;
+
+  const resaved = parseTestFile(
+    "fork-pr.test.yml",
+    writeTestFile([
+      {
+        label: "Fork PR",
+        scenario: forkPr,
+        pinned: simulate(uncancelled, forkPr).verdicts.filter((v) =>
+          Object.hasOwn(loaded, v.key),
+        ),
+        loaded,
+      },
+    ]),
+  ).file!;
+
+  expect(resaved.tests[0]!.pins).toEqual({
+    "check › build": { value: "passes", possible: null },
+    // value rewritten, the matching fields as written, root never re-added.
+    "ci.yml › concurrency.A": {
+      value: "runs",
+      possible: null,
+      group: "ci-feature",
+      continuing: null,
+    },
+  });
+});
+
+test("a loaded pin gains possible when it turns Uncertain and drops it when it's decided again, and one whose subject is gone is written as loaded", () => {
+  const scenario: Scenario = { ...forkPr, assume: {} };
+  const loaded = {
+    "ci.yml › e2e": { value: "runs" },
+    "ci.yml › gone": { value: "runs", root: "WN-2" },
+  };
+  const file = parseTestFile(
+    "e2e.test.yml",
+    writeTestFile([
+      {
+        label: "Fork PR",
+        scenario,
+        pinned: simulate(example, scenario).verdicts.filter(
+          (v) => v.key === "ci.yml › e2e",
+        ),
+        loaded,
+      },
+    ]),
+  ).file!;
+
+  expect(file.tests[0]!.pins).toEqual({
+    "ci.yml › e2e": { value: "uncertain", possible: ["runs", "skipped"] },
+    "ci.yml › gone": { value: "runs", root: "WN-2" },
+  });
+
+  // Settled, e2e runs: the Verdict has no possible, so the pin drops it.
+  const settled = parseTestFile(
+    "e2e.test.yml",
+    writeTestFile([
+      {
+        label: "Fork PR",
+        scenario: forkPr,
+        pinned: pinned(forkPr, ["ci.yml › e2e"]),
+        loaded: file.tests[0]!.pins,
+      },
+    ]),
+  ).file!;
+  expect(settled.tests[0]!.pins["ci.yml › e2e"]).toEqual({ value: "runs" });
+});
+
+test("saving over an opened Test file keeps its unopened tests verbatim and in order, matching saved entries by label", () => {
+  const original = parseTestFile(
+    "three.test.yml",
+    `version: 1
+tests:
+  - label: One
+    scenario: { event: { name: push }, repo: { date: 2026-12-03 } }
+    pins: { ci.yml: { value: runs } }
+  - label: Fork PR
+    scenario: { event: { name: push }, repo: { date: 2026-12-03 } }
+    pins: { ci.yml: { value: runs } }
+  - label: Three
+    scenario: { event: { name: push }, repo: { date: 2026-01-01 } }
+    pins: { ci.yml: { root: EV-0 } }
+`,
+  ).file!;
+
+  const saved = parseTestFile(
+    "three.test.yml",
+    writeTestFile(
+      [
+        {
+          label: "Fork PR",
+          scenario: forkPr,
+          pinned: pinned(forkPr, ["check › build"]),
+        },
+        { label: "New", scenario: forkPr, pinned: pinned(forkPr, ["ci.yml"]) },
+      ],
+      original,
+    ),
+  ).file!;
+
+  expect(saved.tests.map((t) => t.label)).toEqual([
+    "One",
+    "Fork PR",
+    "Three",
+    "New",
+  ]);
+  expect(saved.tests[0]).toEqual(original.tests[0]);
+  expect(saved.tests[2]).toEqual(original.tests[2]);
+  expect(Object.keys(saved.tests[1]!.pins)).toEqual(["check › build"]);
+});
