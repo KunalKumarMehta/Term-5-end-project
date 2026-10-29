@@ -10,6 +10,8 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  isCheck,
+  isConcurrency,
   isJobKey,
   isLoaded,
   producedChecks,
@@ -44,6 +46,7 @@ import { ImportForm } from "./ImportForm";
 import type { Imported, ImportedFacts } from "./importRepo";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { PasteDialog } from "./PasteDialog";
+import { PinToggle, Pins, SaveDialog } from "./Pins";
 import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
 
@@ -77,6 +80,21 @@ const BLANK: Scenario = { event: { name: "push" }, repo: { date: "" } };
 /** An Event name being typed: the field shows why, and the Scenario keeps its last results. */
 const unnamed = (s: Scenario) =>
   s.event.name.trim() === "" || s.followUp?.name.trim() === "";
+
+/** The Changed files field keeps the blank line being typed; simulate() gets only paths. */
+function withoutBlankPaths(s: Scenario): Scenario {
+  let input = s;
+  for (const on of ["event", "followUp"] as const) {
+    const changed = s[on]?.changed;
+    if (changed)
+      input = setScenarioValue(
+        input,
+        [on, "changed"],
+        changed.filter((path) => path !== ""),
+      );
+  }
+  return input;
+}
 
 // Diagnostics never depend on the Scenario, so this stands in for the date while it's empty.
 const ANY_DATE = "2000-01-01";
@@ -142,6 +160,9 @@ export function App() {
   // One Scenario, or two with Compare on (#9 §8).
   const [scenarios, setScenarios] = useState<Scenario[]>([BLANK]);
   const [labels, setLabels] = useState(["Scenario 1"]);
+  // Each Scenario's pinned subject keys, in the order pinned (#9 §3).
+  const [pins, setPins] = useState<string[][]>([[]]);
+  const [saving, setSaving] = useState(false);
   // The Scenario the form shows, and the last label it refused (#12 §6).
   const [form, setForm] = useState(0);
   const [labelError, setLabelError] = useState<string>();
@@ -212,17 +233,7 @@ export function App() {
             continue;
           }
           const dated = s.repo.date !== "";
-          // The Changed files field keeps the blank line being typed; simulate() gets only paths.
-          let input = s;
-          for (const on of ["event", "followUp"] as const) {
-            const changed = s[on]?.changed;
-            if (changed)
-              input = setScenarioValue(
-                input,
-                [on, "changed"],
-                changed.filter((path) => path !== ""),
-              );
-          }
+          let input = withoutBlankPaths(s);
           if (!dated)
             input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
           const result = simulate(files, input);
@@ -567,6 +578,7 @@ export function App() {
   const setCompare = (on: boolean) => {
     setScenarios((ss) => (on ? [ss[0]!, ss[0]!] : [ss[0]!]));
     setLabels((ls) => (on ? [ls[0]!, "Scenario 2"] : [ls[0]!]));
+    setPins((ps) => (on ? [ps[0]!, []] : [ps[0]!]));
     setForm(on ? 1 : 0);
     setLabelError(undefined);
     setRepoDraft(undefined);
@@ -973,6 +985,7 @@ export function App() {
               <span className="key">{v.key}</span> <Value verdict={v} />{" "}
               <span className="root">root {v.causes[0]?.rule}</span>
             </button>
+            <PinToggle i={0} subject={v.key} />
           </li>
         ))}
       </ul>
@@ -982,6 +995,46 @@ export function App() {
   const wholeTab =
     files.length === 0 || (!compare && columns[0]!.blocked !== undefined);
   const counts = countByPath(diagnostics);
+
+  const pinned = (i: number, key: string) => pins[i]?.includes(key) ?? false;
+  const togglePin = (i: number, key: string) =>
+    setPins((ps) =>
+      ps.map((p, j) =>
+        j !== i
+          ? p
+          : p.includes(key)
+            ? p.filter((k) => k !== key)
+            : [...p, key],
+      ),
+    );
+  const inTab = (key: string, verdicts: Verdict[]) =>
+    tab === "access"
+      ? isAccess(key) || verdicts.some((v) => v.key === `${key} › secrets`)
+      : tab === "checks"
+        ? isCheck(key)
+        : tab === "concurrency"
+          ? isConcurrency(key)
+          : true;
+  // #9 §3: every Verdict of this tab, for the Scenarios shown.
+  const tabKeys = columns.map((c) =>
+    c.blocked || !c.verdicts
+      ? []
+      : c.verdicts.filter((v) => inTab(v.key, c.verdicts!)).map((v) => v.key),
+  );
+  const pinCount = pins.flat().length;
+  // The tray saves one Test file with an entry per Scenario that has a pinned Verdict.
+  const tests = scenarios.flatMap((s, i) => {
+    const pinnedVerdicts = (runs[i] ?? []).filter((v) => pinned(i, v.key));
+    return pinnedVerdicts.length === 0 || unnamed(s)
+      ? []
+      : [
+          {
+            label: labels[i]!,
+            scenario: withoutBlankPaths(s),
+            pinned: pinnedVerdicts,
+          },
+        ];
+  });
 
   return (
     <>
@@ -1376,8 +1429,45 @@ export function App() {
             </ul>
           )}
           {failed && !wholeTab && <p className="banner">{INTERNAL_ERROR}</p>}
+          {(tabKeys.flat().length > 0 || pinCount > 0) && (
+            <div className="row tray">
+              {tabKeys.flat().length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const already = tabKeys.flatMap((keys, i) =>
+                      keys.filter((k) => pinned(i, k)),
+                    ).length;
+                    setPins((ps) =>
+                      ps.map((p, i) => [
+                        ...p,
+                        ...(tabKeys[i] ?? []).filter((k) => !p.includes(k)),
+                      ]),
+                    );
+                    setToast({
+                      id: Date.now(),
+                      node: `Pinned ${tabKeys.flat().length - already} (${already} already pinned)`,
+                    });
+                  }}
+                >
+                  Pin all in this tab
+                </button>
+              )}
+              {pinCount > 0 && (
+                <button
+                  type="button"
+                  disabled={tests.length === 0}
+                  onClick={() => setSaving(true)}
+                >
+                  {pinCount} pinned · Save as Behaviour test…
+                </button>
+              )}
+            </div>
+          )}
           <div className={failed && !wholeTab ? "stale" : undefined}>
-            {results}
+            <Pins.Provider value={{ pinned, toggle: togglePin }}>
+              {results}
+            </Pins.Provider>
           </div>
           {open !== undefined &&
             files.length > 0 &&
@@ -1433,6 +1523,22 @@ export function App() {
           files={files}
           onAdd={addFile}
           onClose={() => setPasting(false)}
+        />
+      )}
+      {saving && (
+        <SaveDialog
+          tests={tests}
+          onSaved={(name) =>
+            setToast({
+              id: Date.now(),
+              node: (
+                <>
+                  Download started: <code>{name}</code>
+                </>
+              ),
+            })
+          }
+          onClose={() => setSaving(false)}
         />
       )}
       {confirm && (
