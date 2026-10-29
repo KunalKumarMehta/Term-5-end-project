@@ -83,8 +83,8 @@ export function ImportForm({
         owner,
         repo,
         ref.trim(),
-        // A cancelled import's last steps never bring the step line back.
-        (text) => controller.signal.aborted || setStep(text),
+        // A cancelled or failed import's last steps (a download still in flight) never bring the step line back.
+        (text) => running.current !== controller || setStep(text),
         controller.signal,
       );
     } catch {
