@@ -481,6 +481,11 @@ dialog form {
   width: auto;
 }
 
+/* body's overflow-wrap: anywhere would break a badge mid-word; wrapping at spaces keeps the table in its panel. */
+.grid .value {
+  overflow-wrap: normal;
+}
+
 /* A cell names its Scenario only once the Scenarios stack. */
 .grid .tag {
   display: none;
@@ -549,6 +554,13 @@ select.assumed {
 
 .required-checks .label {
   width: 100%;
+}
+
+/* Keeps each label on the same line as its control. */
+.required-checks .field {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
 }
 
 .chips {
