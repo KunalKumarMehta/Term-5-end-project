@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { isAccess, type Verdict } from "../../src/core";
 import { Value, same, type Column } from "./Grid";
+import { PinToggle } from "./Pins";
 
 export { isAccess };
 
@@ -100,16 +101,19 @@ function Card({
     columns.some((c) => !same(find(c, key), find(columns[0]!, key)));
 
   const button = (v: Verdict, i: number) => (
-    <button
-      type="button"
-      className="verdict"
-      data-key={v.key}
-      data-scenario={i}
-      aria-expanded={open?.key === v.key && open.i === i}
-      onClick={() => onOpen(v.key, i)}
-    >
-      <Value verdict={v} />
-    </button>
+    <>
+      <button
+        type="button"
+        className="verdict"
+        data-key={v.key}
+        data-scenario={i}
+        aria-expanded={open?.key === v.key && open.i === i}
+        onClick={() => onOpen(v.key, i)}
+      >
+        <Value verdict={v} />
+      </button>
+      <PinToggle i={i} subject={v.key} />
+    </>
   );
 
   return (
