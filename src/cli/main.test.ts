@@ -1,15 +1,17 @@
 import {
   copyFileSync,
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test, vi } from "vitest";
-import { PLATFORM_BASELINE } from "../core";
+import { PLATFORM_BASELINE, simulate, type Scenario } from "../core";
 import { main } from "./main";
 
 const { version } = JSON.parse(
@@ -491,4 +493,465 @@ test("show in a folder without .github/workflows/ exits 2 and names the folder",
   );
   expect(code).toBe(2);
   expect(stderr).toContain(".github/workflows/");
+});
+
+const testsFixture = (name: string) =>
+  fileURLToPath(new URL(`fixtures/tests-${name}`, import.meta.url));
+
+test("test exits 0 with only the version line when every pin matches", () => {
+  process.chdir(testsFixture("pass"));
+  expect(run("test")).toEqual({
+    code: 0,
+    stdout: `whynorun ${version}\n`,
+    stderr: "",
+  });
+});
+
+test("test exits 1 with one line per changed pin, under its file and label", () => {
+  process.chdir(testsFixture("changed"));
+  expect(run("test")).toEqual({
+    code: 1,
+    stdout: [
+      `whynorun ${version}`,
+      "",
+      ".github/whynorun/fork-pr.test.yml: Fork PR",
+      "ci.yml › test › secrets: available → empty (root FK-0 → FK-2)",
+      "",
+    ].join("\n"),
+    stderr: "",
+  });
+});
+
+test("test exits 2 on an invalid Test file: an unquoted true in repo.vars is rejected at its line", () => {
+  process.chdir(testsFixture("invalid"));
+  expect(run("test")).toEqual({
+    code: 2,
+    stdout: "",
+    stderr:
+      ".github/whynorun/vars.test.yml:9: /tests/0/scenario/repo/vars/DEPLOY quote it: GitHub variables and job outputs are always strings\n",
+  });
+});
+
+const temps: string[] = [];
+afterEach(() => {
+  for (const dir of temps.splice(0))
+    rmSync(dir, { recursive: true, force: true });
+});
+
+/** A repo of `workflows` (a fixture repo or the example set) and these Test files, made the cwd. */
+function testRepo(workflows: string, tests: Record<string, string>): string {
+  const repo = mkdtempSync(join(tmpdir(), "whynorun-tests-"));
+  temps.push(repo);
+  cpSync(
+    join(workflows, ".github", "workflows"),
+    join(repo, ".github", "workflows"),
+    {
+      recursive: true,
+    },
+  );
+  for (const [name, text] of Object.entries(tests)) {
+    const path = join(repo, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  }
+  process.chdir(repo);
+  return repo;
+}
+const example = () => {
+  const repo = exampleRepo();
+  temps.push(repo);
+  return repo;
+};
+
+// The example's Fork PR Scenario (#15 §2), as a Test file holds it.
+const forkPr = (pins: string, extra = "") => `version: 1
+tests:
+  - label: Fork PR
+    scenario:
+      event: { name: pull_request, actor: fork, ref: feature, base: main, changed: [src/app.ts] }
+      followUp: { name: pull_request, type: synchronize, actor: fork, ref: feature, base: main, changed: [src/app.ts] }
+      repo: { date: 2026-12-03, required: [build, test] }
+${extra}    pins:
+${pins}`;
+
+test("test compares only the pinned fields: a missing field isn't compared, possible is a set, and null means the Verdict must not have the field", () => {
+  testRepo(example(), {
+    ".github/whynorun/fork-pr.test.yml": forkPr(
+      [
+        "      ci.yml › build: { value: runs }",
+        "      ci.yml › e2e: { value: uncertain, possible: [skipped, runs], root: WN-4 }",
+        "      ci.yml › changes: { value: runs, possible: [runs] }",
+        "      ci.yml › concurrency.A: { value: cancelled, group: null, root: CC-2 }",
+        "      ci.yml › concurrency.B: { value: pending, possible: null, root: CC-1 }",
+        "",
+      ].join("\n"),
+    ),
+  });
+  expect(run("test")).toEqual({
+    code: 1,
+    stdout: [
+      `whynorun ${version}`,
+      "",
+      ".github/whynorun/fork-pr.test.yml: Fork PR",
+      "ci.yml › changes: runs (possible {runs} → —)",
+      "ci.yml › concurrency.A: cancelled (group — → ci-feature)",
+      "ci.yml › concurrency.B: pending → runs (root CC-1 → CC-2)",
+      "",
+    ].join("\n"),
+    stderr: "",
+  });
+});
+
+test("test reports a pinned subject that isn't found, with candidates of the same kind, and never follows the rename", () => {
+  testRepo(example(), {
+    ".github/whynorun/fork-pr.test.yml": forkPr(
+      "      ci.yml › tests: { value: runs }\n      check › tset: { value: passes }\n",
+    ),
+  });
+  const { code, stdout } = run("test");
+  expect(code).toBe(1);
+  expect(lastBlock(stdout)).toBe(
+    [
+      ".github/whynorun/fork-pr.test.yml: Fork PR",
+      "pinned subject not found: ci.yml › tests (candidates: ci.yml › build, ci.yml › changes, ci.yml › e2e, ci.yml › test)",
+      "pinned subject not found: check › tset (candidates: check › build, check › test)",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("test reports an Assumption that names no subject as assumed subject not found, with candidates", () => {
+  testRepo(example(), {
+    ".github/whynorun/fork-pr.test.yml": forkPr(
+      "      ci.yml › build: { value: runs }\n",
+      '      assume: { "ci.yml › change › outputs.src": "true" }\n',
+    ),
+  });
+  const { code, stdout } = run("test");
+  expect(code).toBe(1);
+  expect(lastBlock(stdout)).toBe(
+    [
+      ".github/whynorun/fork-pr.test.yml: Fork PR",
+      "assumed subject not found: ci.yml › change › outputs.src (candidates: ci.yml › build, ci.yml › changes, ci.yml › e2e, ci.yml › test)",
+      "",
+    ].join("\n"),
+  );
+});
+
+const pushTest = (pins: string) => `version: 1
+tests:
+  - label: Push
+    scenario:
+      event: { name: push }
+      repo: { date: 2026-12-03 }
+    pins:
+${pins}`;
+
+test("test fails on any Diagnostic, even when every pin matches, and pins on the broken file report file has Diagnostics once", () => {
+  const broken = fileURLToPath(
+    new URL("fixtures/broken-repo", import.meta.url),
+  );
+  testRepo(broken, {
+    ".github/whynorun/a.test.yml": pushTest(
+      "      ci.yml: { value: runs, root: EV-0 }\n",
+    ),
+    ".github/whynorun/b.test.yml": pushTest(
+      "      broken.yml: { value: runs }\n      broken.yml › build: { value: runs }\n",
+    ),
+  });
+  expect(run("test")).toEqual({
+    code: 1,
+    stdout: [
+      `whynorun ${version}`,
+      "",
+      ".github/workflows/broken.yml:3: Unexpected value 'branchez'",
+      "",
+      ".github/whynorun/b.test.yml: Push",
+      "broken.yml: file has Diagnostics",
+      "",
+    ].join("\n"),
+    stderr: "",
+  });
+});
+
+test("test reports an unsupported Scenario once per test, and still compares a pin on event", () => {
+  testRepo(testsFixture("pass"), {
+    ".github/whynorun/schedule.test.yml": `version: 1
+tests:
+  - label: Nightly
+    scenario: { event: { name: schedule }, repo: { date: 2026-12-03 } }
+    pins:
+      event: { value: unsupported, root: WN-3 }
+      ci.yml: { value: runs }
+      ci.yml › test: { value: runs }
+  - label: Nightly again
+    scenario: { event: { name: schedule }, repo: { date: 2026-12-03 } }
+    pins:
+      event: { value: runs }
+`,
+  });
+  expect(run("test")).toEqual({
+    code: 1,
+    stdout: [
+      `whynorun ${version}`,
+      "",
+      ".github/whynorun/schedule.test.yml: Nightly",
+      "Scenario unsupported (root WN-3): event.name = schedule, event.actor = member",
+      "",
+      ".github/whynorun/schedule.test.yml: Nightly again",
+      "Scenario unsupported (root WN-3): event.name = schedule, event.actor = member",
+      "event: runs → unsupported",
+      "",
+    ].join("\n"),
+    stderr: "",
+  });
+});
+
+const one = (scenario: string, pins = "      ci.yml: { value: runs }\n") =>
+  `version: 1\ntests:\n  - label: Push\n    scenario: ${scenario}\n    pins:\n${pins}`;
+const push = "{ event: { name: push }, repo: { date: 2026-12-03 } }";
+
+test.each([
+  [
+    "a YAML syntax error",
+    "version: 1\ntests: [\n",
+    "x.test.yml:3: Flow sequence in block collection must be sufficiently indented and end with a ]",
+  ],
+  [
+    "an alias bomb",
+    `version: 1\nx: &x 1\ny: [${"*x, ".repeat(1001)}]\n`,
+    "x.test.yml:1: Excessive alias count indicates a resource exhaustion attack",
+  ],
+  [
+    "a newer version",
+    `version: 2\ntests: []\n`,
+    "x.test.yml:1: version 2 isn't supported: this WhyNoRun reads Test file version 1",
+  ],
+  [
+    "a file with no tests",
+    "version: 1\ntests: []\n",
+    "x.test.yml:2: /tests must NOT have fewer than 1 items",
+  ],
+  [
+    "a test with no pins",
+    one(push, "      {}\n"),
+    "x.test.yml:6: /tests/0/pins must NOT have fewer than 1 properties",
+  ],
+  [
+    "a label used twice",
+    `${one(push)}${one(push).slice("version: 1\ntests:\n".length)}`,
+    "x.test.yml:7: label `Push` is used by another test in this file",
+  ],
+  [
+    "an unquoted output Assumption",
+    one(
+      `{ event: { name: push }, repo: { date: 2026-12-03 },\n      assume: { "ci.yml › test › outputs.ok": true } }`,
+    ),
+    "x.test.yml:5: /tests/0/scenario/assume/ci.yml › test › outputs.ok quote it: GitHub variables and job outputs are always strings",
+  ],
+  [
+    "an owner/repo that isn't owner/repo",
+    one(
+      "{ event: { name: push }, repo: { date: 2026-12-03, repository: acme } }",
+    ),
+    "x.test.yml:4: /tests/0/scenario/repo/repository use the form owner/repo, e.g. acme/app",
+  ],
+  [
+    "a pin field that isn't value, possible, root, group or continuing",
+    one(push, "      ci.yml: { value: runs, settle: [] }\n"),
+    "x.test.yml:6: /tests/0/pins/ci.yml/settle must NOT have additional properties",
+  ],
+])("test exits 2 on %s, at file:line", (_, text, message) => {
+  testRepo(testsFixture("pass"), { "x.test.yml": text });
+  expect(run("test", "x.test.yml")).toEqual({
+    code: 2,
+    stdout: "",
+    stderr: `${message}\n`,
+  });
+});
+
+test("test exits 2 on a Test file it can't read, and names it", () => {
+  testRepo(testsFixture("pass"), { "dir.test.yml/keep": "" });
+  expect(run("test", "dir.test.yml")).toEqual({
+    code: 2,
+    stdout: "",
+    stderr: "dir.test.yml: can't read it (EISDIR)\n",
+  });
+});
+
+test("test with no Test files exits 2, names the pattern and suggests a nearby .test.yaml", () => {
+  testRepo(testsFixture("pass"), {
+    ".github/whynorun/push.test.yaml": pushTest(
+      "      ci.yml: { value: runs }\n",
+    ),
+  });
+  expect(run("test")).toEqual({
+    code: 2,
+    stdout: "",
+    stderr:
+      "whynorun: no Test files match .github/whynorun/**/*.test.yml; Test files end in .test.yml, so these don't count: .github/whynorun/push.test.yaml\n",
+  });
+  vi.restoreAllMocks();
+  expect(run("test", "other.test.yml")).toMatchObject({
+    code: 2,
+    stderr: expect.stringMatching(
+      /^whynorun: no Test files match other\.test\.yml;/,
+    ),
+  });
+});
+
+test("test expands each argument as a glob from the cwd, de-duplicated and sorted", () => {
+  const changed = readFileSync(
+    join(testsFixture("changed"), ".github", "whynorun", "fork-pr.test.yml"),
+    "utf8",
+  );
+  testRepo(testsFixture("changed"), {
+    "b.test.yml": changed,
+    "a.test.yml": changed,
+  });
+  const { code, stdout } = run("test", "b.test.yml", "*.test.yml");
+  expect(code).toBe(1);
+  expect(stdout.match(/^.*: Fork PR$/gm)).toEqual([
+    "a.test.yml: Fork PR",
+    "b.test.yml: Fork PR",
+  ]);
+});
+
+test("test without .github/workflows/ exits 2 and names the folder", () => {
+  const repo = mkdtempSync(join(tmpdir(), "whynorun-tests-"));
+  temps.push(repo);
+  writeFileSync(join(repo, "x.test.yml"), one(push));
+  process.chdir(repo);
+  const { code, stderr } = run("test", "x.test.yml");
+  expect(code).toBe(2);
+  expect(stderr).toContain(".github/workflows/");
+});
+
+test("show --from <file> --scenario <label> prints the Merge-readiness badges with --flow checks, and runs A and B with --flow concurrency", () => {
+  testRepo(example(), {
+    "fork-pr.test.yml": forkPr("      ci.yml: { value: runs }\n").replace(
+      "tests:\n",
+      "tests:\n  - label: Push\n    scenario: { event: { name: push }, repo: { date: 2026-12-03 } }\n    pins: { ci.yml: { value: runs } }\n",
+    ),
+  });
+  const show = (flow: string) =>
+    run(
+      "show",
+      "--from",
+      "fork-pr.test.yml",
+      "--scenario",
+      "Fork PR",
+      "--flow",
+      flow,
+    );
+  const checks = show("checks");
+  expect(checks.code).toBe(0);
+  expect(lastBlock(checks.stdout)).toBe(
+    "check › build: passes (root RQ-4; WN-5 assumed event.approval = approved)\n" +
+      "check › test: passes (root RQ-4; WN-5 assumed event.approval = approved)\n",
+  );
+  const concurrency = show("concurrency");
+  expect(concurrency.code).toBe(0);
+  expect(lastBlock(concurrency.stdout)).toBe(
+    [
+      "ci.yml › concurrency.A: cancelled (root CC-2, line 13; WN-5 assumed repo.visibility = public; WN-5 assumed event.approval = approved)",
+      "ci.yml › concurrency.B: runs (root CC-2, line 13; WN-5 assumed repo.visibility = public; WN-5 assumed event.approval = approved)",
+      "deploy.yml › concurrency.A: no-run (root EV-0, line 3)",
+      "deploy.yml › concurrency.B: no-run (root EV-0, line 3; WN-5 assumed repo.visibility = public)",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("show --from can't be combined with the Scenario flags, needs --scenario for a file of several tests, and names the labels", () => {
+  testRepo(testsFixture("pass"), {
+    "two.test.yml": `${one(push)}${one(push).slice("version: 1\ntests:\n".length).replace("Push", "Again")}`,
+  });
+  const combined = run("show", "--from", "two.test.yml", "--event", "push");
+  expect(combined.code).toBe(2);
+  expect(combined.stderr).toContain("--from can't be combined with --event");
+  const unpicked = run("show", "--from", "two.test.yml");
+  expect(unpicked.code).toBe(2);
+  expect(unpicked.stderr).toContain("--scenario <label> (Push, Again)");
+  const unknown = run("show", "--from", "two.test.yml", "--scenario", "Nope");
+  expect(unknown.code).toBe(2);
+  expect(unknown.stderr).toContain(
+    "no test labelled Nope in two.test.yml (Push, Again)",
+  );
+  expect(
+    run("show", "--from", "two.test.yml", "--scenario", "Again").code,
+  ).toBe(0);
+});
+
+test("show --from an invalid Test file exits 2 with its file:line messages", () => {
+  process.chdir(testsFixture("invalid"));
+  expect(run("show", "--from", ".github/whynorun/vars.test.yml")).toEqual({
+    code: 2,
+    stdout: "",
+    stderr:
+      ".github/whynorun/vars.test.yml:9: /tests/0/scenario/repo/vars/DEPLOY quote it: GitHub variables and job outputs are always strings\n",
+  });
+});
+
+test("prototype pollution (#14 §6.7): the core's input loaded through a Test file gives the same Verdicts as simulate()", () => {
+  // One job per condition on a member's pull_request, as the core test has it.
+  const conditions = {
+    ctor: "vars.CONSTRUCTOR == 'a'",
+    proto: "vars.__proto__ == 'b'",
+    payload: "github.event.__proto__.x == 'c'",
+  };
+  const workflow = {
+    path: ".github/workflows/pr.yml",
+    text:
+      "on: pull_request\njobs:\n" +
+      Object.entries(conditions)
+        .map(
+          ([id, condition]) =>
+            `  ${id}:\n    if: ${condition}\n    runs-on: x\n    steps:\n      - run: echo\n`,
+        )
+        .join(""),
+  };
+  const scenario = JSON.parse(
+    `{"event":{"name":"pull_request","payload":{"__proto__":{"x":"c"}}},
+      "repo":{"date":"2026-12-03","vars":{"CONSTRUCTOR":"a","__proto__":"b"}}}`,
+  ) as Scenario;
+  const { verdicts } = simulate([workflow], scenario);
+  expect(
+    ["ctor", "proto", "payload"].map(
+      (id) => verdicts.find((v) => v.key === `pr.yml › ${id}`)?.value,
+    ),
+  ).toEqual(["runs", "runs", "runs"]);
+
+  // Every Verdict simulate() gives, pinned in full.
+  const pins = verdicts
+    .map(
+      (v) =>
+        `      ${JSON.stringify(v.key)}: ${JSON.stringify({
+          value: v.value,
+          possible: v.possible ?? null,
+          root: v.causes[0]?.rule ?? null,
+        })}\n`,
+    )
+    .join("");
+  const repo = mkdtempSync(join(tmpdir(), "whynorun-tests-"));
+  temps.push(repo);
+  mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(repo, workflow.path), workflow.text);
+  testRepo(repo, {
+    "pollution.test.yml": `version: 1
+tests:
+  - label: Polluting keys
+    scenario:
+      event: { name: pull_request, payload: { __proto__: { x: c } } }
+      repo: { date: 2026-12-03, vars: { CONSTRUCTOR: a, __proto__: b } }
+    pins:
+${pins}`,
+  });
+  expect(run("test", "pollution.test.yml")).toEqual({
+    code: 0,
+    stdout: `whynorun ${version}\n`,
+    stderr: "",
+  });
+  expect(({} as Record<string, unknown>).x).toBeUndefined();
+  expect(Object.getPrototypeOf({})).toBe(Object.prototype);
 });

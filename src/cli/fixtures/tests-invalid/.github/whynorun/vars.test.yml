@@ -1,0 +1,11 @@
+version: 1
+tests:
+  - label: Push with DEPLOY set
+    scenario:
+      event: { name: push }
+      repo:
+        date: 2026-12-03
+        vars:
+          DEPLOY: true
+    pins:
+      ci.yml: { value: runs }

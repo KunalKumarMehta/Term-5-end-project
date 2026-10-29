@@ -17,3 +17,4 @@ playwright-report/
 # build and test has it without running the generator first.
 src/core/generated/*
 !src/core/generated/validate-scenario.ts
+!src/core/generated/validate-test-file.ts

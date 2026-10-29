@@ -1,0 +1,11 @@
+version: 1
+tests:
+  - label: Push to main
+    scenario:
+      event: { name: push, ref: refs/heads/main }
+      repo: { date: 2026-12-03 }
+    pins:
+      ci.yml: { value: runs, possible: null, root: EV-0 }
+      ci.yml › test: { value: runs, possible: null, root: WN-2 }
+      ci.yml › release: { value: skipped, root: JG-3 }
+      ci.yml › test › secrets: { value: available, root: FK-0 }

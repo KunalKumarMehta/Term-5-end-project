@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn.jsdelivr.net/npm/whynorun@1/schemas/test-file.schema.json",
+  "title": "TestFile",
+  "description": "A WhyNoRun Test file, committed at .github/whynorun/<name>.test.yml: one or more Behaviour tests, each a Scenario and the Verdicts pinned for it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tests"],
+  "properties": {
+    "version": {
+      "description": "The Test file format version, separate from the package version.",
+      "const": 1
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/test" }
+    }
+  },
+  "definitions": {
+    "test": {
+      "title": "Test",
+      "description": "One Behaviour test. Labels are unique within the file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "scenario", "pins"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "scenario": {
+          "description": "Exactly the Scenario simulate() takes, with every default written out.",
+          "$ref": "scenario.schema.json"
+        },
+        "pins": {
+          "description": "Keyed by subject key, such as \"ci.yml › test › secrets\" or \"check › test\".",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/definitions/pin" }
+        }
+      }
+    },
+    "pin": {
+      "title": "Pin",
+      "description": "A missing field isn't compared; null means the Verdict must not have that field. possible and continuing compare as sets.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string" },
+        "possible": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "root": {
+          "description": "The root cause's rule ID.",
+          "type": ["string", "null"]
+        },
+        "group": {
+          "description": "A concurrency Verdict's resolved group.",
+          "type": ["string", "null"]
+        },
+        "continuing": {
+          "description": "The job keys a cancelled run A keeps running.",
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
