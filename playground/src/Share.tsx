@@ -7,6 +7,8 @@ const LONG = 4000;
 interface Props {
   /** The full link, or undefined while it's being written. */
   url?: string;
+  /** Why no link can be offered, when its own checks would refuse it. */
+  error?: string;
   /** For the message when it's too big: an edited import's reference, if any. */
   reference?: string;
   /** Whether the tray has pins, the only time a Test file is mentioned. */
@@ -18,6 +20,7 @@ interface Props {
 /** #14 §8: the share popover, with the link, Copy, and the long-link warning or refusal. */
 export function ShareDialog({
   url,
+  error,
   reference,
   pins,
   onCopied,
@@ -47,7 +50,11 @@ export function ShareDialog({
   return (
     <dialog ref={dialog} aria-labelledby="share-title" onClose={onClose}>
       <h2 id="share-title">Share link</h2>
-      {url === undefined ? (
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : url === undefined ? (
         <p>Writing the link…</p>
       ) : n > MAX_LINK ? (
         <p className="error" role="alert">

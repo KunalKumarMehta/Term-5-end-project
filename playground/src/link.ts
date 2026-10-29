@@ -4,11 +4,14 @@
 import type { Scenario, WorkflowFile } from "../../src/core";
 import {
   ANOTHER_VERSION,
+  MAX_KEY,
   fromDraft,
+  isObject,
   toDraft,
   validateDraft,
   type Held,
   type Origin,
+  type Reference,
 } from "./draft";
 import type { Source } from "./RepoFacts";
 
@@ -19,7 +22,7 @@ export const PENDING = "whynorun:pending-link";
 export const MAX_LINK = 65_000;
 const MAX_INFLATED = 1024 * 1024;
 
-const COULDNT = "This link couldn't be opened: ";
+export const COULDNT = "This link couldn't be opened: ";
 export const CUT_OFF = "This link was cut off";
 
 /** What a link carries (#14 §7): never the tray, the opened Test file or touched flags. */
@@ -36,13 +39,6 @@ interface Link {
   /** The open Explanation. */
   open?: { key: string; i: number };
 }
-
-export type Reference = {
-  owner: string;
-  repo: string;
-  ref: string;
-  sha: string;
-};
 
 /** A link that passed every check: what it holds, and the import to fetch for a reference link. */
 export interface Opening {
@@ -118,9 +114,6 @@ async function inflate(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
   return out;
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
 /** The link's own checks, then the draft's field checks (#14 §6.4) on what it carries. */
 function check(data: unknown): Opening | { error: string } {
   if (!isObject(data)) return { error: `${COULDNT}link is invalid` };
@@ -167,7 +160,7 @@ function check(data: unknown): Opening | { error: string } {
     !(
       isObject(open) &&
       typeof open.key === "string" &&
-      open.key.length <= 300 &&
+      open.key.length <= MAX_KEY &&
       Number.isInteger(open.i) &&
       (open.i as number) >= 0 &&
       (open.i as number) < draft.scenarios.length

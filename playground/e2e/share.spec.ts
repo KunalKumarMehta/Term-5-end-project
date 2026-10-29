@@ -368,6 +368,29 @@ test("the share popover warns past 4,000 characters, with Copy anyway, and refus
   );
 });
 
+test("a set past the draft's limits is neither saved as a draft nor shared as a link its own checks would refuse", async ({
+  page,
+}) => {
+  await page.goto("./");
+  // Past 256 KiB, yet deflate shrinks it far below 65,000 characters.
+  await paste(page, `${CI}# ${"a".repeat(300_000)}\n`);
+  await expect(header(page)).toContainText(
+    "Not saving a draft in this browser",
+  );
+  expect(
+    await page.evaluate(() => localStorage.getItem("whynorun:draft:v1")),
+  ).toBeNull();
+
+  await header(page).getByRole("button", { name: "Copy link" }).click();
+  await expect(share(page)).toContainText(
+    "Can't share this as a link: set.files[0].text is invalid",
+  );
+  await expect(share(page).getByLabel("Link")).toHaveCount(0);
+  await expect(share(page).getByRole("button", { name: /Copy/ })).toHaveCount(
+    0,
+  );
+});
+
 test("a reference link whose import fails changes nothing, keeps the link pending for Retry and a reload, and Dismiss forgets it", async ({
   page,
 }) => {

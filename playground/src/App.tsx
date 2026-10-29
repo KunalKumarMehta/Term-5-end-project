@@ -67,7 +67,15 @@ import {
   type Imported,
   type ImportedFacts,
 } from "./importRepo";
-import { PENDING, decodeLink, encodeLink, isLink, type Opening } from "./link";
+import {
+  COULDNT,
+  MAX_LINK,
+  PENDING,
+  decodeLink,
+  encodeLink,
+  isLink,
+  type Opening,
+} from "./link";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { InvalidTestDialog, TestPicker } from "./OpenTest";
 import { PasteDialog } from "./PasteDialog";
@@ -801,7 +809,7 @@ export function App() {
   };
 
   // #14 §8–9: the share popover's link, and a link's banner: bad, loading or failed.
-  const [share, setShare] = useState<{ url?: string }>();
+  const [share, setShare] = useState<{ url?: string; error?: string }>();
   const [linkNote, setLinkNote] = useState<{
     text: string;
     retry?: { opening: Opening; what: string };
@@ -810,11 +818,20 @@ export function App() {
 
   const copyLink = () => {
     setShare({});
-    void encodeLink(latest.current!, open).then((fragment) =>
-      setShare({
-        url: location.origin + location.pathname + location.search + fragment,
-      }),
-    );
+    void encodeLink(latest.current!, open).then(async (fragment) => {
+      const url =
+        location.origin + location.pathname + location.search + fragment;
+      // Past 65,000 the popover refuses it; otherwise, never a link its own checks refuse.
+      const back =
+        url.length > MAX_LINK ? undefined : await decodeLink(fragment);
+      setShare(
+        back && "error" in back
+          ? {
+              error: `Can't share this as a link: ${back.error.replace(COULDNT, "")}`,
+            }
+          : { url },
+      );
+    });
   };
 
   /** #14 §9 steps 4–6: cancels a running import, loads the link's set, and only then replaces. */
@@ -2441,6 +2458,7 @@ export function App() {
       {share && (
         <ShareDialog
           url={share.url}
+          error={share.error}
           reference={
             origin === "imported" && edited
               ? `${imported!.owner}/${imported!.repo}@${imported!.sha.slice(0, 7)}`

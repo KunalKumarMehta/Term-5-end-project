@@ -21,12 +21,23 @@ const KEYS = /^whynorun:draft:v(\d+)$/;
 export const ANOTHER_VERSION =
   "A draft from another WhyNoRun version can't be opened here";
 
+/** An import's repo and commit. */
+export interface Reference {
+  owner: string;
+  repo: string;
+  ref: string;
+  sha: string;
+}
+
 /** An import travels as its reference; the files are the draft's own (#14 §2). */
-export type Origin =
-  | "example"
-  | "pasted"
-  | "uploaded"
-  | { owner: string; repo: string; ref: string; sha: string };
+export type Origin = "example" | "pasted" | "uploaded" | Reference;
+
+const referenceOf = ({ owner, repo, ref, sha }: Reference): Reference => ({
+  owner,
+  repo,
+  ref,
+  sha,
+});
 
 /** A Scenario as the playground holds it: unset fields stay unset, beside their source tags. */
 export interface DraftScenario {
@@ -105,15 +116,7 @@ export function toDraft(held: Held, saved: Date): Draft | undefined {
     saved: saved.toISOString(),
     set: {
       files,
-      origin:
-        origin === "imported"
-          ? {
-              owner: imported!.owner,
-              repo: imported!.repo,
-              ref: imported!.ref,
-              sha: imported!.sha,
-            }
-          : origin,
+      origin: origin === "imported" ? referenceOf(imported!) : origin,
       edited: held.edited,
       originals: base && [...base],
     },
@@ -160,10 +163,7 @@ export function fromDraft(draft: Draft, file?: TestFile): Held {
     imported:
       typeof origin === "object"
         ? {
-            owner: origin.owner,
-            repo: origin.repo,
-            ref: origin.ref,
-            sha: origin.sha,
+            ...referenceOf(origin),
             files: originals ?? files,
             ignored: [],
             facts: facts as ImportedFacts,
@@ -194,7 +194,7 @@ const bad = (field: string): never => {
   throw new Invalid(field);
 };
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
+export const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isString = (v: unknown, max = Infinity): v is string =>
   typeof v === "string" && v.length <= max;
@@ -204,7 +204,7 @@ const strings = (v: unknown) =>
 // #14 §6.4's limits.
 const MAX_FILES = 100;
 const MAX_TEXT = 256 * 1024;
-const MAX_KEY = 300;
+export const MAX_KEY = 300;
 const PATH = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 const SHA = /^[0-9a-f]{40}$/;
 const PIN: Record<string, (v: unknown) => boolean> = {
@@ -409,11 +409,16 @@ export function readDraft(): Boot {
 /**
  * Writes the draft, or deletes it when there's none. A write that throws (blocked, private
  * mode or quota) deletes the stored one too, so a reload can't bring back older work (#14 §4).
+ * So does a draft its own checks would refuse at the next load, such as a file past 256 KiB.
  */
 export function writeDraft(draft: Draft | undefined): boolean {
   try {
-    if (draft) localStorage.setItem(KEY, JSON.stringify(draft));
-    else localStorage.removeItem(KEY);
+    if (draft) {
+      const json = JSON.stringify(draft);
+      if (validateDraft(JSON.parse(json)).error !== undefined)
+        throw new Invalid("draft");
+      localStorage.setItem(KEY, json);
+    } else localStorage.removeItem(KEY);
     return true;
   } catch {
     try {
