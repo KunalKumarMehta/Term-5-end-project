@@ -10,10 +10,12 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  compareTest,
   isCheck,
   isConcurrency,
   isJobKey,
   isLoaded,
+  parseTestFile,
   producedChecks,
   setScenarioValue,
   settleValue,
@@ -21,8 +23,12 @@ import {
   validateScenario,
   type ActorKind,
   type Diagnostic,
+  type Finding,
+  type Pin,
   type Scenario,
   type Span,
+  type TestFile,
+  type UnmatchedAssumption,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
@@ -45,8 +51,15 @@ import { Grid, Value, same, type Column } from "./Grid";
 import { ImportForm } from "./ImportForm";
 import type { Imported, ImportedFacts } from "./importRepo";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
+import { InvalidTestDialog, TestPicker } from "./OpenTest";
 import { PasteDialog } from "./PasteDialog";
-import { PinToggle, Pins, SaveDialog } from "./Pins";
+import {
+  OpenedTest,
+  PinToggle,
+  Pins,
+  SaveDialog,
+  type TestStatus,
+} from "./Pins";
 import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
 
@@ -142,6 +155,22 @@ function unset(scenario: Scenario, path: string[]): Scenario {
   return copy as unknown as Scenario;
 }
 
+/** The Test file Open test loaded, and what it put in the Scenarios and tray (#12 §9). */
+interface Opened {
+  name: string;
+  file: TestFile;
+  /** The tests opened as Scenario tabs, by index in the file. */
+  chosen: number[];
+  /** The Scenarios and pinned keys as opened, to tell when they've changed (#14 §10). */
+  scenarios: Scenario[];
+  keys: string[][];
+  /** Each Scenario's loaded pins with their own field lists, re-pointed ones under their new key. */
+  loaded: Record<string, Pin>[];
+}
+
+const failing = (f: Finding) =>
+  f.status !== "match" && f.status !== "file has Diagnostics";
+
 export function App() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [origin, setOrigin] = useState<
@@ -163,6 +192,13 @@ export function App() {
   // Each Scenario's pinned subject keys, in the order pinned (#9 §3).
   const [pins, setPins] = useState<string[][]>([[]]);
   const [saving, setSaving] = useState(false);
+  const [opened, setOpened] = useState<Opened>();
+  // A Test file with more than two tests, waiting for the picker, or one that's invalid.
+  const [choosing, setChoosing] = useState<{ name: string; file: TestFile }>();
+  const [invalidTest, setInvalidTest] = useState<{
+    name: string;
+    errors: string[];
+  }>();
   // The Scenario the form shows, and the last label it refused (#12 §6).
   const [form, setForm] = useState(0);
   const [labelError, setLabelError] = useState<string>();
@@ -180,6 +216,8 @@ export function App() {
   const [failPick, setFailPick] = useState("");
   // Each Scenario's Verdicts; undefined while it has no date.
   const [runs, setRuns] = useState<(Verdict[] | undefined)[]>([]);
+  // Each Scenario's Assumptions that point at nothing.
+  const [unmatched, setUnmatched] = useState<UnmatchedAssumption[][]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [target, setTarget] = useState<Target>();
   const [failed, setFailed] = useState(false);
@@ -193,6 +231,10 @@ export function App() {
   const sheet = useRef<HTMLElement>(null);
   const sheetScroll = useRef(0);
   const picker = useRef<HTMLInputElement>(null);
+  const testPicker = useRef<HTMLInputElement>(null);
+  // The last run's news, announced with the tray's count once both are rendered; null is silent.
+  const newsRef = useRef<string[] | null>([]);
+  const lastTray = useRef(0);
 
   // What the last run left on screen and what was last announced, read by the next run.
   const last = useRef<{
@@ -218,18 +260,22 @@ export function App() {
     const timer = setTimeout(() => {
       if (files.length === 0) {
         last.current = { runs: [], counts: new Map(), failed: false };
+        newsRef.current = null;
         setRuns([]);
+        setUnmatched([]);
         setDiagnostics([]);
         setFailed(false);
         return;
       }
       const { runs: before, counts: was, replaced } = last.current;
       const next: (Verdict[] | undefined)[] = [];
+      const nextUnmatched: UnmatchedAssumption[][] = [];
       let diagnostics: Diagnostic[] = [];
       try {
         for (const [i, s] of scenarios.entries()) {
           if (unnamed(s)) {
             next.push(before[i]);
+            nextUnmatched.push(unmatched[i] ?? []);
             continue;
           }
           const dated = s.repo.date !== "";
@@ -239,6 +285,7 @@ export function App() {
           const result = simulate(files, input);
           diagnostics = result.diagnostics;
           next.push(dated ? result.verdicts : undefined);
+          nextUnmatched.push(dated ? result.unmatchedAssumptions : []);
         }
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
@@ -260,13 +307,16 @@ export function App() {
       });
       if (n > 0)
         news.unshift(`Results updated: ${plural(n, "Verdict")} changed`);
-      if (!replaced) announce(news.join(" "));
+      newsRef.current = replaced ? null : news;
       last.current = { runs: next, counts, failed: false };
       setRuns(next);
+      setUnmatched(nextUnmatched);
       setDiagnostics(diagnostics);
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
+    // unmatched only carries an unnamed Scenario's last result over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, scenarios, announce]);
 
   useEffect(() => {
@@ -371,11 +421,15 @@ export function App() {
       title: "Load the example?",
       losses: [
         ...setLosses(),
-        ...(touched
+        ...(opened
           ? [
-              `${labels[0]} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
+              `${labels[0]} comes from ${opened.name}, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
             ]
-          : []),
+          : touched
+            ? [
+                `${labels[0]} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
+              ]
+            : []),
       ],
       action: "Load example",
       run: () => {
@@ -383,7 +437,8 @@ export function App() {
         setOrigin("example");
         setImported(undefined);
         setActive(undefined);
-        if (!touched) {
+        // #14 §3: only an untouched Scenario 1, with no Test file open.
+        if (!touched && !opened) {
           setScenarios((ss) => [EXAMPLE_SCENARIO, ...ss.slice(1)]);
           setLabels((ls) => [EXAMPLE_LABEL, ...ls.slice(1)]);
         }
@@ -460,10 +515,118 @@ export function App() {
       );
   };
 
+  /** What opening a Test file would lose (#12 §1, #14 §10). */
+  const openLosses = () => {
+    const scenariosChanged = opened
+      ? scenarios.length !== opened.scenarios.length ||
+        scenarios.some((s, i) => s !== opened.scenarios[i]) ||
+        labels.some((l, i) => l !== opened.file.tests[opened.chosen[i]!]?.label)
+      : touched ||
+        (compare &&
+          (scenarios[1] !== scenarios[0] || labels[1] !== "Scenario 2"));
+    const pinsChanged =
+      opened !== undefined &&
+      pins.some((p, i) => p.join("\n") !== (opened.keys[i] ?? []).join("\n"));
+    return [
+      ...(scenariosChanged
+        ? [`It replaces your changes to ${labels.join(" and ")}.`]
+        : []),
+      ...(pinsChanged
+        ? [`It drops your changes to the pins from ${opened.name}.`]
+        : !opened && pins.flat().length > 0
+          ? [
+              `It replaces your ${plural(pins.flat().length, "pinned Verdict")}.`,
+            ]
+          : []),
+    ];
+  };
+
+  /** Opens the chosen tests as the Scenario tabs, replacing the Scenarios and tray (#12 §9). */
+  const openTests = (name: string, file: TestFile, chosen: number[]) =>
+    ask({
+      title: `Open ${name}?`,
+      losses: openLosses(),
+      action: "Open test",
+      run: () => {
+        const tests = chosen.map((i) => file.tests[i]!);
+        const opening = tests.map((t) => t.scenario);
+        const keys = tests.map((t) => Object.keys(t.pins));
+        // #12 addendum E: the first run stays silent, as the toast speaks.
+        last.current.replaced = true;
+        newsRef.current = null;
+        setScenarios(opening);
+        setLabels(tests.map((t) => t.label));
+        setPins(keys);
+        setOpened({
+          name,
+          file,
+          chosen,
+          scenarios: opening,
+          keys,
+          loaded: tests.map((t) => t.pins),
+        });
+        // Scenarios from a Test file count as touched (#14 §3).
+        setTouched(true);
+        setForm(0);
+        setLabelError(undefined);
+        setRepoDraft(undefined);
+        setOpen(undefined);
+        setToast({
+          id: Date.now(),
+          node: (
+            <>
+              Opened <code>{name}</code>
+            </>
+          ),
+        });
+      },
+    });
+
+  /** Open test… or a dropped Test file: invalid loads nothing, more than two tests asks which. */
+  const openTestFile = (name: string, text: string) => {
+    const parsed = parseTestFile(name, text);
+    if (parsed.errors) return setInvalidTest({ name, errors: parsed.errors });
+    if (parsed.file.tests.length > 2)
+      return setChoosing({ name, file: parsed.file });
+    openTests(
+      name,
+      parsed.file,
+      parsed.file.tests.map((_, i) => i),
+    );
+  };
+
+  /** Re-points a pin, keeping its place and its loaded fields (#12 §9, addendum G). */
+  const repoint = (i: number, from: string, to: string) => {
+    setPins((ps) =>
+      ps.map((p, j) => (j === i ? p.map((k) => (k === from ? to : k)) : p)),
+    );
+    setOpened(
+      (o) =>
+        o && {
+          ...o,
+          loaded: o.loaded.map((l, j) =>
+            j === i
+              ? Object.fromEntries(
+                  Object.entries(l).map(([k, pin]) => [
+                    k === from ? to : k,
+                    pin,
+                  ]),
+                )
+              : l,
+          ),
+        },
+    );
+  };
+
   /** Upload and folder drop replace the whole set, under the confirm-first rule (#12 §1, §5). */
   const upload = async (reading: Promise<Upload>) => {
     setUploadNote(undefined);
     const read = await reading;
+    if ("test" in read)
+      return openTestFile(
+        read.test.name,
+        new TextDecoder().decode(await read.test.read()),
+      );
     if ("error" in read) {
       setUploadNote(
         <p className="error" role="alert">
@@ -471,11 +634,6 @@ export function App() {
             <>
               Couldn&rsquo;t read <code>{read.path}</code>: it isn&rsquo;t
               readable UTF-8 text, so nothing changed.
-            </>
-          ) : read.error === "test" ? (
-            <>
-              <code>{read.name}</code> is a Test file. Opening Test files
-              isn&rsquo;t supported yet, so nothing changed.
             </>
           ) : (
             <>
@@ -579,6 +737,7 @@ export function App() {
     setScenarios((ss) => (on ? [ss[0]!, ss[0]!] : [ss[0]!]));
     setLabels((ls) => (on ? [ls[0]!, "Scenario 2"] : [ls[0]!]));
     setPins((ps) => (on ? [ps[0]!, []] : [ps[0]!]));
+    setOpened((o) => o && { ...o, loaded: o.loaded.slice(0, 1) });
     setForm(on ? 1 : 0);
     setLabelError(undefined);
     setRepoDraft(undefined);
@@ -646,6 +805,21 @@ export function App() {
 
   // Assumptions, keyed by job key ("job X fails").
   const assume = scenario.assume ?? {};
+  // #12 §9: Assumptions that point at nothing, whether or not a Test file is open.
+  const notFound = new Map(
+    (unmatched[form] ?? []).map((u) => [u.key, u.candidates]),
+  );
+  /** Re-points an Assumption onto a job, keeping an output's path after it. */
+  const reassume = (from: string, job: string) =>
+    setScenario((s) => ({
+      ...s,
+      assume: Object.fromEntries(
+        Object.entries(s.assume ?? {}).map(([k, v]) => [
+          k === from ? onJob(from, job) : k,
+          v,
+        ]),
+      ),
+    }));
   const eventApprovalSource = sourceOf(scenario, "event.approval");
   const repositorySource = sourceOf(
     scenario,
@@ -1022,19 +1196,86 @@ export function App() {
       : c.verdicts.filter((v) => inTab(v.key, c.verdicts!)).map((v) => v.key),
   );
   const pinCount = pins.flat().length;
+  // Each Scenario's loaded pins still in the tray, in the tray's order.
+  const loadedPins = (i: number) => {
+    const loaded = opened?.loaded[i];
+    return loaded
+      ? Object.fromEntries(
+          (pins[i] ?? [])
+            .filter((k) => Object.hasOwn(loaded, k))
+            .map((k) => [k, loaded[k]!]),
+        )
+      : undefined;
+  };
+  // What `whynorun test` would report for each opened test (#12 §9), or why it's waiting.
+  const statuses = scenarios.map((s, i) => {
+    const loaded = loadedPins(i);
+    if (!loaded) return undefined;
+    const verdicts = runs[i];
+    const waiting =
+      files.length === 0
+        ? "waiting for a Workflow set"
+        : s.repo.date === ""
+          ? "waiting for the simulation date"
+          : undefined;
+    const findings =
+      waiting || !verdicts
+        ? []
+        : compareTest(
+            { label: labels[i]!, scenario: s, pins: loaded },
+            {
+              verdicts,
+              diagnostics,
+              unmatchedAssumptions: unmatched[i] ?? [],
+            },
+          );
+    return { waiting, findings, pins: Object.keys(loaded).length };
+  });
+  const pinStatus = (i: number, key: string) =>
+    statuses[i]?.findings.find(
+      (f) => (f.status === "match" || f.status === "changed") && f.key === key,
+    );
+  // #12 §9: everything that would make the CLI exit 1, plus the pins still waiting.
+  const evaluated = statuses.some((t) => t && t.waiting === undefined);
+  const wouldFail =
+    statuses.reduce(
+      (n, t) => n + (t?.findings.filter(failing).length ?? 0),
+      0,
+    ) + (evaluated ? counts.size : 0);
+  const waitingPins = statuses.reduce(
+    (n, t) => n + (t?.waiting ? t.pins : 0),
+    0,
+  );
   // The tray saves one Test file with an entry per Scenario that has a pinned Verdict.
   const tests = scenarios.flatMap((s, i) => {
     const pinnedVerdicts = (runs[i] ?? []).filter((v) => pinned(i, v.key));
-    return pinnedVerdicts.length === 0 || unnamed(s)
+    const loaded = loadedPins(i);
+    return (pinnedVerdicts.length === 0 && !Object.keys(loaded ?? {}).length) ||
+      unnamed(s)
       ? []
       : [
           {
             label: labels[i]!,
             scenario: withoutBlankPaths(s),
             pinned: pinnedVerdicts,
+            loaded,
           },
         ];
   });
+
+  // #12 addendum E: the run's news, then "· tray: N would fail" when that count changes.
+  useEffect(() => {
+    const said = newsRef.current;
+    newsRef.current = [];
+    const changed = wouldFail !== lastTray.current;
+    lastTray.current = wouldFail;
+    if (said === null) return;
+    announce(
+      [...said, ...(changed ? [`· tray: ${wouldFail} would fail`] : [])].join(
+        " ",
+      ),
+    );
+  }, [runs, wouldFail, announce]);
 
   return (
     <>
@@ -1064,6 +1305,21 @@ export function App() {
           <button type="button" onClick={() => picker.current!.click()}>
             Upload
           </button>
+          <button type="button" onClick={() => testPicker.current!.click()}>
+            Open test…
+          </button>
+          <input
+            ref={testPicker}
+            type="file"
+            accept=".yml,.yaml"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // Picking the same file again still opens it.
+              if (file)
+                void file.text().then((t) => openTestFile(file.name, t));
+            }}
+          />
           <label className="row">
             <input
               type="checkbox"
@@ -1357,6 +1613,27 @@ export function App() {
                     >
                       Remove
                     </button>
+                    {notFound.has(key) && (
+                      <p className="error">
+                        assumed subject not found
+                        {notFound.get(key)!.length > 0 && <> · re-point to </>}
+                        {notFound.get(key)!.map((job) => {
+                          const taken = Object.hasOwn(assume, onJob(key, job));
+                          return (
+                            // Re-pointing never overwrites or merges (addendum G).
+                            <button
+                              key={job}
+                              type="button"
+                              disabled={taken}
+                              onClick={() => reassume(key, job)}
+                            >
+                              {onJob(key, job)}
+                              {taken && " (already assumed)"}
+                            </button>
+                          );
+                        })}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1462,10 +1739,37 @@ export function App() {
                   {pinCount} pinned · Save as Behaviour test…
                 </button>
               )}
+              {opened && (
+                <span className="tray-status">
+                  {wouldFail} would fail
+                  {waitingPins > 0 && ` · ${waitingPins} waiting`}
+                </span>
+              )}
             </div>
           )}
+          {opened && (
+            <OpenedTest
+              name={opened.name}
+              tests={statuses.flatMap((t, i): TestStatus[] =>
+                t
+                  ? [
+                      {
+                        label: labels[i]!,
+                        waiting: t.waiting,
+                        findings: t.findings,
+                        pinned: (key) => pinned(i, key),
+                        repoint: (from, to) => repoint(i, from, to),
+                        remove: (key) => togglePin(i, key),
+                      },
+                    ]
+                  : [],
+              )}
+            />
+          )}
           <div className={failed && !wholeTab ? "stale" : undefined}>
-            <Pins.Provider value={{ pinned, toggle: togglePin }}>
+            <Pins.Provider
+              value={{ pinned, toggle: togglePin, status: pinStatus }}
+            >
               {results}
             </Pins.Provider>
           </div>
@@ -1528,6 +1832,13 @@ export function App() {
       {saving && (
         <SaveDialog
           tests={tests}
+          opened={
+            opened && {
+              name: opened.name,
+              file: opened.file,
+              labels: opened.chosen.map((i) => opened.file.tests[i]!.label),
+            }
+          }
           onSaved={(name) =>
             setToast({
               id: Date.now(),
@@ -1539,6 +1850,19 @@ export function App() {
             })
           }
           onClose={() => setSaving(false)}
+        />
+      )}
+      {invalidTest && (
+        <InvalidTestDialog
+          {...invalidTest}
+          onClose={() => setInvalidTest(undefined)}
+        />
+      )}
+      {choosing && (
+        <TestPicker
+          {...choosing}
+          onPick={(chosen) => openTests(choosing.name, choosing.file, chosen)}
+          onClose={() => setChoosing(undefined)}
         />
       )}
       {confirm && (
@@ -1559,6 +1883,10 @@ export function App() {
     </>
   );
 }
+
+/** An Assumption key moved onto another job: `file › job`, then an output's path if it has one. */
+const onJob = (key: string, job: string) =>
+  [job, ...key.split(" › ").slice(2)].join(" › ");
 
 /** Stored `path = value` entries in the section #8 §5 puts them in; nothing when there are none. */
 function Entries({

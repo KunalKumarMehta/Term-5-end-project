@@ -683,3 +683,28 @@ select.assumed {
 .import .error {
   flex-basis: 100%;
 }
+
+/* #12 §9: a loaded pin's status beside its toggle, and the opened Test file's own statuses. */
+.pin-status {
+  margin-left: 0.25rem;
+  color: var(--good);
+  font-size: 0.8125rem;
+}
+
+.pin-status.changed {
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
+.tray-status {
+  color: var(--muted);
+}
+
+.opened-test ul {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+}
+
+.opened-test button {
+  margin-left: 0.25rem;
+}
