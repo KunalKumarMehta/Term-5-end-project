@@ -65,6 +65,15 @@ test.each(["acme", "acme/app/x", "-acme/app", "acme/..", "acme/a b", "/app"])(
   },
 );
 
+test("the schema rejects more runs already pending than a queue: max group holds (100, CC-3)", () => {
+  const pending = (pendingRuns: number) =>
+    validateScenario({ ...example, followUp: { name: "push", pendingRuns } });
+  expect(pending(100)).toEqual([]);
+  expect(pending(101)).toEqual([
+    expect.stringContaining("/followUp/pendingRuns"),
+  ]);
+});
+
 test("the schema rejects a Scenario without a simulation date, and simulate() refuses it", () => {
   const noDate = { event: { name: "push" }, repo: {} } as unknown as Scenario;
   expect(validateScenario(noDate)).not.toEqual([]);
