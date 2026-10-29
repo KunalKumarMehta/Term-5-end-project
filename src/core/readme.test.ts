@@ -19,6 +19,13 @@ function section(name: string): string[] {
     .map((line) => line.slice(2));
 }
 
+test("the README's status line names package.json's version", () => {
+  const { version } = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+  expect(readme).toMatch(new RegExp(`^\\*\\*Status:\\*\\* ${version}: `, "m"));
+});
+
 test("the README's Platform baseline matches the core's export", () => {
   expect(section("baseline")).toEqual(PLATFORM_BASELINE);
 });
@@ -49,6 +56,7 @@ test("every relative link and image in the README points at a file in the repo",
     .map((m) => m[1]!)
     .filter((href) => !/^[a-z]+:/.test(href));
   expect(targets).toContain("docs/images/access-report.png");
+  expect(targets).toContain("docs/images/merge-readiness.png");
   for (const href of targets) {
     expect(existsSync(new URL(`../../${href}`, import.meta.url)), href).toBe(
       true,
