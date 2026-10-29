@@ -4129,7 +4129,10 @@ test("a matrix-dependent group is uncertain with empty settle (CC-5, CC-6): a ma
       ["ci.yml › deploy › concurrency.A", "uncertain", []],
       ["ci.yml › deploy › concurrency.B", "uncertain", []],
     ]);
-    expect(pair[0]!.causes.map((c) => c.rule)).toEqual(["CC-5", "CC-6"]);
+    // CC-5 only for a group that reads the matrix; a constant one is shared by the legs (CC-6).
+    expect(pair[0]!.causes.map((c) => c.rule)).toEqual(
+      group === "deploy" ? ["CC-6"] : ["CC-5", "CC-6"],
+    );
   }
 });
 
@@ -4256,6 +4259,61 @@ test("a local callee's group is keyed <callerFile> › <callerJob>/ › concurre
     ["ci.yml › concurrency.A", "uncertain", "CC-6", undefined],
     ["ci.yml › deploy/ › concurrency.A", "uncertain", "CC-6", undefined],
   ]);
+});
+
+test("run B's no-run cause chain names the Follow-up event's inputs (#9 §7): a docs-only Follow-up synchronize skips ci.yml at PA-2 with the input followUp.changed", () => {
+  const { verdicts } = simulate(example, {
+    ...forkPr,
+    followUp: { ...forkPr.event, type: "synchronize", changed: ["docs/a.md"] },
+  });
+  const b = verdicts.find((v) => v.key === "ci.yml › concurrency.B")!;
+  expect(b.value).toBe("no-run");
+  expect(b.causes[0]).toMatchObject({
+    rule: "PA-2",
+    inputs: [{ path: "followUp.changed", value: ["docs/a.md"] }],
+  });
+});
+
+test("a cancel-in-progress reading github.head_ref on push adds no CC-5: only the group's reads count", () => {
+  const [a, b] = pairOf(
+    { event: mainPush, followUp: mainPush, repo: { date } },
+    [
+      wf(
+        "ci.yml",
+        deployOn(
+          "  group: ci-${{ github.ref }}\n  cancel-in-progress: ${{ github.head_ref == '' }}\n",
+        ),
+      ),
+    ],
+  );
+  expect(b!.value).toBe("runs");
+  for (const v of [a!, b!])
+    expect(v.causes.map((c) => c.rule)).not.toContain("CC-5");
+});
+
+test("a local callee's if: always() job keeps running when run A is cancelled: listed in continuing (CC-9), and run B is uncertain [pending, runs] (CC-11)", () => {
+  const [a, b] = pairOf(
+    { event: mainPush, followUp: mainPush, repo: { date } },
+    [
+      wf(
+        "ci.yml",
+        "on: push\nconcurrency:\n  group: ci\n  cancel-in-progress: true\njobs:\n  lib:\n    uses: ./.github/workflows/lib.yml\n",
+      ),
+      wf(
+        "lib.yml",
+        "on: workflow_call\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n  report:\n    if: always()\n    runs-on: ubuntu-latest\n    steps:\n      - run: report\n",
+      ),
+    ],
+  );
+  expect(a).toMatchObject({
+    value: "cancelled",
+    continuing: ["ci.yml › lib/report"],
+  });
+  expect(b).toMatchObject({
+    value: "uncertain",
+    possible: ["pending", "runs"],
+  });
+  expect(b!.causes[0]!.rule).toBe("CC-11");
 });
 
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
