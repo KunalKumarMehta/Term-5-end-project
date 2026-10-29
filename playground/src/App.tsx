@@ -810,6 +810,7 @@ export function App() {
       states={scenarios.map(
         (s) => s.followUp && (s.followUp.runA ?? "in-progress"),
       )}
+      pendingRuns={scenarios.map((s) => s.followUp?.pendingRuns ?? 0)}
       diagnosed={diagnostics.length > 0}
       open={open}
       onOpen={openExplanation}
@@ -1065,13 +1066,14 @@ export function App() {
                   id="follow-up-pending-runs"
                   type="number"
                   min={0}
+                  max={100}
                   step={1}
                   value={scenario.followUp.pendingRuns ?? 0}
                   aria-describedby="follow-up-pending-runs-hint"
                   onChange={(e) => {
                     const n = Number(e.target.value);
-                    // The schema takes a whole number from 0: anything else is left as it was.
-                    if (Number.isInteger(n) && n >= 0)
+                    // The schema takes a whole number from 0 to 100: anything else is left as it was.
+                    if (Number.isInteger(n) && n >= 0 && n <= 100)
                       setInput(["followUp", "pendingRuns"], n);
                   }}
                 />

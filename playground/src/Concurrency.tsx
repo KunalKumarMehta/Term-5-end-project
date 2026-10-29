@@ -11,6 +11,7 @@ const ADD = "Add a Follow-up event to see what happens to run B";
 export function Concurrency({
   columns,
   states,
+  pendingRuns,
   diagnosed,
   open,
   onOpen,
@@ -19,6 +20,8 @@ export function Concurrency({
   columns: Column[];
   /** Each Scenario's run A state when B arrives; undefined with no Follow-up event. */
   states: (string | undefined)[];
+  /** Each Scenario's runs already pending in a `queue: max` group besides run A. */
+  pendingRuns: number[];
   /** Whether a file has Diagnostics, so its `concurrency:` wasn't read. */
   diagnosed: boolean;
   open?: { key: string; i: number };
@@ -58,12 +61,12 @@ export function Concurrency({
       : []),
   ];
   // CC-6: a queued run's place, behind the runs already pending and a pending run A.
-  const place = (v: Verdict, i: number) => {
-    const queued = v.causes.find((c) => c.rule === "CC-6")?.inputs[0]?.value;
-    return v.value === "pending" && typeof queued === "number"
-      ? queued + (states[i] === "pending" ? 1 : 0) + 1
+  const place = (v: Verdict, i: number) =>
+    v.key.endsWith(".B") &&
+    v.value === "pending" &&
+    v.causes[0]?.rule === "CC-3"
+      ? (pendingRuns[i] ?? 0) + (states[i] === "pending" ? 1 : 0) + 1
       : undefined;
-  };
 
   const cell = (v: Verdict, i: number) => (
     <>
