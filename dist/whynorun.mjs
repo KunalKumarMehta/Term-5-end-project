@@ -18109,7 +18109,7 @@ var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
   if (argv.length === 1 && argv[0] === "--version") {
-    process.stdout.write(`whynorun ${"0.2.0"}
+    process.stdout.write(`whynorun ${"0.3.0"}
 `);
     return 0;
   }
@@ -18197,7 +18197,7 @@ function show(args, stdin) {
   ].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, text]) => text);
   process.stdout.write(
     [
-      `whynorun ${"0.2.0"}`,
+      `whynorun ${"0.3.0"}`,
       "",
       "What WhyNoRun always assumes:",
       ...PLATFORM_BASELINE.map((item) => `- ${item}`),
