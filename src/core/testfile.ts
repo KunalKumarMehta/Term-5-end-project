@@ -243,7 +243,7 @@ function candidates(key: string, verdicts: Verdict[]): string[] {
 }
 
 // An absent value shows as —, and a set in code-unit order (#10 §3).
-function shown(value: unknown): string {
+export function shown(value: unknown): string {
   if (value === undefined || value === null) return "—";
   if (Array.isArray(value))
     return `{${[...(value as string[])].sort().join(", ")}}`;
