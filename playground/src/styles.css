@@ -700,6 +700,10 @@ select.assumed {
   color: var(--muted);
 }
 
+.blocked-by {
+  color: var(--bad);
+}
+
 .opened-test ul {
   margin: 0.25rem 0;
   padding-left: 1.25rem;

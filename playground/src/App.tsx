@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -10,6 +11,7 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  blocksUpdate,
   compareTest,
   isCheck,
   isConcurrency,
@@ -20,6 +22,7 @@ import {
   setScenarioValue,
   settleValue,
   simulate,
+  updatedPins,
   validateScenario,
   type ActorKind,
   type Diagnostic,
@@ -376,6 +379,19 @@ export function App() {
     );
   };
 
+  // #12 §10: on a narrow screen this also switches to the YAML tab.
+  const showDiagnostic = (d: Diagnostic) => {
+    setPane("yaml");
+    setActive(d.path);
+    setTarget({ path: d.path, line: d.line, col: d.col });
+  };
+
+  /** Shows a pane, then focuses an element in it. */
+  const focusIn = (to: Pane, id: string) => {
+    setPane(to);
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  };
+
   /** Shows the pane and Scenario tab a field lives in, then focuses the field. */
   const focusField = (id: string, i = form) => {
     setPane("scenario");
@@ -526,7 +542,13 @@ export function App() {
           (scenarios[1] !== scenarios[0] || labels[1] !== "Scenario 2"));
     const pinsChanged =
       opened !== undefined &&
-      pins.some((p, i) => p.join("\n") !== (opened.keys[i] ?? []).join("\n"));
+      (pins.some(
+        (p, i) => p.join("\n") !== (opened.keys[i] ?? []).join("\n"),
+      ) ||
+        // Accept all rewrote them (#14 §10).
+        opened.loaded.some(
+          (l, i) => l !== opened.file.tests[opened.chosen[i]!]?.pins,
+        ));
     return [
       ...(scenariosChanged
         ? [`It replaces your changes to ${labels.join(" and ")}.`]
@@ -1218,18 +1240,19 @@ export function App() {
         : s.repo.date === ""
           ? "waiting for the simulation date"
           : undefined;
-    const findings =
+    const test = { label: labels[i]!, scenario: s, pins: loaded };
+    const result =
       waiting || !verdicts
-        ? []
-        : compareTest(
-            { label: labels[i]!, scenario: s, pins: loaded },
-            {
-              verdicts,
-              diagnostics,
-              unmatchedAssumptions: unmatched[i] ?? [],
-            },
-          );
-    return { waiting, findings, pins: Object.keys(loaded).length };
+        ? undefined
+        : { verdicts, diagnostics, unmatchedAssumptions: unmatched[i] ?? [] };
+    const findings = result ? compareTest(test, result) : [];
+    return {
+      waiting,
+      findings,
+      pins: Object.keys(loaded).length,
+      test,
+      result,
+    };
   });
   const pinStatus = (i: number, key: string) =>
     statuses[i]?.findings.find(
@@ -1246,6 +1269,81 @@ export function App() {
     (n, t) => n + (t?.waiting ? t.pins : 0),
     0,
   );
+
+  // #12 §9: Accept all mirrors `test --update`, all or nothing, listing what blocks it.
+  const blocking = statuses.flatMap((t, i) =>
+    (t?.findings ?? []).filter(blocksUpdate).map((f) => ({ f, i })),
+  );
+  const blockers = [
+    ...(
+      [
+        ["pinned subject not found", "pin", "not found"],
+        ["assumed subject not found", "Assumption", "not found"],
+        ["Scenario unsupported", "Scenario", "unsupported"],
+      ] as const
+    ).flatMap(([kind, word, what]) => {
+      const all = blocking.filter(({ f }) => f.status === kind);
+      const first = all[0];
+      if (!first) return [];
+      const { f, i } = first;
+      const go =
+        f.status === "assumed subject not found"
+          ? () => focusField(`assumed:${f.key}`, i)
+          : () =>
+              focusIn(
+                "results",
+                f.status === "pinned subject not found"
+                  ? `not-found:${labels[i]}:${f.key}`
+                  : `unsupported:${labels[i]}`,
+              );
+      return [
+        {
+          key: kind,
+          label: `${plural(all.length, word)} ${what}` as ReactNode,
+          go,
+        },
+      ];
+    }),
+    ...(evaluated
+      ? [...counts.keys()].map((path) => ({
+          key: path,
+          label: (
+            <>
+              <code>{basename(path)}</code> has Diagnostics
+            </>
+          ) as ReactNode,
+          go: () => showDiagnostic(diagnostics.find((d) => d.path === path)!),
+        }))
+      : []),
+  ];
+  const changedPins = statuses.reduce(
+    (n, t) =>
+      n + (t?.findings.filter((f) => f.status === "changed").length ?? 0),
+    0,
+  );
+  const canAccept =
+    blockers.length === 0 && waitingPins === 0 && changedPins > 0;
+
+  const acceptAll = () => {
+    const updates = statuses.map((t) =>
+      t?.result ? updatedPins(t.test, t.result) : {},
+    );
+    setOpened(
+      (o) =>
+        o && {
+          ...o,
+          loaded: o.loaded.map((l, i) =>
+            Object.keys(updates[i] ?? {}).length > 0
+              ? { ...l, ...updates[i] }
+              : l,
+          ),
+        },
+    );
+    setToast({
+      id: Date.now(),
+      node: `Accepted ${plural(changedPins, "changed pin")}`,
+    });
+  };
   // The tray saves one Test file with an entry per Scenario that has a pinned Verdict.
   const tests = scenarios.flatMap((s, i) => {
     const pinnedVerdicts = (runs[i] ?? []).filter((v) => pinned(i, v.key));
@@ -1614,7 +1712,7 @@ export function App() {
                       Remove
                     </button>
                     {notFound.has(key) && (
-                      <p className="error">
+                      <p className="error" id={`assumed:${key}`} tabIndex={-1}>
                         assumed subject not found
                         {notFound.get(key)!.length > 0 && <> · re-point to </>}
                         {notFound.get(key)!.map((job) => {
@@ -1690,10 +1788,7 @@ export function App() {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      // #12 §10: on a narrow screen this also switches to the YAML tab.
-                      setPane("yaml");
-                      setActive(d.path);
-                      setTarget({ path: d.path, line: d.line, col: d.col });
+                      showDiagnostic(d);
                     }}
                   >
                     <code>
@@ -1743,6 +1838,31 @@ export function App() {
                 <span className="tray-status">
                   {wouldFail} would fail
                   {waitingPins > 0 && ` · ${waitingPins} waiting`}
+                </span>
+              )}
+              {opened && (
+                <button
+                  type="button"
+                  disabled={!canAccept}
+                  aria-describedby={
+                    blockers.length > 0 ? "blocked-by" : undefined
+                  }
+                  onClick={acceptAll}
+                >
+                  Accept all changes
+                </button>
+              )}
+              {opened && blockers.length > 0 && (
+                <span id="blocked-by" className="blocked-by">
+                  Blocked by:{" "}
+                  {blockers.map((b, k) => (
+                    <Fragment key={b.key}>
+                      {k > 0 && ", "}
+                      <button type="button" onClick={b.go}>
+                        {b.label}
+                      </button>
+                    </Fragment>
+                  ))}
                 </span>
               )}
             </div>
