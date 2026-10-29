@@ -11,6 +11,27 @@ A released rule ID never changes meaning. A release that changes any pinned
 affected rule under `### Affected rules` as `- RULE-ID: what changed`
 ([ADR 0002](docs/adr/0002-test-files-embed-the-core-scenario.md)).
 
+## [0.3.0] - 2026-10-29
+
+Core flow 3, the Concurrency outcome, works end to end.
+
+### Added
+
+- The Concurrency outcome (core flow 3): wherever `concurrency:` is declared, at workflow or job level, run A gets a Verdict (`<file> › concurrency.A`, or `<file> › <job> › concurrency.A`), and with a Follow-up event so does run B (`… › concurrency.B`): `runs`, `pending`, `cancelled`, `no-run`, `uncertain` or `unsupported`, each with its resolved group, lower-cased with run-time placeholders such as `<run_id:A>`, beside the group as written.
+- The group and `cancel-in-progress` are evaluated against each run's own Event: an undefined property such as `github.head_ref` on a push resolves to empty (CC-5), `github.workflow` reads the workflow's `name:` or path, and groups compare ignoring case (CC-4). A group that reads a value the Scenario lacks is Uncertain only when the outcome turns on it (WN-4), settled on the Event that reads it, run B's on the Follow-up event.
+- With both runs in one group, `cancel-in-progress` cancels run A and run B runs (CC-2); otherwise run B waits pending behind a running A and replaces a pending one (CC-1, CC-8). A Follow-up event outside v1 makes run B unsupported (WN-3).
+- `queue: max` queues run B behind the Follow-up event's pending-run count, its place likely, not certain (CC-6), and cancels it once 100 wait (CC-3). `queue: max` with `cancel-in-progress: true` is a CC-3 Diagnostic on the `queue:` line, quoting GitHub's own error.
+- A group shared by two GitHub workflows follows the arriving item's `cancel-in-progress` (CC-12); mixed `queue` modes are Uncertain where they decide the outcome. A local reusable workflow's `concurrency:` is keyed `<file> › <caller job>/ › concurrency.A`, reads its caller's `github.workflow` and inputs, and in its caller's group with `cancel-in-progress` cancels its own run (CC-7).
+- A cancelled run A lists the jobs that keep running, such as `if: always()`, as continuing (CC-9), and run B waiting on that group is Uncertain (CC-11).
+- Uncertain with nothing to settle: two items of one Event in one group (CC-6), a matrix job or a group read from the matrix (CC-5, CC-6), and a run awaiting approval and what meets it in its group (FK-4).
+- The playground's Concurrency tab, between Merge readiness and All Verdicts, with ◆ under Compare and — for a missing run B, and the Scenario form's Follow-up event section with Run A's state when B arrives and the runs already pending. Load example's Follow-up `synchronize` on the same pull request now shows there. With no `concurrency:` declared, the tab says so and notes what it couldn't check: files with Diagnostics and remote reusable workflows (WN-6).
+- `whynorun show` prints run A's line for each `concurrency:`.
+- Rules CC-1, CC-2, CC-3, CC-4, CC-5, CC-6, CC-7, CC-8, CC-9, CC-11 and CC-12.
+
+### Changed
+
+- A file whose `concurrency:` sets `queue: max` with `cancel-in-progress: true` now gets the CC-3 Diagnostic and so no Verdicts, as GitHub rejects it; 0.2.0 simulated it.
+
 ## [0.2.0] - 2026-10-29
 
 Core flow 2, the merge-readiness check, works end to end.
