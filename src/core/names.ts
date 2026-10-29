@@ -22,7 +22,7 @@ export interface Named {
 }
 
 // A `strategy:` that isn't a mapping is an expression, which may hold a matrix.
-const isMatrix = (job: WorkflowJob) =>
+export const isMatrix = (job: WorkflowJob) =>
   job.strategy !== undefined &&
   (!isMapping(job.strategy) || job.strategy.find("matrix") !== undefined);
 

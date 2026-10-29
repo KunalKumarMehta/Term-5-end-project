@@ -609,6 +609,8 @@ class Reader extends Evaluator {
 export interface Status {
   success: boolean;
   failure: boolean;
+  /** Set while GitHub cancels the run and re-evaluates its jobs' `if:` (CC-9). */
+  cancelled?: boolean;
 }
 
 // GitHub's status functions are missing from @actions/expressions, and a stub must be
@@ -619,7 +621,7 @@ const stubs = (status: Status): FunctionDefinition[] => [
   stub("success", 0, () => new data.BooleanData(status.success)),
   stub("always", 0, () => new data.BooleanData(true)),
   stub("failure", 0, () => new data.BooleanData(status.failure)),
-  stub("cancelled", 0, () => new data.BooleanData(false)),
+  stub("cancelled", 0, () => new data.BooleanData(status.cancelled ?? false)),
   // The files exist only in the run's workspace, so its result is a run-time value.
   stub("hashFiles", 1, () => {
     throw new RuntimeValueNeeded("hashFiles()");

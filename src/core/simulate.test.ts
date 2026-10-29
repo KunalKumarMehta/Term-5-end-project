@@ -3975,6 +3975,289 @@ test("queue: max with cancel-in-progress: true is a CC-3 Diagnostic on the queue
   ]);
 });
 
+const queueMax = wf("deploy.yml", deployOn("  group: deploy\n  queue: max\n"));
+const pairOf = (scenario: Scenario, files = [queueMax]) =>
+  simulate(files, scenario).verdicts.filter((v) => isConcurrencyKey(v.key));
+const isConcurrencyKey = (key: string) => / › concurrency\.[AB]$/.test(key);
+
+test("queue: max keeps a FIFO of up to 100: run A keeps running and run B waits pending behind the runs already pending (CC-3, CC-8), its place likely, not certain (CC-6)", () => {
+  for (const pendingRuns of [0, 99]) {
+    const [a, b] = pairOf({
+      event: mainPush,
+      followUp: { ...mainPush, pendingRuns },
+      repo: { date },
+    });
+    expect([a!.value, a!.causes[0]!.rule]).toEqual(["runs", "CC-3"]);
+    expect(b!.value).toBe("pending");
+    expect(b!.causes.map((c) => c.rule)).toEqual(["CC-3", "CC-8", "CC-6"]);
+    expect(b!.causes[0]!.inputs).toContainEqual({
+      path: "followUp.pendingRuns",
+      value: pendingRuns,
+    });
+  }
+});
+
+test("queue: max cancels run B once the queue is full (CC-3): 100 runs pending, or 99 with run A pending too, which the queue keeps rather than replacing", () => {
+  const full = pairOf({
+    event: mainPush,
+    followUp: { ...mainPush, pendingRuns: 100 },
+    repo: { date },
+  });
+  expect(full.map((v) => [v.key, v.value, v.causes[0]!.rule])).toEqual([
+    ["deploy.yml › concurrency.A", "runs", "CC-3"],
+    ["deploy.yml › concurrency.B", "cancelled", "CC-3"],
+  ]);
+  const behindA = pairOf({
+    event: mainPush,
+    followUp: { ...mainPush, pendingRuns: 99, runA: "pending" },
+    repo: { date },
+  });
+  expect(behindA.map((v) => [v.value, v.causes[0]!.rule])).toEqual([
+    ["pending", "CC-3"],
+    ["cancelled", "CC-3"],
+  ]);
+});
+
+const prOnly = (concurrency: string) =>
+  wf("build.yml", deployOn(concurrency, "pull_request"));
+const sameRepoPr = {
+  name: "pull_request",
+  ref: "feature",
+  base: "main",
+  changed: ["src/app.ts"],
+};
+const rows = (verdicts: Verdict[]) =>
+  verdicts
+    .filter((v) => isConcurrencyKey(v.key))
+    .map((v) => [v.key, v.value, v.causes[0]!.rule, v.possible]);
+
+test("a group shared by two GitHub workflows follows the arriving run's cancel-in-progress (CC-12): a push to deploy.yml cancels build.yml's pull request run, but build.yml arriving with none waits behind deploy.yml whatever deploy.yml says", () => {
+  const files = [
+    prOnly("  group: shared\n"),
+    wf("deploy.yml", deployOn("  group: Shared\n  cancel-in-progress: true\n")),
+  ];
+  const pushed = simulate(files, {
+    event: sameRepoPr,
+    followUp: mainPush,
+    repo: { date },
+  }).verdicts;
+  expect(rows(pushed)).toEqual([
+    ["build.yml › concurrency.A", "cancelled", "CC-2", undefined],
+    ["build.yml › concurrency.B", "no-run", "EV-0", undefined],
+    ["deploy.yml › concurrency.A", "no-run", "EV-0", undefined],
+    ["deploy.yml › concurrency.B", "runs", "CC-2", undefined],
+  ]);
+  const a = pushed.find((v) => v.key === "build.yml › concurrency.A")!;
+  expect(a.causes.map((c) => c.rule)).toEqual(["CC-2", "CC-4", "CC-12"]);
+  expect(a.causes[0]!.spans.map((s) => [s.path, s.line])).toEqual([
+    [".github/workflows/build.yml", 3],
+    [".github/workflows/deploy.yml", 4],
+  ]);
+  const reversed = simulate(files, {
+    event: mainPush,
+    followUp: sameRepoPr,
+    repo: { date },
+  }).verdicts;
+  expect(rows(reversed)).toEqual([
+    ["build.yml › concurrency.A", "no-run", "EV-0", undefined],
+    ["build.yml › concurrency.B", "pending", "CC-1", undefined],
+    ["deploy.yml › concurrency.A", "runs", "CC-1", undefined],
+    ["deploy.yml › concurrency.B", "no-run", "EV-0", undefined],
+  ]);
+});
+
+test("mixed queue modes in one group are uncertain with empty settle (CC-12) where they decide the outcome: queue: single would replace a pending run A that queue: max keeps", () => {
+  const files = [
+    prOnly("  group: shared\n"),
+    wf("deploy.yml", deployOn("  group: shared\n  queue: max\n")),
+  ];
+  const { verdicts } = simulate(files, {
+    event: sameRepoPr,
+    followUp: { ...mainPush, runA: "pending" },
+    repo: { date },
+  });
+  expect(rows(verdicts)).toEqual([
+    [
+      "build.yml › concurrency.A",
+      "uncertain",
+      "CC-12",
+      ["cancelled", "pending"],
+    ],
+    ["build.yml › concurrency.B", "no-run", "EV-0", undefined],
+    ["deploy.yml › concurrency.A", "no-run", "EV-0", undefined],
+    ["deploy.yml › concurrency.B", "pending", "CC-1", undefined],
+  ]);
+  expect(
+    verdicts.find((v) => v.key === "build.yml › concurrency.A")!.settle,
+  ).toEqual([]);
+});
+
+test("two items one Event starts in one group are uncertain with empty settle (CC-6): which arrives first is undocumented", () => {
+  const files = [
+    wf("a.yml", deployOn("  group: shared\n")),
+    wf("b.yml", deployOn("  group: shared\n")),
+  ];
+  const { verdicts } = simulate(files, {
+    event: mainPush,
+    followUp: mainPush,
+    repo: { date },
+  });
+  expect(rows(verdicts).map((r) => r.slice(1, 3))).toEqual([
+    ["uncertain", "CC-6"],
+    ["uncertain", "CC-6"],
+    ["uncertain", "CC-6"],
+    ["uncertain", "CC-6"],
+  ]);
+  for (const v of verdicts.filter((v) => isConcurrencyKey(v.key)))
+    expect(v.settle).toEqual([]);
+});
+
+test("a matrix-dependent group is uncertain with empty settle (CC-5, CC-6): a matrix job's legs each make an item, which isn't expanded", () => {
+  const matrix = (group: string) =>
+    wf(
+      "ci.yml",
+      `on: push\njobs:\n  deploy:\n    strategy:\n      matrix:\n        env: [staging, prod]\n    concurrency: ${group}\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n`,
+    );
+  for (const group of ["deploy-${{ matrix.env }}", "deploy"]) {
+    const { verdicts } = simulate([matrix(group)], {
+      event: mainPush,
+      followUp: mainPush,
+      repo: { date },
+    });
+    const pair = verdicts.filter((v) => isConcurrencyKey(v.key));
+    expect(pair.map((v) => [v.key, v.value, v.settle])).toEqual([
+      ["ci.yml › deploy › concurrency.A", "uncertain", []],
+      ["ci.yml › deploy › concurrency.B", "uncertain", []],
+    ]);
+    expect(pair[0]!.causes.map((c) => c.rule)).toEqual(["CC-5", "CC-6"]);
+  }
+});
+
+test("an unevaluable cancel-in-progress leaves the pair uncertain (WN-4): a repository variable settles it, a job's needs output never does", () => {
+  const vars = wf(
+    "ci.yml",
+    deployOn(
+      "  group: ci\n  cancel-in-progress: ${{ vars.CANCEL == 'true' }}\n",
+    ),
+  );
+  const scenario: Scenario = {
+    event: mainPush,
+    followUp: mainPush,
+    repo: { date },
+  };
+  const [a, b] = pairOf(scenario, [vars]);
+  expect(a).toMatchObject({
+    value: "uncertain",
+    possible: ["cancelled", "runs"],
+    settle: ["vars.CANCEL"],
+  });
+  expect(a!.causes[0]).toMatchObject({ rule: "WN-4", spans: [{ line: 4 }] });
+  expect(b).toMatchObject({
+    value: "uncertain",
+    possible: ["pending", "runs"],
+  });
+  const settled = settleValue(scenario, "vars.CANCEL", "true");
+  expect(pairOf(settled, [vars]).map((v) => v.value)).toEqual([
+    "cancelled",
+    "runs",
+  ]);
+  const needs = wf(
+    "ci.yml",
+    "on: push\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n  deploy:\n    needs: check\n    concurrency:\n      group: deploy\n      cancel-in-progress: ${{ needs.check.outputs.cancel == 'true' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n",
+  );
+  const [ja, jb] = pairOf(scenario, [needs]);
+  expect([ja!.value, ja!.causes[0]!.rule, ja!.settle]).toEqual([
+    "uncertain",
+    "WN-4",
+    [],
+  ]);
+  expect(jb!.value).toBe("uncertain");
+});
+
+test("a fork run awaiting approval leaves its concurrency Verdicts uncertain with empty settle (root FK-4, #8 §2), and run B in its group too", () => {
+  const { verdicts } = simulate(example, {
+    ...forkPr,
+    event: { ...forkPr.event, approval: "awaiting" },
+    followUp: { ...forkPr.event, type: "synchronize" },
+  });
+  const pair = verdicts.filter((v) => v.key.startsWith("ci.yml › concurrency"));
+  expect(
+    pair.map((v) => [v.key, v.value, v.causes[0]!.rule, v.settle]),
+  ).toEqual([
+    ["ci.yml › concurrency.A", "uncertain", "FK-4", []],
+    ["ci.yml › concurrency.B", "uncertain", "FK-4", []],
+  ]);
+});
+
+const survivorFile = wf(
+  "ci.yml",
+  "on: push\nconcurrency:\n  group: ci\n  cancel-in-progress: true\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n  report:\n    if: always()\n    runs-on: ubuntu-latest\n    steps:\n      - run: report\n",
+);
+
+test("an if: always() job in run A keeps running after A is cancelled and is listed in continuing (CC-9); whether it still holds the group is undocumented, so run B is uncertain [pending, runs] with empty settle (CC-11)", () => {
+  const [a, b] = pairOf(
+    { event: mainPush, followUp: mainPush, repo: { date } },
+    [survivorFile],
+  );
+  expect(a).toMatchObject({
+    value: "cancelled",
+    continuing: ["ci.yml › report"],
+  });
+  expect(a!.causes.map((c) => c.rule)).toEqual(["CC-2", "CC-9"]);
+  expect(b).toMatchObject({
+    value: "uncertain",
+    possible: ["pending", "runs"],
+    settle: [],
+  });
+  expect(b!.causes[0]!.rule).toBe("CC-11");
+  // With run A pending, no job had started, so nothing continues.
+  const [pending] = pairOf(
+    {
+      event: mainPush,
+      followUp: { ...mainPush, runA: "pending" },
+      repo: { date },
+    },
+    [survivorFile],
+  );
+  expect(pending!.continuing).toBeUndefined();
+});
+
+test("a local callee's group is keyed <callerFile> › <callerJob>/ › concurrency.A and sees the caller's github.workflow, so the same group with cancel-in-progress: true cancels the run itself (CC-7)", () => {
+  const files = (cancel: string) => [
+    wf(
+      "ci.yml",
+      "name: CI\non: push\nconcurrency: ${{ github.workflow }}\njobs:\n  deploy:\n    uses: ./.github/workflows/lib.yml\n",
+    ),
+    wf(
+      "lib.yml",
+      `on: workflow_call\nconcurrency:\n  group: \${{ github.workflow }}\n${cancel}jobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n`,
+    ),
+  ];
+  const { verdicts } = simulate(files("  cancel-in-progress: true\n"), {
+    event: mainPush,
+    repo: { date },
+  });
+  expect(rows(verdicts)).toEqual([
+    ["ci.yml › concurrency.A", "cancelled", "CC-7", undefined],
+    ["ci.yml › deploy/ › concurrency.A", "cancelled", "CC-7", undefined],
+  ]);
+  const callee = verdicts.find(
+    (v) => v.key === "ci.yml › deploy/ › concurrency.A",
+  )!;
+  expect(callee.group).toBe("ci");
+  expect(callee.causes[0]!.spans.map((s) => [s.path, s.line])).toEqual([
+    [".github/workflows/lib.yml", 3],
+    [".github/workflows/lib.yml", 4],
+  ]);
+  // Without cancel-in-progress, which item arrives first is undocumented (CC-6).
+  expect(
+    rows(simulate(files(""), { event: mainPush, repo: { date } }).verdicts),
+  ).toEqual([
+    ["ci.yml › concurrency.A", "uncertain", "CC-6", undefined],
+    ["ci.yml › deploy/ › concurrency.A", "uncertain", "CC-6", undefined],
+  ]);
+});
+
 test("every rule in the catalogue has its text, citation and confidence, and is the root or a cause in a test above", () => {
   for (const rule of Object.values(RULES)) {
     expect(rule.text).not.toBe("");
