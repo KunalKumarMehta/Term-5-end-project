@@ -85,6 +85,18 @@ export interface ParsedWorkflow {
    * expression defaults.
    */
   callInputs: Map<string, { type?: unknown; default?: unknown }>;
+  /** The workflow-level `name:`, which `github.workflow` reads. */
+  name?: string;
+  /** The workflow-level `concurrency:`: the converter checks it and drops it. */
+  concurrency?: Concurrency;
+}
+
+/** A `concurrency:` setting as written, a scalar being its group (CC-1, CC-2). */
+export interface Concurrency {
+  /** The group as written, at its value. */
+  group: { text: string; span: Span };
+  /** `cancel-in-progress` as written: a boolean, or a `${{ }}` string. */
+  cancel?: { value: unknown; span: Span };
 }
 
 /** A `permissions:` block as written: the parser drops it, so it's read from the YAML (PERM-11). */
@@ -115,6 +127,8 @@ export interface JobSpans {
   uses?: Span;
   /** A caller's `secrets:` value. */
   secrets?: Span;
+  /** The job-level `concurrency:`. */
+  concurrency?: Concurrency;
 }
 
 /** An `actions/checkout` step as written: the parser drops `with:`. */
@@ -274,7 +288,10 @@ function convert(
 function indexOn(
   doc: Document,
   span: (node: Node) => Span,
-): Pick<ParsedWorkflow, "onSpan" | "onEntries" | "jobSpans" | "permissions"> {
+): Pick<
+  ParsedWorkflow,
+  "onSpan" | "onEntries" | "jobSpans" | "permissions" | "name" | "concurrency"
+> {
   const onEntries = new Map<string, Span>();
   const jobSpans = new Map<string, JobSpans>();
   if (!isMap(doc.contents)) return { onSpan: undefined, onEntries, jobSpans };
@@ -311,6 +328,31 @@ function indexOn(
   const root = doc.contents.items.find(
     (p) => name(doc, p.key) === "permissions",
   );
+  const concurrency = (
+    pair: Pair | undefined,
+    own: Span | undefined,
+  ): Concurrency | undefined => {
+    if (!pair) return undefined;
+    const via = own ?? (isAlias(pair.value) ? span(pair.value) : undefined);
+    const value = resolve(doc, pair.value);
+    const at = (key: string) => {
+      const v = isMap(value)
+        ? resolve(doc, value.items.find((p) => name(doc, p.key) === key)?.value)
+        : undefined;
+      return isScalar(v) ? { value: v.value, span: via ?? span(v) } : undefined;
+    };
+    const group = isScalar(value)
+      ? { value: value.value, span: via ?? span(value) }
+      : at("group");
+    const cancel = at("cancel-in-progress");
+    return {
+      group: {
+        text: String(group?.value ?? ""),
+        span: group?.span ?? via ?? span(pair.key as Node),
+      },
+      ...(cancel && { cancel }),
+    };
+  };
 
   const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
   const jobs = resolve(doc, jobsPair?.value);
@@ -339,10 +381,19 @@ function indexOn(
       checkouts: isSeq(steps) ? checkouts(doc, steps.items, own, span) : [],
       uses: field("uses")?.span,
       secrets: field("secrets")?.span,
+      concurrency: concurrency(field("concurrency")?.pair, own),
     });
   }
 
-  const workflow = { jobSpans, permissions: permissions(root, undefined) };
+  const workflow = {
+    jobSpans,
+    permissions: permissions(root, undefined),
+    name: name(doc, doc.contents.get("name", true)),
+    concurrency: concurrency(
+      doc.contents.items.find((p) => name(doc, p.key) === "concurrency"),
+      undefined,
+    ),
+  };
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
   if (!pair || !isScalar(pair.key))
     return { ...workflow, onSpan: undefined, onEntries };

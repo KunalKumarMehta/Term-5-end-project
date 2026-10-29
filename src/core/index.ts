@@ -6,6 +6,7 @@ import {
   unreadable,
   type Producer,
 } from "./checks";
+import { concurrencyVerdicts, isConcurrency, type Run } from "./concurrency";
 import { jobVerdicts } from "./jobs";
 import { namesOf } from "./names";
 import {
@@ -33,6 +34,7 @@ import { filterDiagnostics, trigger } from "./triggers";
 
 export { isAccess } from "./access";
 export { isCheck } from "./checks";
+export { isConcurrency } from "./concurrency";
 export { PLATFORM_BASELINE } from "./baseline";
 export type { Diagnostic, Span } from "./parser";
 export { RULES, type Rule } from "./rules";
@@ -72,6 +74,13 @@ export interface Verdict {
   settle?: string[];
   /** Beside a non-empty `settle`, one per path in its order, for the Settle it box. */
   hints?: SettleHint[];
+  /**
+   * Only on a concurrency Verdict: its resolved, lower-cased group, with run-time
+   * placeholders such as `<run_id:A>` (#6); left out while it reads a value the Scenario lacks.
+   */
+  group?: string;
+  /** Only on a concurrency Verdict: its group as written. */
+  groupSource?: string;
 }
 
 export interface SettleHint {
@@ -113,9 +122,12 @@ const loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
 /** Whether GitHub reads the file at this path: a `.yml`/`.yaml` file directly in `.github/workflows/`. */
 export const isLoaded = (path: string): boolean => loaded.test(path);
 
-/** Whether a Verdict key is a job's `<file> › <jobId>`; `check › <name>` has two segments too. */
+/**
+ * Whether a Verdict key is a job's `<file> › <jobId>`; `check › <name>` and
+ * `<file> › concurrency.A` have two segments too.
+ */
 export const isJobKey = (key: string): boolean =>
-  key.split(" › ").length === 2 && !isCheck(key);
+  key.split(" › ").length === 2 && !isCheck(key) && !isConcurrency(key);
 
 /**
  * Simulates the Workflow set for the Scenario. Pure, synchronous and deterministic.
@@ -128,7 +140,6 @@ export function simulate(
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
   const { scenario, filled } = withDefaults(input);
-  const { event } = scenario;
 
   // Diagnostics never depend on the Scenario, so an unsupported Event still reports them.
   const parsed = files.flatMap((file) => {
@@ -161,32 +172,13 @@ export function simulate(
       (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col,
     );
 
-  // Events outside v1 (and those later tickets add), and the impossible combinations (#6):
-  // a fork contributor pushing, and a private repo with a fork contributor (WN-3).
-  const fork = event.actor === "fork";
-  const privateFork = fork && scenario.repo.visibility === "private";
-  if (
-    !SUPPORTED.has(event.name) ||
-    (fork && event.name === "push") ||
-    privateFork
-  ) {
-    const inputs = [
-      { path: "event.name", value: event.name },
-      { path: "event.actor", value: event.actor },
-      ...(privateFork ? [{ path: "repo.visibility", value: "private" }] : []),
-    ];
+  const outside = unsupported(scenario, "event");
+  if (outside)
     return {
-      verdicts: [
-        {
-          key: "event",
-          value: "unsupported",
-          causes: [{ rule: "WN-3", spans: [], inputs }],
-        },
-      ],
+      verdicts: [{ key: "event", ...outside }],
       diagnostics,
       unmatchedAssumptions: [],
     };
-  }
 
   const verdicts = evaluate(parsed, scenario);
   // WN-5 (#8 §3): an assumed default decides a Verdict when another allowed value of the
@@ -292,6 +284,34 @@ function unmatched(
   });
 }
 
+/**
+ * Events outside v1 (and those later tickets add), and the impossible combinations (#6): a
+ * fork contributor pushing, and a private repo with a fork contributor (WN-3).
+ */
+function unsupported(
+  scenario: Scenario,
+  on: "event" | "followUp",
+): Omit<Verdict, "key"> | undefined {
+  const event = scenario[on]!;
+  const fork = event.actor === "fork";
+  const privateFork = fork && scenario.repo.visibility === "private";
+  if (
+    SUPPORTED.has(event.name) &&
+    !(fork && event.name === "push") &&
+    !privateFork
+  )
+    return undefined;
+  const inputs = [
+    { path: `${on}.name`, value: event.name },
+    { path: `${on}.actor`, value: event.actor },
+    ...(privateFork ? [{ path: "repo.visibility", value: "private" }] : []),
+  ];
+  return {
+    value: "unsupported",
+    causes: [{ rule: "WN-3", spans: [], inputs }],
+  };
+}
+
 type Parsed = ReturnType<typeof parseWorkflowFile> & {
   key: string;
   bytes: number;
@@ -319,6 +339,14 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
     event.name !== "push" && event.actor !== "fork"
       ? { ...scenario, event: { ...event, name: "push" } }
       : undefined;
+  // Run B of each concurrency pair is the Follow-up event's (#6).
+  const followed: Scenario | undefined = scenario.followUp && {
+    ...scenario,
+    event: (({ runA: _a, pendingRuns: _p, ...event }) => event)(
+      scenario.followUp,
+    ),
+  };
+  const outsideB = followed && unsupported(scenario, "followUp");
   const pa4: Cause = {
     rule: "PA-4",
     spans: [],
@@ -402,6 +430,42 @@ function evaluate(parsed: Parsed[], scenario: Scenario): Verdict[] {
     if (queue) {
       const w = run(queue, true);
       queued.push(...producing(queue, jobsWithCallees(w, queue), w));
+    }
+    // Each `concurrency:` declared, at workflow or job level, gets its pair (#6).
+    const declared = [
+      ...(file.concurrency ? [{ id: undefined, at: file.concurrency }] : []),
+      ...file.jobs.flatMap((j) => {
+        const at = file.jobSpans.get(j.id.value)?.concurrency;
+        return at ? [{ id: j.id.value, at }] : [];
+      }),
+    ];
+    if (declared.length > 0) {
+      const workflowB = followed && !outsideB && run(followed);
+      const jobsB = workflowB
+        ? jobVerdicts(`${key} › `, file, workflowB, followed!)
+        : [];
+      const name = file.name ?? `.github/workflows/${key}`;
+      for (const { id, at } of declared) {
+        const subject = id === undefined ? key : `${key} › ${id}`;
+        const of = (vs: Verdict[]) => vs.find((v) => v.key === subject)!;
+        const b: Run | undefined = followed && {
+          scenario: followed,
+          verdict: outsideB
+            ? { key: subject, ...outsideB }
+            : id === undefined
+              ? (workflowB as Verdict)
+              : of(jobsB),
+        };
+        verdicts.push(
+          ...concurrencyVerdicts(
+            `${subject} › `,
+            at,
+            name,
+            { scenario, verdict: id === undefined ? workflow : of(jobs) },
+            b,
+          ),
+        );
+      }
     }
     verdicts.push(
       workflow,
