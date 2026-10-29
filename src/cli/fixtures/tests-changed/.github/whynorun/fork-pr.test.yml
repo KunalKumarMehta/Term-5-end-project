@@ -1,0 +1,10 @@
+# Pinned when the PR came from a member; it now comes from a fork.
+version: 1
+tests:
+  - label: Fork PR
+    scenario:
+      event: { name: pull_request, actor: fork, ref: feature, base: main }
+      repo: { date: 2026-12-03 }
+    pins:
+      ci.yml › test: { value: runs, root: WN-2 }
+      ci.yml › test › secrets: { value: available, root: FK-0 }
