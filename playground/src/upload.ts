@@ -105,3 +105,12 @@ async function load(found: Found[]): Promise<Upload> {
   }
   return { files, ignored: paths.filter((p) => !isLoaded(p)) };
 }
+
+/** Downloads `text` as a file called `name`. */
+export function download(name: string, text: string, type: string): void {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}

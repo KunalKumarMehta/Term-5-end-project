@@ -190,3 +190,16 @@ test("the default path is <event>-<actor kind> while the label is Scenario N, el
     await saveDialog(page).getByRole("button", { name: "Cancel" }).click();
   }
 });
+
+test("the default path comes from Scenario 1's label even when only Scenario 2 has pins", async ({
+  page,
+}) => {
+  await page.getByRole("banner").getByLabel("Compare").check();
+  await tab(page, "All Verdicts").click();
+  await pin(page, "ci.yml › test").nth(1).click();
+  await expect(tray(page)).toHaveText("1 pinned · Save as Behaviour test…");
+  await tray(page).click();
+  await expect(saveDialog(page).getByLabel("Path")).toHaveValue(
+    ".github/whynorun/fork-pr.test.yml",
+  );
+});

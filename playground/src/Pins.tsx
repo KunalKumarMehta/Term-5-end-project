@@ -7,6 +7,7 @@ import {
   type Scenario,
   type TestFile,
 } from "../../src/core";
+import { download } from "./upload";
 
 /** Pins by Scenario: a pin is one (Scenario, subject key) pair (#9 §3). */
 export const Pins = createContext<
@@ -170,11 +171,14 @@ type Tests = Parameters<typeof writeTestFile>[0];
  */
 export function SaveDialog({
   tests,
+  first,
   opened,
   onSaved,
   onClose,
 }: {
   tests: Tests;
+  /** Scenario 1, whose label names the file (#10 §1), pinned or not. */
+  first: { label: string; scenario: Scenario };
   opened?: { name: string; file: TestFile; labels: string[] };
   onSaved: (name: string) => void;
   onClose: () => void;
@@ -183,7 +187,7 @@ export function SaveDialog({
   const [path, setPath] = useState(() =>
     opened
       ? `.github/whynorun/${opened.name}`
-      : defaultTestPath(tests[0]!.label, tests[0]!.scenario),
+      : defaultTestPath(first.label, first.scenario),
   );
   const [text] = useState(() => writeTestFile(tests, opened?.file));
   // The opened file's tests no saved entry replaces, kept as they were (#12 §9).
@@ -201,11 +205,7 @@ export function SaveDialog({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(new Blob([text], { type: "text/yaml" }));
-          a.download = name;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          download(name, text, "text/yaml");
           onSaved(name);
           dialog.current!.close();
         }}

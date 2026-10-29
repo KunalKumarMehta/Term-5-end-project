@@ -80,7 +80,7 @@ import {
 } from "./Pins";
 import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
 import { ShareDialog } from "./Share";
-import { fromDropped, fromPicked, type Upload } from "./upload";
+import { download, fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
 
@@ -1726,12 +1726,14 @@ export function App() {
       node: `Accepted ${plural(changedPins, "changed pin")}`,
     });
   };
-  // The tray saves one Test file with an entry per Scenario that has a pinned Verdict.
+  // The tray saves one Test file with an entry per Scenario that has a pinned Verdict,
+  // leaving out any Scenario `whynorun test` would reject: unnamed, or with no date.
   const tests = scenarios.flatMap((s, i) => {
     const pinnedVerdicts = (runs[i] ?? []).filter((v) => pinned(i, v.key));
     const loaded = loadedPins(i);
     return (pinnedVerdicts.length === 0 && !Object.keys(loaded ?? {}).length) ||
-      unnamed(s)
+      unnamed(s) ||
+      s.repo.date === ""
       ? []
       : [
           {
@@ -1874,15 +1876,13 @@ export function App() {
               {unreadable.reason}{" "}
               <button
                 type="button"
-                onClick={() => {
-                  const a = document.createElement("a");
-                  a.href = URL.createObjectURL(
-                    new Blob([unreadable.raw], { type: "application/json" }),
-                  );
-                  a.download = "whynorun-draft.json";
-                  a.click();
-                  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-                }}
+                onClick={() =>
+                  download(
+                    "whynorun-draft.json",
+                    unreadable.raw,
+                    "application/json",
+                  )
+                }
               >
                 Download
               </button>{" "}
@@ -2413,6 +2413,11 @@ export function App() {
       {saving && (
         <SaveDialog
           tests={tests}
+          first={
+            unnamed(scenarios[0]!)
+              ? tests[0]!
+              : { label: labels[0]!, scenario: scenarios[0]! }
+          }
           opened={
             opened && {
               name: opened.name,

@@ -127,6 +127,13 @@ test("re-opening the demo's fork-pr.test.yml waits for a Workflow set, then show
   ).toHaveText("changed value cancelled → runs; root CC-2 → CC-1");
   await expect(trayStatus(page)).toHaveText("2 would fail");
   await expect(page.locator("#status")).toContainText("· tray: 2 would fail");
+
+  // With no simulation date the Scenario would save as one whynorun test rejects.
+  await page.getByLabel("Simulation date").fill("");
+  await expect(opened(page)).toContainText(
+    "Fork PR: pins waiting for the simulation date",
+  );
+  await expect(tray(page)).toBeDisabled();
 });
 
 test("an invalid Test file loads nothing, and a dialog lists the same file:line: message errors the CLI prints", async ({
