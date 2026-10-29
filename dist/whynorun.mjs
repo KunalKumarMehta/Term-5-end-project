@@ -6320,7 +6320,7 @@ var require_lexer = __commonJS({
 var require_line_counter = __commonJS({
   "node_modules/yaml/dist/parse/line-counter.js"(exports) {
     "use strict";
-    var LineCounter3 = class {
+    var LineCounter4 = class {
       constructor() {
         this.lineStarts = [];
         this.addNewLine = (offset) => this.lineStarts.push(offset);
@@ -6343,7 +6343,7 @@ var require_line_counter = __commonJS({
         };
       }
     };
-    exports.LineCounter = LineCounter3;
+    exports.LineCounter = LineCounter4;
   }
 });
 
@@ -7251,7 +7251,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument3(source, options = {}) {
+    function parseDocument4(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -7277,7 +7277,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver2 && typeof reviver2 === "object") {
         options = reviver2;
       }
-      const doc = parseDocument3(src, options);
+      const doc = parseDocument4(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning) => log.warn(doc.options.logLevel, warning));
@@ -7313,7 +7313,7 @@ var require_public_api = __commonJS({
     }
     exports.parse = parse;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument3;
+    exports.parseDocument = parseDocument4;
     exports.stringify = stringify;
   }
 });
@@ -8445,7 +8445,7 @@ var require_cronstrue = __commonJS({
 });
 
 // src/cli/main.ts
-import { readdirSync, readFileSync } from "node:fs";
+import { globSync, readdirSync, readFileSync } from "node:fs";
 import { join as join2, resolve as resolve3 } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -15733,15 +15733,15 @@ function filterDiagnostics(parsed) {
   for (const event of Object.keys(parsed.events)) {
     const at = (key) => parsed.onEntries.get(key) ?? parsed.onEntries.get(event) ?? parsed.onSpan;
     const settings = settingsOf(parsed, event);
-    for (const kind of [...KINDS, "paths"]) {
-      const ignore = `${kind}-ignore`;
-      if (Object.hasOwn(settings, kind) && Object.hasOwn(settings, ignore))
+    for (const kind2 of [...KINDS, "paths"]) {
+      const ignore = `${kind2}-ignore`;
+      if (Object.hasOwn(settings, kind2) && Object.hasOwn(settings, ignore))
         found.push({
           ...at(`${event}.${ignore}`),
-          rule: kind === "paths" ? "PA-1" : "BR-1",
-          message: `you may only define one of \`${kind}\` and \`${ignore}\` for a single event`
+          rule: kind2 === "paths" ? "PA-1" : "BR-1",
+          message: `you may only define one of \`${kind2}\` and \`${ignore}\` for a single event`
         });
-      for (const key of [kind, ignore]) {
+      for (const key of [kind2, ignore]) {
         const list = settings[key];
         if (!Array.isArray(list)) continue;
         list.forEach((pattern, i) => {
@@ -15911,11 +15911,11 @@ function byRef(parsed, event, defaultBranch) {
   const given = name2 === "push" ? event.ref : event.base;
   const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
   const ref = given ?? `refs/heads/${defaultBranch}`;
-  const kind = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
+  const kind2 = name2 === "push" && ref.startsWith("refs/tags/") ? "tags" : "branches";
   const short = ref.replace(/^refs\/(heads|tags)\//, "");
-  const other = kind === "branches" ? "tags" : "branches";
-  const include = has(kind);
-  if (!include && !has(`${kind}-ignore`)) {
+  const other = kind2 === "branches" ? "tags" : "branches";
+  const include = has(kind2);
+  if (!include && !has(`${kind2}-ignore`)) {
     const otherKey = has(other) ? other : `${other}-ignore`;
     if (name2 === "push" && has(otherKey))
       return {
@@ -15927,7 +15927,7 @@ function byRef(parsed, event, defaultBranch) {
       };
     return { value: "runs", causes: [listed, ...after] };
   }
-  const key = include ? kind : `${kind}-ignore`;
+  const key = include ? kind2 : `${kind2}-ignore`;
   const patterns = settings[key].map(String);
   const decide = (list, flags = "") => (include ? skip : filter)(compilePatterns(list, flags), short);
   const base = decide(patterns);
@@ -15937,7 +15937,7 @@ function byRef(parsed, event, defaultBranch) {
     spans: spans(`${name2}.${key}`),
     inputs: [input]
   };
-  const prefix = `refs/${kind === "tags" ? "tags" : "heads"}/`;
+  const prefix = `refs/${kind2 === "tags" ? "tags" : "heads"}/`;
   const fullRef = patterns.findIndex(
     (p) => p.replace(/^!/, "").startsWith(prefix)
   );
@@ -17726,6 +17726,1199 @@ var RULES = Object.fromEntries(
   rows.map((r) => [r.id, r])
 );
 
+// src/core/testfile.ts
+var import_yaml3 = __toESM(require_dist(), 1);
+
+// src/core/generated/validate-test-file.ts
+var validate_test_file_default = validate102;
+var schema37 = { "title": "Pin", "description": "A missing field isn't compared; null means the Verdict must not have that field. possible and continuing compare as sets.", "type": "object", "additionalProperties": false, "properties": { "value": { "type": "string" }, "possible": { "type": ["array", "null"], "items": { "type": "string" } }, "root": { "description": "The root cause's rule ID.", "type": ["string", "null"] }, "group": { "description": "A concurrency Verdict's resolved group.", "type": ["string", "null"] }, "continuing": { "description": "The job keys a cancelled run A keeps running.", "type": ["array", "null"], "items": { "type": "string" } } } };
+var func22 = ((s) => [...s].length);
+var schema36 = { "title": "RepoFacts", "type": "object", "additionalProperties": false, "required": ["date"], "properties": { "date": { "description": "The simulation date (YYYY-MM-DD). Required: it never defaults to today.", "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" }, "visibility": { "enum": ["public", "private", "internal"] }, "predates": { "description": "Whether the repo was created before 2026-09-17.", "type": "boolean" }, "tokenDefault": { "description": "The GITHUB_TOKEN default permissions.", "enum": ["restricted", "permissive"] }, "eventPolicy": { "description": "The pull_request_target event policy.", "enum": ["none", "allows", "blocks"] }, "defaultBranch": { "type": "string", "minLength": 1 }, "required": { "description": "Required check names, as typed in branch protection.", "type": "array", "items": { "type": "string" } }, "strict": { "description": "Whether branches must be up to date before merging.", "type": "boolean" }, "mergeQueue": { "type": "boolean" }, "vars": { "description": "Repository variables. Values are strings, as GitHub's are.", "type": "object", "additionalProperties": { "type": "string" } }, "repository": { "description": "owner/repo, with GitHub's owner and repo name characters.", "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/(?!\\.\\.?$)[A-Za-z0-9._-]{1,100}$" } } };
+var schema14 = { "title": "Event", "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/definitions/name" }, "type": { "$ref": "#/definitions/type" }, "actor": { "$ref": "#/definitions/actor" }, "approval": { "$ref": "#/definitions/approval" }, "ref": { "$ref": "#/definitions/ref" }, "base": { "$ref": "#/definitions/base" }, "changed": { "$ref": "#/definitions/changed" }, "message": { "$ref": "#/definitions/message" }, "payload": { "$ref": "#/definitions/payload" }, "login": { "$ref": "#/definitions/login" } } };
+var schema17 = { "title": "ActorKind", "description": "Who caused the Event: a member, a fork contributor or dependabot[bot].", "enum": ["member", "fork", "dependabot"] };
+var schema18 = { "description": "Whether a fork contributor's run is approved.", "enum": ["approved", "awaiting"] };
+var func32 = Object.prototype.hasOwnProperty;
+function validate132(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (data && typeof data == "object" && !Array.isArray(data)) {
+    if (data.name === void 0) {
+      const err0 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "name" }, message: "must have required property 'name'" };
+      if (vErrors === null) {
+        vErrors = [err0];
+      } else {
+        vErrors.push(err0);
+      }
+      errors++;
+    }
+    for (const key0 in data) {
+      if (!func32.call(schema14.properties, key0)) {
+        const err1 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
+        if (vErrors === null) {
+          vErrors = [err1];
+        } else {
+          vErrors.push(err1);
+        }
+        errors++;
+      }
+    }
+    if (data.name !== void 0) {
+      let data0 = data.name;
+      if (typeof data0 === "string") {
+        if (func22(data0) < 1) {
+          const err2 = { instancePath: instancePath + "/name", schemaPath: "#/definitions/name/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+          if (vErrors === null) {
+            vErrors = [err2];
+          } else {
+            vErrors.push(err2);
+          }
+          errors++;
+        }
+      } else {
+        const err3 = { instancePath: instancePath + "/name", schemaPath: "#/definitions/name/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err3];
+        } else {
+          vErrors.push(err3);
+        }
+        errors++;
+      }
+    }
+    if (data.type !== void 0) {
+      let data1 = data.type;
+      if (typeof data1 === "string") {
+        if (func22(data1) < 1) {
+          const err4 = { instancePath: instancePath + "/type", schemaPath: "#/definitions/type/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+          if (vErrors === null) {
+            vErrors = [err4];
+          } else {
+            vErrors.push(err4);
+          }
+          errors++;
+        }
+      } else {
+        const err5 = { instancePath: instancePath + "/type", schemaPath: "#/definitions/type/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err5];
+        } else {
+          vErrors.push(err5);
+        }
+        errors++;
+      }
+    }
+    if (data.actor !== void 0) {
+      let data2 = data.actor;
+      if (!(data2 === "member" || data2 === "fork" || data2 === "dependabot")) {
+        const err6 = { instancePath: instancePath + "/actor", schemaPath: "#/definitions/actor/enum", keyword: "enum", params: { allowedValues: schema17.enum }, message: "must be equal to one of the allowed values" };
+        if (vErrors === null) {
+          vErrors = [err6];
+        } else {
+          vErrors.push(err6);
+        }
+        errors++;
+      }
+    }
+    if (data.approval !== void 0) {
+      let data3 = data.approval;
+      if (!(data3 === "approved" || data3 === "awaiting")) {
+        const err7 = { instancePath: instancePath + "/approval", schemaPath: "#/definitions/approval/enum", keyword: "enum", params: { allowedValues: schema18.enum }, message: "must be equal to one of the allowed values" };
+        if (vErrors === null) {
+          vErrors = [err7];
+        } else {
+          vErrors.push(err7);
+        }
+        errors++;
+      }
+    }
+    if (data.ref !== void 0) {
+      if (typeof data.ref !== "string") {
+        const err8 = { instancePath: instancePath + "/ref", schemaPath: "#/definitions/ref/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err8];
+        } else {
+          vErrors.push(err8);
+        }
+        errors++;
+      }
+    }
+    if (data.base !== void 0) {
+      if (typeof data.base !== "string") {
+        const err9 = { instancePath: instancePath + "/base", schemaPath: "#/definitions/base/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err9];
+        } else {
+          vErrors.push(err9);
+        }
+        errors++;
+      }
+    }
+    if (data.changed !== void 0) {
+      let data6 = data.changed;
+      if (Array.isArray(data6)) {
+        const len0 = data6.length;
+        for (let i0 = 0; i0 < len0; i0++) {
+          if (typeof data6[i0] !== "string") {
+            const err10 = { instancePath: instancePath + "/changed/" + i0, schemaPath: "#/definitions/changed/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+            if (vErrors === null) {
+              vErrors = [err10];
+            } else {
+              vErrors.push(err10);
+            }
+            errors++;
+          }
+        }
+      } else {
+        const err11 = { instancePath: instancePath + "/changed", schemaPath: "#/definitions/changed/type", keyword: "type", params: { type: "array" }, message: "must be array" };
+        if (vErrors === null) {
+          vErrors = [err11];
+        } else {
+          vErrors.push(err11);
+        }
+        errors++;
+      }
+    }
+    if (data.message !== void 0) {
+      if (typeof data.message !== "string") {
+        const err12 = { instancePath: instancePath + "/message", schemaPath: "#/definitions/message/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err12];
+        } else {
+          vErrors.push(err12);
+        }
+        errors++;
+      }
+    }
+    if (data.payload !== void 0) {
+      let data9 = data.payload;
+      if (!(data9 && typeof data9 == "object" && !Array.isArray(data9))) {
+        const err13 = { instancePath: instancePath + "/payload", schemaPath: "#/definitions/payload/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err13];
+        } else {
+          vErrors.push(err13);
+        }
+        errors++;
+      }
+    }
+    if (data.login !== void 0) {
+      if (typeof data.login !== "string") {
+        const err14 = { instancePath: instancePath + "/login", schemaPath: "#/definitions/login/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err14];
+        } else {
+          vErrors.push(err14);
+        }
+        errors++;
+      }
+    }
+  } else {
+    const err15 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    if (vErrors === null) {
+      vErrors = [err15];
+    } else {
+      vErrors.push(err15);
+    }
+    errors++;
+  }
+  validate132.errors = vErrors;
+  return errors === 0;
+}
+var schema25 = { "title": "FollowUpEvent", "description": "A second Event that arrives while the first Event's run (A) is still in progress or pending.", "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/definitions/name" }, "type": { "$ref": "#/definitions/type" }, "actor": { "$ref": "#/definitions/actor" }, "approval": { "$ref": "#/definitions/approval" }, "ref": { "$ref": "#/definitions/ref" }, "base": { "$ref": "#/definitions/base" }, "changed": { "$ref": "#/definitions/changed" }, "message": { "$ref": "#/definitions/message" }, "payload": { "$ref": "#/definitions/payload" }, "login": { "$ref": "#/definitions/login" }, "runA": { "description": "Run A's state when this Event arrives.", "enum": ["in-progress", "pending"] }, "pendingRuns": { "description": "How many runs already wait in a queue: max group.", "type": "integer", "minimum": 0, "maximum": 100 } } };
+function validate15(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (data && typeof data == "object" && !Array.isArray(data)) {
+    if (data.name === void 0) {
+      const err0 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "name" }, message: "must have required property 'name'" };
+      if (vErrors === null) {
+        vErrors = [err0];
+      } else {
+        vErrors.push(err0);
+      }
+      errors++;
+    }
+    for (const key0 in data) {
+      if (!func32.call(schema25.properties, key0)) {
+        const err1 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
+        if (vErrors === null) {
+          vErrors = [err1];
+        } else {
+          vErrors.push(err1);
+        }
+        errors++;
+      }
+    }
+    if (data.name !== void 0) {
+      let data0 = data.name;
+      if (typeof data0 === "string") {
+        if (func22(data0) < 1) {
+          const err2 = { instancePath: instancePath + "/name", schemaPath: "#/definitions/name/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+          if (vErrors === null) {
+            vErrors = [err2];
+          } else {
+            vErrors.push(err2);
+          }
+          errors++;
+        }
+      } else {
+        const err3 = { instancePath: instancePath + "/name", schemaPath: "#/definitions/name/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err3];
+        } else {
+          vErrors.push(err3);
+        }
+        errors++;
+      }
+    }
+    if (data.type !== void 0) {
+      let data1 = data.type;
+      if (typeof data1 === "string") {
+        if (func22(data1) < 1) {
+          const err4 = { instancePath: instancePath + "/type", schemaPath: "#/definitions/type/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+          if (vErrors === null) {
+            vErrors = [err4];
+          } else {
+            vErrors.push(err4);
+          }
+          errors++;
+        }
+      } else {
+        const err5 = { instancePath: instancePath + "/type", schemaPath: "#/definitions/type/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err5];
+        } else {
+          vErrors.push(err5);
+        }
+        errors++;
+      }
+    }
+    if (data.actor !== void 0) {
+      let data2 = data.actor;
+      if (!(data2 === "member" || data2 === "fork" || data2 === "dependabot")) {
+        const err6 = { instancePath: instancePath + "/actor", schemaPath: "#/definitions/actor/enum", keyword: "enum", params: { allowedValues: schema17.enum }, message: "must be equal to one of the allowed values" };
+        if (vErrors === null) {
+          vErrors = [err6];
+        } else {
+          vErrors.push(err6);
+        }
+        errors++;
+      }
+    }
+    if (data.approval !== void 0) {
+      let data3 = data.approval;
+      if (!(data3 === "approved" || data3 === "awaiting")) {
+        const err7 = { instancePath: instancePath + "/approval", schemaPath: "#/definitions/approval/enum", keyword: "enum", params: { allowedValues: schema18.enum }, message: "must be equal to one of the allowed values" };
+        if (vErrors === null) {
+          vErrors = [err7];
+        } else {
+          vErrors.push(err7);
+        }
+        errors++;
+      }
+    }
+    if (data.ref !== void 0) {
+      if (typeof data.ref !== "string") {
+        const err8 = { instancePath: instancePath + "/ref", schemaPath: "#/definitions/ref/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err8];
+        } else {
+          vErrors.push(err8);
+        }
+        errors++;
+      }
+    }
+    if (data.base !== void 0) {
+      if (typeof data.base !== "string") {
+        const err9 = { instancePath: instancePath + "/base", schemaPath: "#/definitions/base/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err9];
+        } else {
+          vErrors.push(err9);
+        }
+        errors++;
+      }
+    }
+    if (data.changed !== void 0) {
+      let data6 = data.changed;
+      if (Array.isArray(data6)) {
+        const len0 = data6.length;
+        for (let i0 = 0; i0 < len0; i0++) {
+          if (typeof data6[i0] !== "string") {
+            const err10 = { instancePath: instancePath + "/changed/" + i0, schemaPath: "#/definitions/changed/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+            if (vErrors === null) {
+              vErrors = [err10];
+            } else {
+              vErrors.push(err10);
+            }
+            errors++;
+          }
+        }
+      } else {
+        const err11 = { instancePath: instancePath + "/changed", schemaPath: "#/definitions/changed/type", keyword: "type", params: { type: "array" }, message: "must be array" };
+        if (vErrors === null) {
+          vErrors = [err11];
+        } else {
+          vErrors.push(err11);
+        }
+        errors++;
+      }
+    }
+    if (data.message !== void 0) {
+      if (typeof data.message !== "string") {
+        const err12 = { instancePath: instancePath + "/message", schemaPath: "#/definitions/message/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err12];
+        } else {
+          vErrors.push(err12);
+        }
+        errors++;
+      }
+    }
+    if (data.payload !== void 0) {
+      let data9 = data.payload;
+      if (!(data9 && typeof data9 == "object" && !Array.isArray(data9))) {
+        const err13 = { instancePath: instancePath + "/payload", schemaPath: "#/definitions/payload/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err13];
+        } else {
+          vErrors.push(err13);
+        }
+        errors++;
+      }
+    }
+    if (data.login !== void 0) {
+      if (typeof data.login !== "string") {
+        const err14 = { instancePath: instancePath + "/login", schemaPath: "#/definitions/login/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err14];
+        } else {
+          vErrors.push(err14);
+        }
+        errors++;
+      }
+    }
+    if (data.runA !== void 0) {
+      let data11 = data.runA;
+      if (!(data11 === "in-progress" || data11 === "pending")) {
+        const err15 = { instancePath: instancePath + "/runA", schemaPath: "#/properties/runA/enum", keyword: "enum", params: { allowedValues: schema25.properties.runA.enum }, message: "must be equal to one of the allowed values" };
+        if (vErrors === null) {
+          vErrors = [err15];
+        } else {
+          vErrors.push(err15);
+        }
+        errors++;
+      }
+    }
+    if (data.pendingRuns !== void 0) {
+      let data12 = data.pendingRuns;
+      if (!(typeof data12 == "number" && (!(data12 % 1) && !isNaN(data12)) && isFinite(data12))) {
+        const err16 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+        if (vErrors === null) {
+          vErrors = [err16];
+        } else {
+          vErrors.push(err16);
+        }
+        errors++;
+      }
+      if (typeof data12 == "number" && isFinite(data12)) {
+        if (data12 > 100 || isNaN(data12)) {
+          const err17 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/maximum", keyword: "maximum", params: { comparison: "<=", limit: 100 }, message: "must be <= 100" };
+          if (vErrors === null) {
+            vErrors = [err17];
+          } else {
+            vErrors.push(err17);
+          }
+          errors++;
+        }
+        if (data12 < 0 || isNaN(data12)) {
+          const err18 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+          if (vErrors === null) {
+            vErrors = [err18];
+          } else {
+            vErrors.push(err18);
+          }
+          errors++;
+        }
+      }
+    }
+  } else {
+    const err19 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    if (vErrors === null) {
+      vErrors = [err19];
+    } else {
+      vErrors.push(err19);
+    }
+    errors++;
+  }
+  validate15.errors = vErrors;
+  return errors === 0;
+}
+var pattern02 = new RegExp("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", "u");
+var pattern12 = new RegExp("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/(?!\\.\\.?$)[A-Za-z0-9._-]{1,100}$", "u");
+function validate12(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  if (data && typeof data == "object" && !Array.isArray(data)) {
+    if (data.event === void 0) {
+      const err0 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "event" }, message: "must have required property 'event'" };
+      if (vErrors === null) {
+        vErrors = [err0];
+      } else {
+        vErrors.push(err0);
+      }
+      errors++;
+    }
+    if (data.repo === void 0) {
+      const err1 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "repo" }, message: "must have required property 'repo'" };
+      if (vErrors === null) {
+        vErrors = [err1];
+      } else {
+        vErrors.push(err1);
+      }
+      errors++;
+    }
+    for (const key0 in data) {
+      if (!(key0 === "event" || key0 === "followUp" || key0 === "repo" || key0 === "assume")) {
+        const err2 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
+        if (vErrors === null) {
+          vErrors = [err2];
+        } else {
+          vErrors.push(err2);
+        }
+        errors++;
+      }
+    }
+    if (data.event !== void 0) {
+      if (!validate132(data.event, { instancePath: instancePath + "/event", parentData: data, parentDataProperty: "event", rootData })) {
+        vErrors = vErrors === null ? validate132.errors : vErrors.concat(validate132.errors);
+        errors = vErrors.length;
+      }
+    }
+    if (data.followUp !== void 0) {
+      if (!validate15(data.followUp, { instancePath: instancePath + "/followUp", parentData: data, parentDataProperty: "followUp", rootData })) {
+        vErrors = vErrors === null ? validate15.errors : vErrors.concat(validate15.errors);
+        errors = vErrors.length;
+      }
+    }
+    if (data.repo !== void 0) {
+      let data2 = data.repo;
+      if (data2 && typeof data2 == "object" && !Array.isArray(data2)) {
+        if (data2.date === void 0) {
+          const err3 = { instancePath: instancePath + "/repo", schemaPath: "#/definitions/repo/required", keyword: "required", params: { missingProperty: "date" }, message: "must have required property 'date'" };
+          if (vErrors === null) {
+            vErrors = [err3];
+          } else {
+            vErrors.push(err3);
+          }
+          errors++;
+        }
+        for (const key1 in data2) {
+          if (!func32.call(schema36.properties, key1)) {
+            const err4 = { instancePath: instancePath + "/repo", schemaPath: "#/definitions/repo/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" };
+            if (vErrors === null) {
+              vErrors = [err4];
+            } else {
+              vErrors.push(err4);
+            }
+            errors++;
+          }
+        }
+        if (data2.date !== void 0) {
+          let data3 = data2.date;
+          if (typeof data3 === "string") {
+            if (!pattern02.test(data3)) {
+              const err5 = { instancePath: instancePath + "/repo/date", schemaPath: "#/definitions/repo/properties/date/pattern", keyword: "pattern", params: { pattern: "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" }, message: 'must match pattern "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"' };
+              if (vErrors === null) {
+                vErrors = [err5];
+              } else {
+                vErrors.push(err5);
+              }
+              errors++;
+            }
+          } else {
+            const err6 = { instancePath: instancePath + "/repo/date", schemaPath: "#/definitions/repo/properties/date/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+            if (vErrors === null) {
+              vErrors = [err6];
+            } else {
+              vErrors.push(err6);
+            }
+            errors++;
+          }
+        }
+        if (data2.visibility !== void 0) {
+          let data4 = data2.visibility;
+          if (!(data4 === "public" || data4 === "private" || data4 === "internal")) {
+            const err7 = { instancePath: instancePath + "/repo/visibility", schemaPath: "#/definitions/repo/properties/visibility/enum", keyword: "enum", params: { allowedValues: schema36.properties.visibility.enum }, message: "must be equal to one of the allowed values" };
+            if (vErrors === null) {
+              vErrors = [err7];
+            } else {
+              vErrors.push(err7);
+            }
+            errors++;
+          }
+        }
+        if (data2.predates !== void 0) {
+          if (typeof data2.predates !== "boolean") {
+            const err8 = { instancePath: instancePath + "/repo/predates", schemaPath: "#/definitions/repo/properties/predates/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+            if (vErrors === null) {
+              vErrors = [err8];
+            } else {
+              vErrors.push(err8);
+            }
+            errors++;
+          }
+        }
+        if (data2.tokenDefault !== void 0) {
+          let data6 = data2.tokenDefault;
+          if (!(data6 === "restricted" || data6 === "permissive")) {
+            const err9 = { instancePath: instancePath + "/repo/tokenDefault", schemaPath: "#/definitions/repo/properties/tokenDefault/enum", keyword: "enum", params: { allowedValues: schema36.properties.tokenDefault.enum }, message: "must be equal to one of the allowed values" };
+            if (vErrors === null) {
+              vErrors = [err9];
+            } else {
+              vErrors.push(err9);
+            }
+            errors++;
+          }
+        }
+        if (data2.eventPolicy !== void 0) {
+          let data7 = data2.eventPolicy;
+          if (!(data7 === "none" || data7 === "allows" || data7 === "blocks")) {
+            const err10 = { instancePath: instancePath + "/repo/eventPolicy", schemaPath: "#/definitions/repo/properties/eventPolicy/enum", keyword: "enum", params: { allowedValues: schema36.properties.eventPolicy.enum }, message: "must be equal to one of the allowed values" };
+            if (vErrors === null) {
+              vErrors = [err10];
+            } else {
+              vErrors.push(err10);
+            }
+            errors++;
+          }
+        }
+        if (data2.defaultBranch !== void 0) {
+          let data8 = data2.defaultBranch;
+          if (typeof data8 === "string") {
+            if (func22(data8) < 1) {
+              const err11 = { instancePath: instancePath + "/repo/defaultBranch", schemaPath: "#/definitions/repo/properties/defaultBranch/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+              if (vErrors === null) {
+                vErrors = [err11];
+              } else {
+                vErrors.push(err11);
+              }
+              errors++;
+            }
+          } else {
+            const err12 = { instancePath: instancePath + "/repo/defaultBranch", schemaPath: "#/definitions/repo/properties/defaultBranch/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+            if (vErrors === null) {
+              vErrors = [err12];
+            } else {
+              vErrors.push(err12);
+            }
+            errors++;
+          }
+        }
+        if (data2.required !== void 0) {
+          let data9 = data2.required;
+          if (Array.isArray(data9)) {
+            const len0 = data9.length;
+            for (let i0 = 0; i0 < len0; i0++) {
+              if (typeof data9[i0] !== "string") {
+                const err13 = { instancePath: instancePath + "/repo/required/" + i0, schemaPath: "#/definitions/repo/properties/required/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                if (vErrors === null) {
+                  vErrors = [err13];
+                } else {
+                  vErrors.push(err13);
+                }
+                errors++;
+              }
+            }
+          } else {
+            const err14 = { instancePath: instancePath + "/repo/required", schemaPath: "#/definitions/repo/properties/required/type", keyword: "type", params: { type: "array" }, message: "must be array" };
+            if (vErrors === null) {
+              vErrors = [err14];
+            } else {
+              vErrors.push(err14);
+            }
+            errors++;
+          }
+        }
+        if (data2.strict !== void 0) {
+          if (typeof data2.strict !== "boolean") {
+            const err15 = { instancePath: instancePath + "/repo/strict", schemaPath: "#/definitions/repo/properties/strict/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+            if (vErrors === null) {
+              vErrors = [err15];
+            } else {
+              vErrors.push(err15);
+            }
+            errors++;
+          }
+        }
+        if (data2.mergeQueue !== void 0) {
+          if (typeof data2.mergeQueue !== "boolean") {
+            const err16 = { instancePath: instancePath + "/repo/mergeQueue", schemaPath: "#/definitions/repo/properties/mergeQueue/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+            if (vErrors === null) {
+              vErrors = [err16];
+            } else {
+              vErrors.push(err16);
+            }
+            errors++;
+          }
+        }
+        if (data2.vars !== void 0) {
+          let data13 = data2.vars;
+          if (data13 && typeof data13 == "object" && !Array.isArray(data13)) {
+            for (const key2 in data13) {
+              if (typeof data13[key2] !== "string") {
+                const err17 = { instancePath: instancePath + "/repo/vars/" + key2.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/repo/properties/vars/additionalProperties/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                if (vErrors === null) {
+                  vErrors = [err17];
+                } else {
+                  vErrors.push(err17);
+                }
+                errors++;
+              }
+            }
+          } else {
+            const err18 = { instancePath: instancePath + "/repo/vars", schemaPath: "#/definitions/repo/properties/vars/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+            if (vErrors === null) {
+              vErrors = [err18];
+            } else {
+              vErrors.push(err18);
+            }
+            errors++;
+          }
+        }
+        if (data2.repository !== void 0) {
+          let data15 = data2.repository;
+          if (typeof data15 === "string") {
+            if (!pattern12.test(data15)) {
+              const err19 = { instancePath: instancePath + "/repo/repository", schemaPath: "#/definitions/repo/properties/repository/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/(?!\\.\\.?$)[A-Za-z0-9._-]{1,100}$" }, message: 'must match pattern "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/(?!\\.\\.?$)[A-Za-z0-9._-]{1,100}$"' };
+              if (vErrors === null) {
+                vErrors = [err19];
+              } else {
+                vErrors.push(err19);
+              }
+              errors++;
+            }
+          } else {
+            const err20 = { instancePath: instancePath + "/repo/repository", schemaPath: "#/definitions/repo/properties/repository/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+            if (vErrors === null) {
+              vErrors = [err20];
+            } else {
+              vErrors.push(err20);
+            }
+            errors++;
+          }
+        }
+      } else {
+        const err21 = { instancePath: instancePath + "/repo", schemaPath: "#/definitions/repo/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err21];
+        } else {
+          vErrors.push(err21);
+        }
+        errors++;
+      }
+    }
+    if (data.assume !== void 0) {
+      let data16 = data.assume;
+      if (data16 && typeof data16 == "object" && !Array.isArray(data16)) {
+        for (const key3 in data16) {
+          if (typeof data16[key3] !== "string") {
+            const err22 = { instancePath: instancePath + "/assume/" + key3.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/properties/assume/additionalProperties/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+            if (vErrors === null) {
+              vErrors = [err22];
+            } else {
+              vErrors.push(err22);
+            }
+            errors++;
+          }
+        }
+      } else {
+        const err23 = { instancePath: instancePath + "/assume", schemaPath: "#/properties/assume/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err23];
+        } else {
+          vErrors.push(err23);
+        }
+        errors++;
+      }
+    }
+  } else {
+    const err24 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    if (vErrors === null) {
+      vErrors = [err24];
+    } else {
+      vErrors.push(err24);
+    }
+    errors++;
+  }
+  validate12.errors = vErrors;
+  return errors === 0;
+}
+function validate112(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (data && typeof data == "object" && !Array.isArray(data)) {
+    if (data.label === void 0) {
+      const err0 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "label" }, message: "must have required property 'label'" };
+      if (vErrors === null) {
+        vErrors = [err0];
+      } else {
+        vErrors.push(err0);
+      }
+      errors++;
+    }
+    if (data.scenario === void 0) {
+      const err1 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "scenario" }, message: "must have required property 'scenario'" };
+      if (vErrors === null) {
+        vErrors = [err1];
+      } else {
+        vErrors.push(err1);
+      }
+      errors++;
+    }
+    if (data.pins === void 0) {
+      const err2 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "pins" }, message: "must have required property 'pins'" };
+      if (vErrors === null) {
+        vErrors = [err2];
+      } else {
+        vErrors.push(err2);
+      }
+      errors++;
+    }
+    for (const key0 in data) {
+      if (!(key0 === "label" || key0 === "scenario" || key0 === "pins")) {
+        const err3 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
+        if (vErrors === null) {
+          vErrors = [err3];
+        } else {
+          vErrors.push(err3);
+        }
+        errors++;
+      }
+    }
+    if (data.label !== void 0) {
+      let data0 = data.label;
+      if (typeof data0 === "string") {
+        if (func22(data0) < 1) {
+          const err4 = { instancePath: instancePath + "/label", schemaPath: "#/properties/label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+          if (vErrors === null) {
+            vErrors = [err4];
+          } else {
+            vErrors.push(err4);
+          }
+          errors++;
+        }
+      } else {
+        const err5 = { instancePath: instancePath + "/label", schemaPath: "#/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+        if (vErrors === null) {
+          vErrors = [err5];
+        } else {
+          vErrors.push(err5);
+        }
+        errors++;
+      }
+    }
+    if (data.scenario !== void 0) {
+      if (!validate12(data.scenario, { instancePath: instancePath + "/scenario", parentData: data, parentDataProperty: "scenario", rootData })) {
+        vErrors = vErrors === null ? validate12.errors : vErrors.concat(validate12.errors);
+        errors = vErrors.length;
+      }
+    }
+    if (data.pins !== void 0) {
+      let data2 = data.pins;
+      if (data2 && typeof data2 == "object" && !Array.isArray(data2)) {
+        if (Object.keys(data2).length < 1) {
+          const err6 = { instancePath: instancePath + "/pins", schemaPath: "#/properties/pins/minProperties", keyword: "minProperties", params: { limit: 1 }, message: "must NOT have fewer than 1 properties" };
+          if (vErrors === null) {
+            vErrors = [err6];
+          } else {
+            vErrors.push(err6);
+          }
+          errors++;
+        }
+        for (const key1 in data2) {
+          let data3 = data2[key1];
+          if (data3 && typeof data3 == "object" && !Array.isArray(data3)) {
+            for (const key2 in data3) {
+              if (!(key2 === "value" || key2 === "possible" || key2 === "root" || key2 === "group" || key2 === "continuing")) {
+                const err7 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/pin/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" };
+                if (vErrors === null) {
+                  vErrors = [err7];
+                } else {
+                  vErrors.push(err7);
+                }
+                errors++;
+              }
+            }
+            if (data3.value !== void 0) {
+              if (typeof data3.value !== "string") {
+                const err8 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/value", schemaPath: "#/definitions/pin/properties/value/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                if (vErrors === null) {
+                  vErrors = [err8];
+                } else {
+                  vErrors.push(err8);
+                }
+                errors++;
+              }
+            }
+            if (data3.possible !== void 0) {
+              let data5 = data3.possible;
+              if (!Array.isArray(data5) && data5 !== null) {
+                const err9 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/possible", schemaPath: "#/definitions/pin/properties/possible/type", keyword: "type", params: { type: schema37.properties.possible.type }, message: "must be array,null" };
+                if (vErrors === null) {
+                  vErrors = [err9];
+                } else {
+                  vErrors.push(err9);
+                }
+                errors++;
+              }
+              if (Array.isArray(data5)) {
+                const len0 = data5.length;
+                for (let i0 = 0; i0 < len0; i0++) {
+                  if (typeof data5[i0] !== "string") {
+                    const err10 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/possible/" + i0, schemaPath: "#/definitions/pin/properties/possible/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                    if (vErrors === null) {
+                      vErrors = [err10];
+                    } else {
+                      vErrors.push(err10);
+                    }
+                    errors++;
+                  }
+                }
+              }
+            }
+            if (data3.root !== void 0) {
+              let data7 = data3.root;
+              if (typeof data7 !== "string" && data7 !== null) {
+                const err11 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/root", schemaPath: "#/definitions/pin/properties/root/type", keyword: "type", params: { type: schema37.properties.root.type }, message: "must be string,null" };
+                if (vErrors === null) {
+                  vErrors = [err11];
+                } else {
+                  vErrors.push(err11);
+                }
+                errors++;
+              }
+            }
+            if (data3.group !== void 0) {
+              let data8 = data3.group;
+              if (typeof data8 !== "string" && data8 !== null) {
+                const err12 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/group", schemaPath: "#/definitions/pin/properties/group/type", keyword: "type", params: { type: schema37.properties.group.type }, message: "must be string,null" };
+                if (vErrors === null) {
+                  vErrors = [err12];
+                } else {
+                  vErrors.push(err12);
+                }
+                errors++;
+              }
+            }
+            if (data3.continuing !== void 0) {
+              let data9 = data3.continuing;
+              if (!Array.isArray(data9) && data9 !== null) {
+                const err13 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/continuing", schemaPath: "#/definitions/pin/properties/continuing/type", keyword: "type", params: { type: schema37.properties.continuing.type }, message: "must be array,null" };
+                if (vErrors === null) {
+                  vErrors = [err13];
+                } else {
+                  vErrors.push(err13);
+                }
+                errors++;
+              }
+              if (Array.isArray(data9)) {
+                const len1 = data9.length;
+                for (let i1 = 0; i1 < len1; i1++) {
+                  if (typeof data9[i1] !== "string") {
+                    const err14 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/continuing/" + i1, schemaPath: "#/definitions/pin/properties/continuing/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                    if (vErrors === null) {
+                      vErrors = [err14];
+                    } else {
+                      vErrors.push(err14);
+                    }
+                    errors++;
+                  }
+                }
+              }
+            }
+          } else {
+            const err15 = { instancePath: instancePath + "/pins/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/pin/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+            if (vErrors === null) {
+              vErrors = [err15];
+            } else {
+              vErrors.push(err15);
+            }
+            errors++;
+          }
+        }
+      } else {
+        const err16 = { instancePath: instancePath + "/pins", schemaPath: "#/properties/pins/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err16];
+        } else {
+          vErrors.push(err16);
+        }
+        errors++;
+      }
+    }
+  } else {
+    const err17 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    if (vErrors === null) {
+      vErrors = [err17];
+    } else {
+      vErrors.push(err17);
+    }
+    errors++;
+  }
+  validate112.errors = vErrors;
+  return errors === 0;
+}
+function validate102(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  if (data && typeof data == "object" && !Array.isArray(data)) {
+    if (data.version === void 0) {
+      const err0 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "version" }, message: "must have required property 'version'" };
+      if (vErrors === null) {
+        vErrors = [err0];
+      } else {
+        vErrors.push(err0);
+      }
+      errors++;
+    }
+    if (data.tests === void 0) {
+      const err1 = { instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: "tests" }, message: "must have required property 'tests'" };
+      if (vErrors === null) {
+        vErrors = [err1];
+      } else {
+        vErrors.push(err1);
+      }
+      errors++;
+    }
+    for (const key0 in data) {
+      if (!(key0 === "version" || key0 === "tests")) {
+        const err2 = { instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
+        if (vErrors === null) {
+          vErrors = [err2];
+        } else {
+          vErrors.push(err2);
+        }
+        errors++;
+      }
+    }
+    if (data.version !== void 0) {
+      if (1 !== data.version) {
+        const err3 = { instancePath: instancePath + "/version", schemaPath: "#/properties/version/const", keyword: "const", params: { allowedValue: 1 }, message: "must be equal to constant" };
+        if (vErrors === null) {
+          vErrors = [err3];
+        } else {
+          vErrors.push(err3);
+        }
+        errors++;
+      }
+    }
+    if (data.tests !== void 0) {
+      let data1 = data.tests;
+      if (Array.isArray(data1)) {
+        if (data1.length < 1) {
+          const err4 = { instancePath: instancePath + "/tests", schemaPath: "#/properties/tests/minItems", keyword: "minItems", params: { limit: 1 }, message: "must NOT have fewer than 1 items" };
+          if (vErrors === null) {
+            vErrors = [err4];
+          } else {
+            vErrors.push(err4);
+          }
+          errors++;
+        }
+        const len0 = data1.length;
+        for (let i0 = 0; i0 < len0; i0++) {
+          if (!validate112(data1[i0], { instancePath: instancePath + "/tests/" + i0, parentData: data1, parentDataProperty: i0, rootData })) {
+            vErrors = vErrors === null ? validate112.errors : vErrors.concat(validate112.errors);
+            errors = vErrors.length;
+          }
+        }
+      } else {
+        const err5 = { instancePath: instancePath + "/tests", schemaPath: "#/properties/tests/type", keyword: "type", params: { type: "array" }, message: "must be array" };
+        if (vErrors === null) {
+          vErrors = [err5];
+        } else {
+          vErrors.push(err5);
+        }
+        errors++;
+      }
+    }
+  } else {
+    const err6 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    if (vErrors === null) {
+      vErrors = [err6];
+    } else {
+      vErrors.push(err6);
+    }
+    errors++;
+  }
+  validate102.errors = vErrors;
+  return errors === 0;
+}
+
+// src/core/testfile.ts
+var LOADERS = {
+  1: (file) => file
+};
+var STRINGS = "quote it: GitHub variables and job outputs are always strings";
+var OWNER_REPO = "use the form owner/repo, e.g. acme/app";
+function parseTestFile(path, text) {
+  const lineCounter = new import_yaml3.LineCounter();
+  const doc = (0, import_yaml3.parseDocument)(text, {
+    lineCounter,
+    prettyErrors: false,
+    version: "1.2",
+    schema: "core"
+  });
+  const at = (offset) => `${path}:${lineCounter.linePos(offset).line}`;
+  if (doc.errors.length > 0)
+    return { errors: doc.errors.map((e) => `${at(e.pos[0])}: ${e.message}`) };
+  const lineOf = (segs) => {
+    for (let n = segs.length; n >= 0; n--) {
+      const node = doc.getIn(segs.slice(0, n), true);
+      if (node?.range) return at(node.range[0]);
+    }
+    return `${path}:1`;
+  };
+  let data;
+  try {
+    data = doc.toJS({ maxAliasCount: 1e3 });
+  } catch (err) {
+    return { errors: [`${path}:1: ${err.message}`] };
+  }
+  const version = typeof data === "object" && data !== null && Object.hasOwn(data, "version") ? data.version : void 0;
+  const load = typeof version === "number" && Object.hasOwn(LOADERS, version) ? LOADERS[version] : void 0;
+  if (version !== void 0 && !load)
+    return {
+      errors: [
+        `${lineOf(["version"])}: version ${JSON.stringify(version)} isn't supported: this WhyNoRun reads Test file version 1`
+      ]
+    };
+  const file = load ? load(data) : data;
+  const check = validate_test_file_default;
+  if (!check(file))
+    return {
+      errors: (check.errors ?? []).map((e) => {
+        const segs = e.instancePath.split("/").slice(1).map((s) => s.replaceAll("~1", "/").replaceAll("~0", "~"));
+        const extra = e.params.additionalProperty;
+        if (extra !== void 0) segs.push(extra);
+        const where = extra === void 0 ? e.instancePath : `${e.instancePath}/${extra}`;
+        const message = e.keyword === "type" && /^\/tests\/\d+\/scenario\/(repo\/vars|assume)\/[^/]+$/.test(
+          e.instancePath
+        ) ? STRINGS : e.keyword === "pattern" && e.instancePath.endsWith("/repo/repository") ? OWNER_REPO : e.message ?? "is invalid";
+        return `${lineOf(segs)}: ${where || "file"} ${message}`;
+      })
+    };
+  const valid = file;
+  const labels = /* @__PURE__ */ new Set();
+  const errors = valid.tests.flatMap((t, i) => {
+    if (!labels.has(t.label)) {
+      labels.add(t.label);
+      return [];
+    }
+    return [
+      `${lineOf(["tests", i, "label"])}: label \`${t.label}\` is used by another test in this file`
+    ];
+  });
+  return errors.length > 0 ? { errors } : { file: valid };
+}
+var FIELDS = [
+  "value",
+  "possible",
+  "root",
+  "group",
+  "continuing"
+];
+var SETS = /* @__PURE__ */ new Set(["possible", "continuing"]);
+function current(verdict, field) {
+  if (field === "root") return verdict.causes[0]?.rule;
+  return verdict[field];
+}
+function same(field, pinned, now) {
+  if (SETS.has(field) && Array.isArray(pinned) && Array.isArray(now))
+    return JSON.stringify([...pinned].sort()) === JSON.stringify([...now].sort());
+  return (pinned ?? void 0) === now;
+}
+function compareTest(test, result) {
+  const verdicts = new Map(result.verdicts.map((v) => [v.key, v]));
+  const event = verdicts.get("event");
+  const unsupported2 = event?.value === "unsupported";
+  const broken = new Set(
+    result.diagnostics.map((d) => d.path.slice(d.path.lastIndexOf("/") + 1))
+  );
+  const findings = [];
+  if (unsupported2) {
+    const inputs = event.causes[0]?.inputs ?? [];
+    const reason = inputs.filter((i) => i.value !== void 0).map((i) => `${i.path} = ${String(i.value)}`).join(", ");
+    findings.push({ status: "Scenario unsupported", reason });
+  }
+  const reported = /* @__PURE__ */ new Set();
+  for (const [key, pin] of Object.entries(test.pins)) {
+    const verdict = verdicts.get(key);
+    if (verdict === void 0) {
+      if (unsupported2) continue;
+      const file = key.split(" \u203A ")[0];
+      if (broken.has(file)) {
+        if (!reported.has(file))
+          findings.push({ status: "file has Diagnostics", file });
+        reported.add(file);
+        continue;
+      }
+      findings.push({
+        status: "pinned subject not found",
+        key,
+        candidates: candidates(key, result.verdicts)
+      });
+      continue;
+    }
+    const changes = FIELDS.flatMap((field) => {
+      if (!Object.hasOwn(pin, field)) return [];
+      const now = current(verdict, field);
+      return same(field, pin[field], now) ? [] : [{ field, pinned: pin[field], now }];
+    });
+    findings.push(
+      changes.length > 0 ? { status: "changed", key, value: verdict.value, changes } : { status: "match", key }
+    );
+  }
+  for (const { key, candidates: candidates2 } of result.unmatchedAssumptions)
+    findings.push({ status: "assumed subject not found", key, candidates: candidates2 });
+  return findings;
+}
+var kind = (key) => [isAccess(key), isCheck(key), isConcurrency(key)].join();
+function candidates(key, verdicts) {
+  const segs = key.split(" \u203A ");
+  return verdicts.map((v) => v.key).filter((k) => {
+    const other = k.split(" \u203A ");
+    return other.length === segs.length && kind(k) === kind(key) && other.filter((s, i) => s !== segs[i]).length === 1;
+  });
+}
+function shown(value) {
+  if (value === void 0 || value === null) return "\u2014";
+  if (Array.isArray(value))
+    return `{${[...value].sort().join(", ")}}`;
+  return String(value);
+}
+var withCandidates = (candidates2) => candidates2.length > 0 ? ` (candidates: ${candidates2.join(", ")})` : "";
+function findingText(finding) {
+  switch (finding.status) {
+    case "match":
+      return `${finding.key}: matches`;
+    case "changed": {
+      const value = finding.changes.find((c) => c.field === "value");
+      const rest = finding.changes.filter((c) => c !== value).map((c) => `${c.field} ${shown(c.pinned)} \u2192 ${shown(c.now)}`);
+      const head = value ? `${shown(value.pinned)} \u2192 ${shown(value.now)}` : finding.value;
+      return `${finding.key}: ${head}${rest.length > 0 ? ` (${rest.join("; ")})` : ""}`;
+    }
+    case "pinned subject not found":
+    case "assumed subject not found":
+      return `${finding.status}: ${finding.key}${withCandidates(finding.candidates)}`;
+    case "file has Diagnostics":
+      return `${finding.file}: file has Diagnostics`;
+    case "Scenario unsupported":
+      return `Scenario unsupported (root WN-3): ${finding.reason}`;
+  }
+}
+
 // src/core/index.ts
 var SUPPORTED = /* @__PURE__ */ new Set(["push", "pull_request", "pull_request_target"]);
 var MAX_BYTES = 500 * 1024;
@@ -17815,8 +19008,8 @@ function unmatched(scenario, verdicts) {
   return Object.keys(scenario.assume ?? {}).flatMap((key) => {
     const [file, id] = key.split(" \u203A ");
     if (jobs.some(([f, j]) => f === file && j === id)) return [];
-    const candidates = jobs.filter(([f, j]) => f === file || j === id).map((parts) => parts.join(" \u203A "));
-    return [{ key, candidates }];
+    const candidates2 = jobs.filter(([f, j]) => f === file || j === id).map((parts) => parts.join(" \u203A "));
+    return [{ key, candidates: candidates2 }];
   });
 }
 function unsupported(scenario, on) {
@@ -18136,9 +19329,13 @@ var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
 // src/cli/main.ts
 var ACTORS = ["member", "fork", "dependabot"];
+var TESTS = ".github/whynorun/**/*.test.yml";
 var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref>] [--base <branch>]
                      [--actor member|fork|dependabot] [--changed <file>|-] [--repo <dir>]
                      [--flow access|all]
+       whynorun show --from <test file> [--scenario <label>] [--repo <dir>]
+                     [--flow access|checks|concurrency|all]
+       whynorun test [patterns\u2026]
        whynorun --version
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
@@ -18148,6 +19345,7 @@ function main(argv, stdin = () => readFileSync(0, "utf8")) {
     return 0;
   }
   if (argv[0] === "show") return show(argv.slice(1), stdin);
+  if (argv[0] === "test") return runTests(argv.slice(1));
   return misuse();
 }
 function misuse(message) {
@@ -18155,6 +19353,113 @@ function misuse(message) {
 ${USAGE}` : USAGE);
   return 2;
 }
+function unusable(messages) {
+  process.stderr.write(messages.map((m) => `${m}
+`).join(""));
+  return 2;
+}
+function readWorkflows(repo) {
+  const dir = join2(resolve3(repo), ".github", "workflows");
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return void 0;
+  }
+  return entries.filter((e) => e.isFile()).map((e) => ({
+    path: `.github/workflows/${e.name}`,
+    text: readFileSync(join2(dir, e.name), "utf8")
+  }));
+}
+function readTestFile(path) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    return {
+      errors: [
+        `${path}: can't read it (${err.code})`
+      ]
+    };
+  }
+  return parseTestFile(path, text);
+}
+var byCodeUnit = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function runTests(args) {
+  let positionals;
+  try {
+    ({ positionals } = parseArgs({ args, allowPositionals: true }));
+  } catch (err) {
+    return misuse(err.message);
+  }
+  const paths = /* @__PURE__ */ new Set();
+  for (const pattern of positionals.length > 0 ? positionals : [TESTS]) {
+    const matches = globSync(pattern);
+    if (matches.length === 0) {
+      const nearby = [
+        ...new Set(
+          globSync([
+            pattern.replace(/\.yml$/, ".yaml"),
+            TESTS.replace(/\.yml$/, ".yaml")
+          ])
+        )
+      ].sort(byCodeUnit);
+      return unusable([
+        `whynorun: no Test files match ${pattern}` + (nearby.length > 0 ? `; Test files end in .test.yml, so these don't count: ${nearby.join(", ")}` : "")
+      ]);
+    }
+    for (const match2 of matches) paths.add(match2);
+  }
+  const files = [];
+  const errors = [];
+  for (const path of [...paths].sort(byCodeUnit)) {
+    const read = readTestFile(path);
+    if (read.errors) errors.push(...read.errors);
+    else files.push({ path, file: read.file });
+  }
+  if (errors.length > 0) return unusable(errors);
+  const workflows = readWorkflows(".");
+  if (!workflows)
+    return unusable([
+      `whynorun: no .github/workflows/ folder in ${resolve3(".")}`
+    ]);
+  const blocks = [];
+  let diagnosed = false;
+  for (const { path, file } of files)
+    for (const test of file.tests) {
+      const result = simulate(workflows, test.scenario);
+      if (!diagnosed && result.diagnostics.length > 0)
+        blocks.push(
+          result.diagnostics.map((d) => `${d.path}:${d.line}: ${d.message}`)
+        );
+      diagnosed ||= result.diagnostics.length > 0;
+      const lines = compareTest(test, result).filter((f) => f.status !== "match").map(findingText);
+      if (lines.length > 0) blocks.push([`${path}: ${test.label}`, ...lines]);
+    }
+  process.stdout.write(
+    [
+      `whynorun ${"0.3.0"}`,
+      ...blocks.map((b) => `
+${b.join("\n")}`),
+      ""
+    ].join("\n")
+  );
+  return blocks.length > 0 ? 1 : 0;
+}
+var SCENARIO_FLAGS = [
+  "event",
+  "date",
+  "ref",
+  "base",
+  "actor",
+  "changed"
+];
+var FLOWS = {
+  access: isAccess,
+  checks: isCheck,
+  concurrency: isConcurrency,
+  all: () => true
+};
 function show(args, stdin) {
   let values;
   try {
@@ -18167,6 +19472,8 @@ function show(args, stdin) {
         base: { type: "string" },
         actor: { type: "string" },
         changed: { type: "string" },
+        from: { type: "string" },
+        scenario: { type: "string" },
         repo: { type: "string", default: "." },
         flow: { type: "string", default: "all" }
       }
@@ -18174,13 +19481,73 @@ function show(args, stdin) {
   } catch (err) {
     return misuse(err.message);
   }
-  const { event, date, ref, base, actor, changed, repo, flow } = values;
-  if (flow === "checks" || flow === "concurrency")
-    return misuse(
-      `--flow ${flow} needs required checks or a Follow-up event, which flags can't describe: use --from <test file>`
-    );
-  if (flow !== "access" && flow !== "all")
+  const { from, repo, flow } = values;
+  if (!Object.hasOwn(FLOWS, flow))
     return misuse("--flow must be access, checks, concurrency or all");
+  let scenario;
+  if (from !== void 0) {
+    const flag = SCENARIO_FLAGS.find((f) => values[f] !== void 0);
+    if (flag) return misuse(`--from can't be combined with --${flag}`);
+    const read = readTestFile(from);
+    if (read.errors) return unusable(read.errors);
+    const { tests } = read.file;
+    const labels = tests.map((t) => t.label).join(", ");
+    const label = values.scenario;
+    if (label === void 0 && tests.length > 1)
+      return misuse(
+        `${from} has ${tests.length} tests: choose one with --scenario <label> (${labels})`
+      );
+    const test = label === void 0 ? tests[0] : tests.find((t) => t.label === label);
+    if (!test)
+      return misuse(`no test labelled ${label} in ${from} (${labels})`);
+    scenario = test.scenario;
+  } else {
+    if (values.scenario !== void 0)
+      return misuse("--scenario picks a test from --from <test file>");
+    if (flow === "checks" || flow === "concurrency")
+      return misuse(
+        `--flow ${flow} needs required checks or a Follow-up event, which flags can't describe: use --from <test file>`
+      );
+    const flags = fromFlags(values, stdin);
+    if (typeof flags === "number") return flags;
+    scenario = flags;
+  }
+  const files = readWorkflows(repo);
+  if (!files) return misuse(`no .github/workflows/ folder in ${resolve3(repo)}`);
+  const { verdicts, diagnostics } = simulate(files, scenario);
+  const shown2 = verdicts.filter(
+    (v) => v.key === "event" || FLOWS[flow](v.key)
+  );
+  const lines = [
+    ...shown2.map((v) => {
+      const root = v.causes[0];
+      const line = root?.spans[0]?.line;
+      const assumed = v.causes.filter((c) => c.rule === "WN-5").flatMap((c) => c.inputs).map(({ path, value }) => `; WN-5 assumed ${path} = ${String(value)}`).join("");
+      return [
+        v.key,
+        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""}${assumed})`
+      ];
+    }),
+    ...diagnostics.map((d) => [
+      d.path.slice(d.path.lastIndexOf("/") + 1),
+      `${d.path}:${d.line}: ${d.message}`
+    ])
+  ].sort(([a], [b]) => byCodeUnit(a, b)).map(([, text]) => text);
+  process.stdout.write(
+    [
+      `whynorun ${"0.3.0"}`,
+      "",
+      "What WhyNoRun always assumes:",
+      ...PLATFORM_BASELINE.map((item) => `- ${item}`),
+      "",
+      ...lines,
+      ""
+    ].join("\n")
+  );
+  return 0;
+}
+function fromFlags(values, stdin) {
+  const { event, date, ref, base, actor, changed } = values;
   if (event === void 0) return misuse("show needs --event <name>");
   if (date === void 0)
     return misuse("show needs --date <YYYY-MM-DD>, the simulation date");
@@ -18201,46 +19568,7 @@ function show(args, stdin) {
   }
   if (validateScenario(scenario).length > 0)
     return misuse(`--event or --date is invalid: --date must be YYYY-MM-DD`);
-  const dir = join2(resolve3(repo), ".github", "workflows");
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return misuse(`no .github/workflows/ folder in ${resolve3(repo)}`);
-  }
-  const files = entries.filter((e) => e.isFile()).map((e) => ({
-    path: `.github/workflows/${e.name}`,
-    text: readFileSync(join2(dir, e.name), "utf8")
-  }));
-  const { verdicts, diagnostics } = simulate(files, scenario);
-  const shown = flow === "access" ? verdicts.filter((v) => v.key === "event" || isAccess(v.key)) : verdicts;
-  const lines = [
-    ...shown.map((v) => {
-      const root = v.causes[0];
-      const line = root?.spans[0]?.line;
-      const assumed = v.causes.filter((c) => c.rule === "WN-5").flatMap((c) => c.inputs).map(({ path, value }) => `; WN-5 assumed ${path} = ${String(value)}`).join("");
-      return [
-        v.key,
-        `${v.key}: ${v.value} (root ${root?.rule}${line ? `, line ${line}` : ""}${assumed})`
-      ];
-    }),
-    ...diagnostics.map((d) => [
-      d.path.slice(d.path.lastIndexOf("/") + 1),
-      `${d.path}:${d.line}: ${d.message}`
-    ])
-  ].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, text]) => text);
-  process.stdout.write(
-    [
-      `whynorun ${"0.3.0"}`,
-      "",
-      "What WhyNoRun always assumes:",
-      ...PLATFORM_BASELINE.map((item) => `- ${item}`),
-      "",
-      ...lines,
-      ""
-    ].join("\n")
-  );
-  return 0;
+  return scenario;
 }
 
 // src/cli/index.ts
