@@ -625,3 +625,21 @@ select.assumed {
     border-color: var(--wait);
   }
 }
+
+/* #9 §6: an imported fact's tag is blue. */
+.source-tag.imported {
+  color: #0969da;
+}
+
+/* The import form, or its step line, takes its own line under the Workflow set source. */
+.source > .import {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.import .error {
+  flex-basis: 100%;
+}
