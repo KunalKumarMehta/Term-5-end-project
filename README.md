@@ -2,7 +2,7 @@
 
 Know what your GitHub Actions workflows will do before you push.
 
-**Status:** 0.2.0: flows 1–2 work. End-term project, SST MERN 2029 batch.
+**Status:** 0.3.0: flows 1–3 work. End-term project, SST MERN 2029 batch.
 
 [Playground](https://kunalkumarmehta.github.io/whynorun/) · [npm](https://www.npmjs.com/package/whynorun) · GitHub Action (planned for 1.0.0) · Demo video playlist (planned)
 
@@ -36,7 +36,9 @@ Type your branch protection's required checks (or click Require every produced c
 
 ### Concurrency outcome (core flow 3)
 
-Planned: whether run A is cancelled, replaced or queued when a Follow-up event arrives.
+Describe a Follow-up event that arrives while run A is in progress or pending, and the Concurrency tab shows, for each `concurrency:` declared at workflow or job level, run A's and run B's outcome as `runs`, `pending`, `cancelled` or `no-run`, with the resolved group (lower-cased, with run-time placeholders such as `<run_id:A>`) next to the group as written. `cancel-in-progress: true` cancels run A and run B runs (CC-2); otherwise run B waits pending behind a running A, and replaces a pending one (CC-1). Groups ignore case (CC-4), and a property the Event leaves undefined, such as `github.head_ref` on a push, resolves to empty, so pushes to different branches can collide (CC-5). For `queue: max`, give the number of runs already pending and run B is queued, its place likely but not certain (CC-6), or cancelled once 100 wait (CC-3); `queue: max` with `cancel-in-progress: true` is GitHub's own validation error, shown as a Diagnostic (CC-3). A group shared by two GitHub workflows follows the arriving run's `cancel-in-progress` (CC-12), a local reusable workflow in its caller's group cancels its own run (CC-7), and jobs that keep running after a cancellation, such as `if: always()`, are listed as continuing (CC-9). A matrix-dependent group, a run awaiting approval, mixed `queue` modes that decide the outcome, or a run waiting on a cancelled run's continuing jobs (CC-11) is Uncertain. With Compare on, ◆ marks each run that differs. `whynorun show` prints run A's line; a Follow-up event, and with it the CLI's `--flow concurrency`, arrives with `whynorun test` and `show --from`.
+
+![Concurrency outcome (core flow 3): the example's Fork PR with a Follow-up synchronize on the same PR. ci.yml › concurrency.A is cancelled, root CC-2 on cancel-in-progress: true at ci.yml line 14, in group ci-feature resolved from ci-${{ github.head_ref || github.ref }}, and ci.yml › concurrency.B runs; deploy.yml's push-only pair is no-run.](docs/images/concurrency.png)
 
 ### Behaviour tests in CI (core flow 4)
 
@@ -50,7 +52,7 @@ Repo import and share links are planned.
 
 ### `whynorun show`
 
-`whynorun show --event push --date 2026-12-03` reads `.github/workflows/` in the current folder (or `--repo <dir>`) and prints one line per GitHub workflow, per job and per access key (each job's 17 `GITHUB_TOKEN` scopes and its secrets, computed as if the job runs): its value, its root rule ID and the YAML line. `--flow access` prints only the access keys. `--ref` (a branch, `refs/heads/…` or `refs/tags/…`) and `--base` give the pushed ref and a pull request's base branch for branch and tag filters; both default to the default branch. `--actor member|fork|dependabot` sets the Actor kind (a member by default). `--changed <file>` (or `-` for stdin) lists the changed files, one per line, taken as the complete diff for path filters; without it the diff is empty. It never reads git and never uses the network. Repo facts it isn't given take these assumed defaults:
+`whynorun show --event push --date 2026-12-03` reads `.github/workflows/` in the current folder (or `--repo <dir>`) and prints one line per GitHub workflow, per job, per run A of each `concurrency:` and per access key (each job's 17 `GITHUB_TOKEN` scopes and its secrets, computed as if the job runs): its value, its root rule ID and the YAML line. `--flow access` prints only the access keys. `--ref` (a branch, `refs/heads/…` or `refs/tags/…`) and `--base` give the pushed ref and a pull request's base branch for branch and tag filters; both default to the default branch. `--actor member|fork|dependabot` sets the Actor kind (a member by default). `--changed <file>` (or `-` for stdin) lists the changed files, one per line, taken as the complete diff for path filters; without it the diff is empty. It never reads git and never uses the network. Repo facts it isn't given take these assumed defaults:
 
 <!-- show-defaults -->
 
@@ -157,6 +159,7 @@ These platform conditions are taken as given and never shown as a cause:
 - Remote reusable workflows are never fetched (WN-6), and neither are the actions that steps `uses:`. Local reusable workflows are modelled one level deep.
 - Changed files are typed by hand, and the CLI never reads git.
 - Environment secrets aren't modelled (RU-3), and environment protection rules are assumed to pass (PL-16).
+- Only one A-then-B pair: one run A and one Follow-up event per Scenario.
 
 ## Credits
 

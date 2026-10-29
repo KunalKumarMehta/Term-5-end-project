@@ -14410,6 +14410,26 @@ function indexOn(doc, span) {
   const root = doc.contents.items.find(
     (p) => name(doc, p.key) === "permissions"
   );
+  const concurrency = (pair2, own2) => {
+    if (!pair2) return void 0;
+    const via = own2 ?? ((0, import_yaml2.isAlias)(pair2.value) ? span(pair2.value) : void 0);
+    const value2 = resolve2(doc, pair2.value);
+    const at = (key) => {
+      const v = (0, import_yaml2.isMap)(value2) ? resolve2(doc, value2.items.find((p) => name(doc, p.key) === key)?.value) : void 0;
+      return (0, import_yaml2.isScalar)(v) ? { value: v.value, span: via ?? span(v) } : void 0;
+    };
+    const group = (0, import_yaml2.isScalar)(value2) ? { value: value2.value, span: via ?? span(value2) } : at("group");
+    const cancel = at("cancel-in-progress");
+    const queue = at("queue");
+    return {
+      group: {
+        text: String(group?.value ?? ""),
+        span: group?.span ?? via ?? span(pair2.key)
+      },
+      ...cancel && { cancel },
+      ...queue && { queue }
+    };
+  };
   const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
   const jobs = resolve2(doc, jobsPair?.value);
   for (const item of (0, import_yaml2.isMap)(jobs) ? jobs.items : []) {
@@ -14435,10 +14455,19 @@ function indexOn(doc, span) {
       environment: env && (own2 ?? span(env.pair.key)),
       checkouts: (0, import_yaml2.isSeq)(steps) ? checkouts(doc, steps.items, own2, span) : [],
       uses: field("uses")?.span,
-      secrets: field("secrets")?.span
+      secrets: field("secrets")?.span,
+      concurrency: concurrency(field("concurrency")?.pair, own2)
     });
   }
-  const workflow = { jobSpans, permissions: permissions(root, void 0) };
+  const workflow = {
+    jobSpans,
+    permissions: permissions(root, void 0),
+    name: name(doc, doc.contents.get("name", true)),
+    concurrency: concurrency(
+      doc.contents.items.find((p) => name(doc, p.key) === "concurrency"),
+      void 0
+    )
+  };
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
   if (!pair || !(0, import_yaml2.isScalar)(pair.key))
     return { ...workflow, onSpan: void 0, onEntries };
@@ -14591,7 +14620,7 @@ var stubs = (status) => [
   stub("success", 0, () => new data_exports.BooleanData(status.success)),
   stub("always", 0, () => new data_exports.BooleanData(true)),
   stub("failure", 0, () => new data_exports.BooleanData(status.failure)),
-  stub("cancelled", 0, () => new data_exports.BooleanData(false)),
+  stub("cancelled", 0, () => new data_exports.BooleanData(status.cancelled ?? false)),
   // The files exist only in the run's workspace, so its result is a run-time value.
   stub("hashFiles", 1, () => {
     throw new RuntimeValueNeeded("hashFiles()");
@@ -14831,7 +14860,7 @@ function validate11(data, { instancePath = "", parentData, parentDataProperty, r
   validate11.errors = vErrors;
   return errors === 0;
 }
-var schema23 = { "title": "FollowUpEvent", "description": "A second Event that arrives while the first Event's run (A) is still in progress or pending.", "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/definitions/name" }, "type": { "$ref": "#/definitions/type" }, "actor": { "$ref": "#/definitions/actor" }, "approval": { "$ref": "#/definitions/approval" }, "ref": { "$ref": "#/definitions/ref" }, "base": { "$ref": "#/definitions/base" }, "changed": { "$ref": "#/definitions/changed" }, "message": { "$ref": "#/definitions/message" }, "payload": { "$ref": "#/definitions/payload" }, "login": { "$ref": "#/definitions/login" }, "runA": { "description": "Run A's state when this Event arrives.", "enum": ["in-progress", "pending"] }, "pendingRuns": { "description": "How many runs already wait in a queue: max group.", "type": "integer", "minimum": 0 } } };
+var schema23 = { "title": "FollowUpEvent", "description": "A second Event that arrives while the first Event's run (A) is still in progress or pending.", "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/definitions/name" }, "type": { "$ref": "#/definitions/type" }, "actor": { "$ref": "#/definitions/actor" }, "approval": { "$ref": "#/definitions/approval" }, "ref": { "$ref": "#/definitions/ref" }, "base": { "$ref": "#/definitions/base" }, "changed": { "$ref": "#/definitions/changed" }, "message": { "$ref": "#/definitions/message" }, "payload": { "$ref": "#/definitions/payload" }, "login": { "$ref": "#/definitions/login" }, "runA": { "description": "Run A's state when this Event arrives.", "enum": ["in-progress", "pending"] }, "pendingRuns": { "description": "How many runs already wait in a queue: max group.", "type": "integer", "minimum": 0, "maximum": 100 } } };
 function validate13(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -15029,8 +15058,8 @@ function validate13(data, { instancePath = "", parentData, parentDataProperty, r
         errors++;
       }
       if (typeof data12 == "number" && isFinite(data12)) {
-        if (data12 < 0 || isNaN(data12)) {
-          const err17 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+        if (data12 > 100 || isNaN(data12)) {
+          const err17 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/maximum", keyword: "maximum", params: { comparison: "<=", limit: 100 }, message: "must be <= 100" };
           if (vErrors === null) {
             vErrors = [err17];
           } else {
@@ -15038,14 +15067,23 @@ function validate13(data, { instancePath = "", parentData, parentDataProperty, r
           }
           errors++;
         }
+        if (data12 < 0 || isNaN(data12)) {
+          const err18 = { instancePath: instancePath + "/pendingRuns", schemaPath: "#/properties/pendingRuns/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+          if (vErrors === null) {
+            vErrors = [err18];
+          } else {
+            vErrors.push(err18);
+          }
+          errors++;
+        }
       }
     }
   } else {
-    const err18 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+    const err19 = { instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" };
     if (vErrors === null) {
-      vErrors = [err18];
+      vErrors = [err19];
     } else {
-      vErrors.push(err18);
+      vErrors.push(err19);
     }
     errors++;
   }
@@ -16001,7 +16039,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
   const fails = (id) => Object.hasOwn(assume, key(id)) && assume[key(id)] === "fails";
   const github = githubContext(scenario);
   const contexts = { github, vars: { ...scenario.repo.vars }, inputs: {} };
-  const { event, repo } = scenario;
+  const { event } = scenario;
   const unsettled = /* @__PURE__ */ new Map();
   const listed = parsed.events[event.name]?.types;
   const activityTypes = PR_DEFAULT_TYPES.filter(
@@ -16063,35 +16101,8 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
       return Object.hasOwn(assume, name2) ? { value: assume[name2] } : lack(name2);
     }
     if (context !== "github" || rest.length === 0) return void 0;
-    const field = rest[0].toLowerCase();
-    if (field === "repository" || field === "repository_owner") {
-      const got = repo.repository === void 0 ? lack("repo.repository") : { value: repo.repository };
-      if (!("value" in got) || field === "repository") return got;
-      return { value: String(got.value).split("/")[0] };
-    }
-    if (field === "actor" || field === "triggering_actor")
-      return event.actor === "dependabot" ? { value: "dependabot[bot]" } : event.login === void 0 ? lack("event.login") : { value: event.login };
-    if (FROM_EVENT.has(field)) return void 0;
-    if (field !== "event") return lack(`github.${rest[0]}`);
-    if (rest.length === 1) return void 0;
-    const star = rest.indexOf("*");
-    const walk2 = rest.slice(1, star < 0 ? void 0 : star);
-    let at = github.event;
-    for (const seg of walk2) {
-      if (!isObj(at)) return { value: null };
-      const found = ownKey(at, seg);
-      if (found === void 0) {
-        if (ABSENT[event.name]?.includes(walk2[0].toLowerCase()))
-          return { value: null };
-        if (at === github.event && seg.toLowerCase() === "action")
-          return walk2.length > 1 ? { value: null } : lack("event.type");
-        if (walk2.join(".").toLowerCase() === "pull_request.head.repo.full_name")
-          return lack("repo.repository");
-        return lack(`github.event.${rest.slice(1).join(".")}`);
-      }
-      at = at[found];
-    }
-    return star < 0 ? { value: at } : void 0;
+    const got = readGithub(rest, scenario, github);
+    return got && "needed" in got ? lack(got.needed) : got;
   };
   const candidatesOf = (name2, compared) => {
     if (name2.includes(".*.")) return [...compared.map((c) => [c]), [], [OTHER]];
@@ -16429,6 +16440,37 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
   };
   return ids.map(final);
 }
+function readGithub(rest, { event, repo }, github) {
+  const field = rest[0].toLowerCase();
+  if (field === "repository" || field === "repository_owner") {
+    const got = repo.repository === void 0 ? { needed: "repo.repository" } : { value: repo.repository };
+    if (!("value" in got) || field === "repository") return got;
+    return { value: String(got.value).split("/")[0] };
+  }
+  if (field === "actor" || field === "triggering_actor")
+    return event.actor === "dependabot" ? { value: "dependabot[bot]" } : event.login === void 0 ? { needed: "event.login" } : { value: event.login };
+  if (FROM_EVENT.has(field)) return void 0;
+  if (field !== "event") return { needed: `github.${rest[0]}` };
+  if (rest.length === 1) return void 0;
+  const star = rest.indexOf("*");
+  const walk2 = rest.slice(1, star < 0 ? void 0 : star);
+  let at = github.event;
+  for (const seg of walk2) {
+    if (!isObj(at)) return { value: null };
+    const found = ownKey(at, seg);
+    if (found === void 0) {
+      if (ABSENT[event.name]?.includes(walk2[0].toLowerCase()))
+        return { value: null };
+      if (at === github.event && seg.toLowerCase() === "action")
+        return walk2.length > 1 ? { value: null } : { needed: "event.type" };
+      if (walk2.join(".").toLowerCase() === "pull_request.head.repo.full_name")
+        return { needed: "repo.repository" };
+      return { needed: `github.event.${rest.slice(1).join(".")}` };
+    }
+    at = at[found];
+  }
+  return star < 0 ? { value: at } : void 0;
+}
 var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 function ownKey(obj, name2) {
   if (Object.hasOwn(obj, name2)) return name2;
@@ -16715,6 +16757,374 @@ function producerBadge({ job, workflow, spans }, pending, skipped) {
     causes: job.causes,
     settle: job.settle ?? [],
     ...job.hints && { hints: job.hints }
+  };
+}
+
+// src/core/concurrency.ts
+var isConcurrency = (key) => / › concurrency\.[AB]$/.test(key);
+function queueDiagnostics(parsed) {
+  return [
+    parsed.concurrency,
+    ...[...parsed.jobSpans.values()].map((j) => j.concurrency)
+  ].flatMap(
+    (c) => c?.queue?.value === "max" && c.cancel?.value === true ? [
+      {
+        ...c.queue.span,
+        rule: "CC-3",
+        message: "The combination of `queue: max` and `cancel-in-progress: true` is not allowed and will result in a workflow validation error."
+      }
+    ] : []
+  );
+}
+var CREATED = /* @__PURE__ */ new Set(["runs", "fails"]);
+var QUEUE_MAX = 100;
+function concurrencyVerdicts(all) {
+  const sides = all.flatMap((d) => [
+    side(d, d.a, "A"),
+    ...d.b ? [side(d, d.b, "B")] : []
+  ]);
+  const followUp = all[0]?.a.scenario.followUp;
+  const state = followUp?.runA ?? "in-progress";
+  const waiting = state === "pending";
+  const runA = { path: "followUp.runA", value: state };
+  const queued = { path: "followUp.pendingRuns", value: followUp?.pendingRuns };
+  const at = (s, rule, spans = []) => ({
+    rule,
+    spans: [s.d.declared.group.span, ...spans],
+    inputs: rule === "CC-8" || !followUp ? [] : [runA]
+  });
+  const lower = (s) => s.group?.toLowerCase();
+  const mayCollide = (x, y) => x.readsMatrix || y.readsMatrix ? x.d === y.d : x.group === void 0 || y.group === void 0 || lower(x) === lower(y);
+  const selfCancels = (x, y, w) => {
+    const [callee, caller] = x.d.callee !== void 0 ? [x, y] : [y, x];
+    return callee.d.callee !== void 0 && caller.d.callee === void 0 && callee.d.tree === caller.d.tree && (caller.d.job === void 0 || caller.d.job === callee.d.callee) && w.cancel.get(callee) === true;
+  };
+  const paired = (x, a, b, w, max) => {
+    const full = (followUp?.pendingRuns ?? 0) + (waiting ? 1 : 0) >= QUEUE_MAX;
+    const A = max ? {
+      value: waiting ? "pending" : "runs",
+      causes: [{ ...at(x, "CC-3"), inputs: [runA] }]
+    } : waiting ? { value: "cancelled", causes: [at(x, "CC-1")] } : w.cancel.get(b) ? {
+      value: "cancelled",
+      causes: [
+        at(
+          x,
+          "CC-2",
+          b.d.declared.cancel && [b.d.declared.cancel.span]
+        )
+      ],
+      ...a.d.survivors.length > 0 && { continuing: a.d.survivors }
+    } : { value: "runs", causes: [at(x, "CC-1")] };
+    const cc2 = !max && !waiting && w.cancel.get(b) === true;
+    const B = max ? full ? {
+      value: "cancelled",
+      causes: [{ ...at(x, "CC-3"), inputs: [runA, queued] }]
+    } : {
+      value: "pending",
+      causes: [
+        { ...at(x, "CC-3"), inputs: [runA, queued] },
+        at(x, "CC-8"),
+        { rule: "CC-6", spans: [], inputs: [queued] }
+      ]
+    } : cc2 && a.d.survivors.length > 0 ? (
+      // CC-11: whether run A's survivors still hold the group is undocumented.
+      {
+        value: "uncertain",
+        possible: ["pending", "runs"],
+        causes: [
+          { rule: "CC-11", spans: [], inputs: [] },
+          at(x, "CC-2", b.d.declared.cancel && [b.d.declared.cancel.span])
+        ]
+      }
+    ) : w.cancel.get(b) ? {
+      value: "runs",
+      causes: [
+        at(
+          x,
+          "CC-2",
+          b.d.declared.cancel && [b.d.declared.cancel.span]
+        )
+      ]
+    } : { value: "pending", causes: [at(x, "CC-1"), at(x, "CC-8")] };
+    const mine = x === a ? A : B;
+    const survived = mine.continuing && mine.value === "cancelled" ? [{ rule: "CC-9", spans: [], inputs: [] }] : [];
+    return { ...mine, causes: [...mine.causes, ...survived] };
+  };
+  const decide = (x, w) => {
+    if (!w.created.get(x))
+      return { value: "no-run", causes: x.run.verdict.causes };
+    const o = met(x, w);
+    return x.empty ? { ...o, causes: [...o.causes, { ...at(x, "CC-5"), inputs: [] }] } : o;
+  };
+  const met = (x, w) => {
+    if (x.doubt) return { value: "uncertain", causes: x.doubt };
+    const near = sides.filter(
+      (y2) => y2 !== x && w.created.get(y2) && w.collide.get(y2)
+    );
+    const peers = near.filter((y2) => y2.label === x.label);
+    if (peers.length > 0)
+      return peers.every((p) => selfCancels(x, p, w)) ? {
+        value: "cancelled",
+        causes: [
+          at(
+            x,
+            "CC-7",
+            peers.flatMap((p) => {
+              const callee = x.d.callee !== void 0 ? x : p;
+              return callee.d.declared.cancel ? [callee.d.declared.cancel.span] : [];
+            })
+          )
+        ]
+      } : (
+        // Two items of one Event in one group: which arrives first is undocumented (CC-6).
+        { value: "uncertain", causes: [at(x, "CC-6")] }
+      );
+    const others = near.filter((y2) => y2.label !== x.label);
+    const doubtful = others.find((y2) => y2.doubt);
+    if (doubtful) return { value: "uncertain", causes: doubtful.doubt };
+    if (others.length > 1)
+      return { value: "uncertain", causes: [at(x, "CC-6")] };
+    const y = others[0];
+    if (!y)
+      return {
+        value: x.label === "A" && waiting ? "pending" : "runs",
+        causes: [at(x, "CC-1")]
+      };
+    const [a, b] = x.label === "A" ? [x, y] : [y, x];
+    const cross = {
+      rule: "CC-12",
+      spans: [a.d.declared.group.span, b.d.declared.group.span],
+      inputs: []
+    };
+    const results = (a.queue === b.queue ? [a.queue === "max"] : [false, true]).map((max) => paired(x, a, b, w, max));
+    const values = [
+      ...new Set(results.flatMap((r) => r.possible ?? [r.value]))
+    ];
+    if (values.length > 1 && results.length > 1)
+      return {
+        value: "uncertain",
+        causes: [cross],
+        ...values.length <= 3 && { possible: values.sort() }
+      };
+    const outcome = results[0];
+    const cased = a.group !== void 0 && b.group !== void 0 && a.group !== b.group;
+    return {
+      ...outcome,
+      causes: [
+        ...outcome.causes,
+        ...cased ? [{ ...at(x, "CC-4"), inputs: [] }] : [],
+        // The arriving item's cancel-in-progress governs across files (CC-12).
+        ...a.d.file !== b.d.file ? [cross] : []
+      ]
+    };
+  };
+  const verdict = (x) => {
+    const group = x.group === void 0 ? {} : {
+      group: x.group.toLowerCase().replace(
+        /(<run_[a-z]+:)([ab])>/g,
+        (_, f, r) => `${f}${r.toUpperCase()}>`
+      )
+    };
+    const base = {
+      key: `${x.d.prefix}concurrency.${x.label}`,
+      ...group,
+      groupSource: x.d.declared.group.text
+    };
+    if (x.run.verdict.value === "unsupported")
+      return { ...base, value: "unsupported", causes: x.run.verdict.causes };
+    const involved = [
+      x,
+      ...sides.filter(
+        (y) => y !== x && y.created !== false && mayCollide(x, y)
+      )
+    ];
+    let worlds = [
+      { created: /* @__PURE__ */ new Map(), collide: /* @__PURE__ */ new Map(), cancel: /* @__PURE__ */ new Map() }
+    ];
+    const branch = (options, set) => {
+      worlds = worlds.flatMap(
+        (w) => options.map((v) => {
+          const next = {
+            created: new Map(w.created),
+            collide: new Map(w.collide),
+            cancel: new Map(w.cancel)
+          };
+          set(next, v);
+          return next;
+        })
+      );
+    };
+    for (const s of involved) {
+      branch(each(s.created), (w, v) => w.created.set(s, v));
+      branch(each(s.cancel), (w, v) => w.cancel.set(s, v));
+      if (s !== x)
+        branch(
+          x.group !== void 0 && s.group !== void 0 ? [lower(x) === lower(s)] : [true, false],
+          (w, v) => w.collide.set(s, v)
+        );
+    }
+    const results = worlds.map((w) => decide(x, w));
+    const values = [
+      ...new Set(results.flatMap((r) => r.possible ?? [r.value]))
+    ];
+    const gaps = results.filter((r) => r.value === "uncertain");
+    if (gaps.length === 0 && values.length === 1)
+      return { ...base, ...results[0] };
+    const lacks = (s) => [
+      ...s.created === void 0 ? s.run.verdict.causes : [],
+      ...s.needed.map((n) => ({
+        rule: "WN-4",
+        spans: [n.span],
+        inputs: []
+      }))
+    ];
+    const paths = (s) => [
+      ...s.created === void 0 ? s.run.verdict.settle ?? [] : [],
+      ...s.needed.map((n) => n.path).filter(settleable)
+    ].map((path) => ({ path, s }));
+    const listed = involved.flatMap(paths).filter((p, i, all2) => all2.findIndex((q) => q.path === p.path) === i);
+    const settle = listed.map((p) => p.path);
+    const hints = listed.map(({ path, s }) => {
+      const followUp2 = s.label === "B" && /^(github\.)?event\./.test(path);
+      return {
+        ...s.run.verdict.hints?.find((h) => h.path === path) ?? {
+          path,
+          text: path.startsWith("vars.") ? `repository variable \`${path.slice(5)}\`` : `\`${path}\` on the ${followUp2 ? "Follow-up event" : "Event"}`,
+          candidates: []
+        },
+        ...followUp2 && { on: "followUp" }
+      };
+    });
+    const gap = gaps.flatMap((g) => g.causes);
+    return {
+      ...base,
+      value: "uncertain",
+      causes: [
+        ...involved.flatMap(lacks),
+        ...gap.filter((c, i) => gap.findIndex((d) => d.rule === c.rule) === i)
+      ],
+      ...values.length <= 3 && gaps.every((g) => g.possible) && { possible: values.sort() },
+      settle,
+      ...settle.length > 0 && { hints }
+    };
+  };
+  return sides.map(verdict);
+}
+var each = (known) => known === void 0 ? [true, false] : [known];
+function survivors(trees, jobs, scenario) {
+  const contexts = {
+    github: githubContext(scenario),
+    vars: { ...scenario.repo.vars },
+    inputs: {},
+    needs: {}
+  };
+  return trees.flatMap(
+    ({ prefix, file }) => file.jobs.flatMap((job) => {
+      const key = `${prefix}${job.id.value}`;
+      if (jobs.find((v) => v.key === key)?.value !== "runs") return [];
+      try {
+        return evaluateCondition(job.if?.expression ?? "success()", contexts, {
+          success: false,
+          failure: false,
+          cancelled: true
+        }) ? [key] : [];
+      } catch {
+        return [];
+      }
+    })
+  );
+}
+function side(d, run, label) {
+  const { declared, workflow } = d;
+  const { scenario, verdict } = run;
+  const github = {
+    ...githubContext(scenario),
+    workflow,
+    // Each run has its own: two runs never share one (#6).
+    run_id: `<run_id:${label}>`,
+    run_number: `<run_number:${label}>`,
+    run_attempt: `<run_attempt:${label}>`
+  };
+  const needed = [];
+  let empty = false;
+  let readsMatrix = false;
+  const vars = scenario.repo.vars ?? {};
+  const resolve4 = (path) => {
+    const [context, ...rest] = path;
+    const lower = context.toLowerCase();
+    if (lower === "vars" && rest.length > 0) {
+      const found = Object.keys(vars).find(
+        (k) => k.toLowerCase() === rest[0].toLowerCase()
+      );
+      return found === void 0 ? { needed: `vars.${rest[0]}` } : { value: rest.length === 1 ? vars[found] : null };
+    }
+    if (lower === "inputs") {
+      const value = rest[0] && d.inputs?.get(rest[0].toLowerCase());
+      return typeof value === "string" && value.includes("${{") ? { needed: path.join(".") } : { value: value ?? null };
+    }
+    if (lower === "matrix" || lower === "strategy") readsMatrix = true;
+    if (lower !== "github") return { needed: path.join(".") };
+    if (rest.length === 0) return void 0;
+    const field = rest[0].toLowerCase();
+    if (rest.length === 1 && (Object.hasOwn(github, field) || FROM_EVENT.has(field))) {
+      const value = github[field] ?? null;
+      if (value === null) empty = true;
+      return { value };
+    }
+    const got = readGithub(rest, scenario, github);
+    if (got && "value" in got && got.value === null) empty = true;
+    return got;
+  };
+  const contexts = {
+    github,
+    vars: {},
+    inputs: {},
+    needs: {},
+    strategy: {},
+    matrix: {}
+  };
+  const read = (span, f) => {
+    try {
+      return f();
+    } catch (e) {
+      if (!(e instanceof RuntimeValueNeeded)) throw e;
+      needed.push({ path: e.needed, span });
+      return void 0;
+    }
+  };
+  const group = read(
+    declared.group.span,
+    () => evaluateTemplate(declared.group.text, contexts, resolve4)
+  );
+  const groupEmpty = empty;
+  const given = label === "B" || d.callee !== void 0 ? declared.cancel : void 0;
+  const cancel = typeof given?.value === "string" ? read(
+    given.span,
+    () => String(evaluateValue(given.value, contexts, resolve4)) === "true"
+  ) : given?.value === true;
+  const possible = verdict.possible ?? [];
+  const approval = verdict.causes[0]?.rule === "FK-4";
+  const created = approval ? true : verdict.value !== "uncertain" ? CREATED.has(verdict.value) : possible.length > 0 && possible.every((p) => CREATED.has(p)) ? true : possible.length > 0 && !possible.some((p) => CREATED.has(p)) ? false : void 0;
+  const doubt = approval ? verdict.causes : readsMatrix ? [
+    { rule: "CC-5", spans: [declared.group.span], inputs: [] },
+    { rule: "CC-6", spans: [], inputs: [] }
+  ] : d.matrix ? (
+    // A constant group on a matrix job: one Event's legs share it (CC-6).
+    [{ rule: "CC-6", spans: [], inputs: [] }]
+  ) : void 0;
+  return {
+    d,
+    run,
+    label,
+    created,
+    group,
+    readsMatrix,
+    cancel,
+    queue: declared.queue?.value === "max" ? "max" : "single",
+    // The matrix is no value the Scenario lacks: its legs aren't expanded.
+    needed: needed.filter((n) => !/^(matrix|strategy)\./i.test(n.path)),
+    empty: groupEmpty,
+    ...doubt && { doubt }
   };
 }
 
@@ -17210,6 +17620,72 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "CC-1",
+    text: "A concurrency group holds at most one running and, by default (`queue: single`), one pending job or run, across the whole repository and every workflow. A new item waits while another runs, and any item already pending in the group is cancelled and replaced, even without `cancel-in-progress`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-2",
+    text: "`cancel-in-progress: true` on the arriving item also cancels the item running in its group. It may be an expression.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-3",
+    text: "`queue: max` lets up to 100 jobs or runs wait `pending` in a concurrency group, in the order each started waiting; once the queue is full, any more are cancelled. `queue: max` with `cancel-in-progress: true` is a workflow validation error.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs",
+    confidence: "High"
+  },
+  {
+    id: "CC-4",
+    text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-5",
+    text: "A workflow-level group may read `github`, `inputs` and `vars`, and a job-level one also `needs`, `strategy` and `matrix`. A property the event leaves undefined, such as `github.head_ref` on push, resolves to empty, so a fallback (`|| github.run_id`) is needed to keep groups apart.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-a-fallback-value",
+    confidence: "High"
+  },
+  {
+    id: "CC-6",
+    text: "Pending items in a concurrency group are ordered by when each started waiting, which isn't guaranteed because start times vary, so a queued run's place is likely, not certain, and which of two items one event starts in one group arrives first is undocumented.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-7",
+    text: "A called (reusable) workflow sees its caller's `github.workflow`, so the same group in the caller and the called workflow, with `cancel-in-progress: true`, cancels the workflow that's already running: the run cancels itself.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+    confidence: "High"
+  },
+  {
+    id: "CC-8",
+    text: "A check waiting at the front of the queue on a full concurrency group shows the status `pending`.",
+    url: "https://docs.github.com/en/pull-requests/reference/status-checks#check-statuses-and-conclusions",
+    confidence: "High"
+  },
+  {
+    id: "CC-9",
+    text: "To cancel a run, GitHub re-evaluates the `if:` of every running job: a job whose condition is still true, such as `if: always()`, keeps running. No `if:` is treated as `success()`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
+    confidence: "High"
+  },
+  {
+    id: "CC-11",
+    text: "Whether a cancelled run whose jobs keep running under CC-9 still holds its concurrency group isn't documented, so the run waiting on that group is uncertain.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
+    confidence: "Low"
+  },
+  {
+    id: "CC-12",
+    text: "Concurrency groups are shared across the repository regardless of the workflow, and the arriving item's `cancel-in-progress` decides whether the running item is cancelled. Items of one group with different `queue` modes are undocumented, so their outcome is uncertain.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "Med"
+  },
+  {
     id: "WN-1",
     text: "Assumption: this job fails.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
@@ -17262,12 +17738,11 @@ function utf8Length(text) {
   return bytes;
 }
 var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
-var isJobKey = (key) => key.split(" \u203A ").length === 2 && !isCheck(key);
+var isJobKey = (key) => key.split(" \u203A ").length === 2 && !isCheck(key) && !isConcurrency(key);
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
   const { scenario, filled } = withDefaults(input);
-  const { event } = scenario;
   const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
     return key === void 0 ? [] : [
@@ -17281,7 +17756,11 @@ function simulate(files, input) {
   const present = new Set(parsed.map((p) => p.key));
   for (const p of parsed)
     if (p.diagnostics.length === 0)
-      p.diagnostics = [...filterDiagnostics(p), ...callDiagnostics(p, present)];
+      p.diagnostics = [
+        ...filterDiagnostics(p),
+        ...queueDiagnostics(p),
+        ...callDiagnostics(p, present)
+      ];
   const broken = new Set(
     parsed.filter((p) => p.diagnostics.length > 0).map((p) => p.key)
   );
@@ -17291,26 +17770,13 @@ function simulate(files, input) {
   const diagnostics = parsed.flatMap((p) => p.diagnostics).sort(
     (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col
   );
-  const fork = event.actor === "fork";
-  const privateFork = fork && scenario.repo.visibility === "private";
-  if (!SUPPORTED.has(event.name) || fork && event.name === "push" || privateFork) {
-    const inputs = [
-      { path: "event.name", value: event.name },
-      { path: "event.actor", value: event.actor },
-      ...privateFork ? [{ path: "repo.visibility", value: "private" }] : []
-    ];
+  const outside = unsupported(scenario, "event");
+  if (outside)
     return {
-      verdicts: [
-        {
-          key: "event",
-          value: "unsupported",
-          causes: [{ rule: "WN-3", spans: [], inputs }]
-        }
-      ],
+      verdicts: [{ key: "event", ...outside }],
       diagnostics,
       unmatchedAssumptions: []
     };
-  }
   const verdicts = evaluate2(parsed, scenario);
   for (const path of filled) {
     const allowed = ASSUMED.get(path);
@@ -17353,17 +17819,50 @@ function unmatched(scenario, verdicts) {
     return [{ key, candidates }];
   });
 }
+function unsupported(scenario, on) {
+  const event = scenario[on];
+  const fork = event.actor === "fork";
+  const privateFork = fork && scenario.repo.visibility === "private";
+  if (SUPPORTED.has(event.name) && !(fork && event.name === "push") && !privateFork)
+    return void 0;
+  const inputs = [
+    { path: `${on}.name`, value: event.name },
+    { path: `${on}.actor`, value: event.actor },
+    ...privateFork ? [{ path: "repo.visibility", value: "private" }] : []
+  ];
+  return {
+    value: "unsupported",
+    causes: [{ rule: "WN-3", spans: [], inputs }]
+  };
+}
+var onFollowUp = (v) => ({
+  ...v,
+  causes: v.causes.map((c) => ({
+    ...c,
+    inputs: c.inputs.map(
+      (i) => i.path.startsWith("event.") ? { ...i, path: `followUp.${i.path.slice("event.".length)}` } : i
+    )
+  }))
+});
 function evaluate2(parsed, scenario) {
   const { event, repo } = scenario;
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts = [];
   const producers = [];
+  const declarations = [];
   const queue = repo.mergeQueue && event.name !== "push" ? {
     ...scenario,
     event: { ...event, name: "merge_group", type: "checks_requested" }
   } : void 0;
   const queued = [];
   const pushed = event.name !== "push" && event.actor !== "fork" ? { ...scenario, event: { ...event, name: "push" } } : void 0;
+  const followed = scenario.followUp && {
+    ...scenario,
+    event: (({ runA: _a, pendingRuns: _p, ...event2 }) => event2)(
+      scenario.followUp
+    )
+  };
+  const outsideB = followed && unsupported(scenario, "followUp");
   const pa4 = {
     rule: "PA-4",
     spans: [],
@@ -17395,8 +17894,9 @@ function evaluate2(parsed, scenario) {
     };
     const workflow = run(scenario);
     const callees = calls(file).flatMap(({ job, path }) => {
-      const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
-      return callee ? [{ job, callee }] : [];
+      const at = path === void 0 ? void 0 : calleeKey(path);
+      const callee = at === void 0 ? void 0 : files.get(at);
+      return callee ? [{ job, callee, path: at }] : [];
     });
     const jobsWithCallees = (workflow2, scenario2) => {
       const jobs2 = jobVerdicts(`${key} \u203A `, file, workflow2, scenario2);
@@ -17438,6 +17938,82 @@ function evaluate2(parsed, scenario) {
       const w = run(queue, true);
       queued.push(...producing(queue, jobsWithCallees(w, queue), w));
     }
+    const declared = [
+      ...file.concurrency ? [{ subject: key, at: file.concurrency, file: key }] : [],
+      ...file.jobs.flatMap((j) => {
+        const at = file.jobSpans.get(j.id.value)?.concurrency;
+        return at ? [
+          {
+            subject: `${key} \u203A ${j.id.value}`,
+            at,
+            file: key,
+            job: j.id.value,
+            matrix: isMatrix(j)
+          }
+        ] : [];
+      }),
+      ...callees.flatMap(({ job, callee, path }) => {
+        const via = { file: path, callee: job.id.value };
+        const inputs = inputsOf(job, callee);
+        return [
+          ...callee.concurrency ? [
+            {
+              ...via,
+              subject: `${key} \u203A ${job.id.value}/`,
+              at: callee.concurrency,
+              inputs
+            }
+          ] : [],
+          ...callee.jobs.flatMap((j) => {
+            const at = callee.jobSpans.get(j.id.value)?.concurrency;
+            return at ? [
+              {
+                ...via,
+                subject: `${key} \u203A ${job.id.value}/${j.id.value}`,
+                at,
+                inputs,
+                matrix: isMatrix(j)
+              }
+            ] : [];
+          })
+        ];
+      })
+    ];
+    if (declared.length > 0) {
+      const workflowB = followed && !outsideB && run(followed);
+      const jobsB = workflowB ? jobsWithCallees(workflowB, followed) : [];
+      for (const d of declared) {
+        const subject = d.subject.replace(/\/$/, "");
+        const of = (w, vs) => subject === key ? w : vs.find((v) => v.key === subject);
+        declarations.push({
+          prefix: `${d.subject} \u203A `,
+          declared: d.at,
+          file: d.file,
+          tree: key,
+          job: "job" in d ? d.job : void 0,
+          callee: "callee" in d ? d.callee : void 0,
+          workflow: file.name ?? `.github/workflows/${key}`,
+          inputs: "inputs" in d ? d.inputs : void 0,
+          matrix: "matrix" in d && d.matrix === true,
+          survivors: d.subject === key ? survivors(
+            [
+              { prefix: `${key} \u203A `, file },
+              ...callees.map(({ job, callee }) => ({
+                prefix: `${key} \u203A ${job.id.value}/`,
+                file: callee
+              }))
+            ],
+            jobs,
+            scenario
+          ) : [],
+          a: { scenario, verdict: of(workflow, jobs) },
+          b: followed && {
+            scenario: followed,
+            verdict: outsideB ? { key: subject, ...outsideB } : onFollowUp(of(workflowB, jobsB))
+          }
+        });
+      }
+    }
     verdicts.push(
       workflow,
       ...jobs,
@@ -17450,6 +18026,7 @@ function evaluate2(parsed, scenario) {
       )
     );
   }
+  verdicts.push(...concurrencyVerdicts(declarations));
   verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;
 }
@@ -17566,7 +18143,7 @@ var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
   if (argv.length === 1 && argv[0] === "--version") {
-    process.stdout.write(`whynorun ${"0.2.0"}
+    process.stdout.write(`whynorun ${"0.3.0"}
 `);
     return 0;
   }
@@ -17654,7 +18231,7 @@ function show(args, stdin) {
   ].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, text]) => text);
   process.stdout.write(
     [
-      `whynorun ${"0.2.0"}`,
+      `whynorun ${"0.3.0"}`,
       "",
       "What WhyNoRun always assumes:",
       ...PLATFORM_BASELINE.map((item) => `- ${item}`),

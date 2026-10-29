@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { eventForm } from "./forms";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const card = (page: Page, job: string) =>
@@ -51,7 +52,7 @@ test("Fork PR vs Member PR on the Access tab shows ◆ on token.pull-requests an
   const label = page.getByLabel("Scenario label");
   await label.fill("Member PR");
   await label.press("Enter");
-  await page.getByLabel("Actor kind").selectOption("member");
+  await eventForm(page).getByLabel("Actor kind").selectOption("member");
 
   for (const [subject, fork, member] of [
     ["pull-requests", "read", "write"],

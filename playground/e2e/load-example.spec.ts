@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { eventForm } from "./forms";
 
 declare global {
   interface Window {
@@ -13,7 +14,7 @@ const runRows = (page: Page) =>
   results(page)
     .locator(".verdicts")
     .getByRole("listitem")
-    .filter({ hasNotText: /^check › | › (token\.|secrets)/ });
+    .filter({ hasNotText: /^check › | › (token\.|secrets|concurrency\.)/ });
 const header = (page: Page) => page.getByRole("banner");
 const source = (page: Page) => page.locator("#set-source");
 const confirm = (page: Page) => page.getByRole("alertdialog");
@@ -56,7 +57,9 @@ test("Load example loads the three files and fills Scenario 1 with the Fork PR S
   await expect(source(page)).toBeFocused();
   await expect(page.locator("#toasts")).toHaveText("Loaded the example");
   await expect(scenarioTabs(page)).toHaveText(["Fork PR"]);
-  await expect(page.getByLabel("Event name")).toHaveValue("pull_request");
+  await expect(eventForm(page).getByLabel("Event name")).toHaveValue(
+    "pull_request",
+  );
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-03");
   // The fork contributor's pull_request is simulated (#64).
   await expect(results(page)).not.toContainText("Unsupported Scenario");
@@ -67,9 +70,9 @@ test("Load example's Scenario shows Actor kind fork contributor and Approval app
   page,
 }) => {
   await results(page).getByRole("button", { name: "Load example" }).click();
-  const actor = page.getByLabel("Actor kind");
+  const actor = eventForm(page).getByLabel("Actor kind");
   await expect(actor.locator("option:checked")).toHaveText("Fork contributor");
-  const approval = page.getByRole("combobox", { name: "Approval" });
+  const approval = eventForm(page).getByRole("combobox", { name: "Approval" });
   await expect(approval).toHaveValue("approved");
   await expect(approval).toHaveAccessibleDescription("assumed");
   await expect(page.locator("label[for=event-approval]")).toHaveText(
@@ -177,7 +180,7 @@ test("with Scenario 1 touched, Load example asks first, then loads the files and
   await expect(source(page)).toHaveText("Example");
   await expect(source(page)).toBeFocused();
   await expect(scenarioTabs(page)).toHaveText(["Scenario 1"]);
-  await expect(page.getByLabel("Event name")).toHaveValue("push");
+  await expect(eventForm(page).getByLabel("Event name")).toHaveValue("push");
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-01");
   await expect(runRows(page)).toHaveText([
     "ci.yml runs root BR-4",

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { eventForm } from "./forms";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const card = (page: Page, job: string) =>
@@ -14,7 +15,7 @@ const row = (page: Page, job: string, subject: string) =>
 test.beforeEach(async ({ page }) => {
   await page.goto("./");
   await results(page).getByRole("button", { name: "Load example" }).click();
-  await page.getByLabel("Actor kind").selectOption("member");
+  await eventForm(page).getByLabel("Actor kind").selectOption("member");
   await results(page).getByRole("tab", { name: "Access" }).click();
 });
 
@@ -81,8 +82,8 @@ test("with Compare on, each card shows both Scenarios side by side", async ({
   page,
 }) => {
   await page.getByRole("banner").getByLabel("Compare").check();
-  await page.getByLabel("Event name").fill("push");
-  await page.getByLabel("Ref").fill("main");
+  await eventForm(page).getByLabel("Event name").fill("push");
+  await eventForm(page).getByLabel("Ref").fill("main");
 
   const deploy = card(page, "deploy.yml › deploy");
   await expect(deploy.getByRole("heading")).toHaveText(

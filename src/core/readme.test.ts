@@ -57,6 +57,7 @@ test("every relative link and image in the README points at a file in the repo",
     .filter((href) => !/^[a-z]+:/.test(href));
   expect(targets).toContain("docs/images/access-report.png");
   expect(targets).toContain("docs/images/merge-readiness.png");
+  expect(targets).toContain("docs/images/concurrency.png");
   for (const href of targets) {
     expect(existsSync(new URL(`../../${href}`, import.meta.url)), href).toBe(
       true,

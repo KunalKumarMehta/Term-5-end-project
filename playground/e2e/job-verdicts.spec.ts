@@ -5,7 +5,7 @@ const runRows = (page: Page) =>
   page
     .getByRole("region", { name: "Results" })
     .getByRole("listitem")
-    .filter({ hasNotText: / › (token\.|secrets)/ });
+    .filter({ hasNotText: / › (token\.|secrets|concurrency\.)/ });
 
 const CI = `on: push
 jobs:
@@ -49,7 +49,7 @@ test('adding "job X fails" in Assumptions turns X\'s row fails and skips its dep
   await scenario
     .getByLabel("Assume this job fails")
     .selectOption("ci.yml › test");
-  await scenario.getByRole("button", { name: "Add" }).click();
+  await scenario.getByRole("button", { name: "Add", exact: true }).click();
 
   await expect(scenario.getByRole("listitem")).toHaveText([
     "job ci.yml › test fails Remove",

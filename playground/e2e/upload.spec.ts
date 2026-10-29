@@ -6,7 +6,7 @@ const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const runRows = (page: Page) =>
   results(page)
     .getByRole("listitem")
-    .filter({ hasNotText: / › (token\.|secrets)/ });
+    .filter({ hasNotText: / › (token\.|secrets|concurrency\.)/ });
 const header = (page: Page) => page.getByRole("banner");
 const source = (page: Page) => page.locator("#set-source");
 const toast = (page: Page) => page.locator("#toasts");
