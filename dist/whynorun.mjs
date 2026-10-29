@@ -775,8 +775,8 @@ var require_createNode = __commonJS({
     var defaultTagPrefix = "tag:yaml.org,2002:";
     function findTagObject(value, tagName, tags) {
       if (tagName) {
-        const match = tags.filter((t) => t.tag === tagName);
-        const tagObj = match.find((t) => !t.format) ?? match[0];
+        const match2 = tags.filter((t) => t.tag === tagName);
+        const tagObj = match2.find((t) => !t.format) ?? match2[0];
         if (!tagObj)
           throw new Error(`Tag ${tagName} not found`);
         return tagObj;
@@ -1471,21 +1471,21 @@ var require_stringify = __commonJS({
     }
     function getTagObject(tags, item) {
       if (item.tag) {
-        const match = tags.filter((t) => t.tag === item.tag);
-        if (match.length > 0)
-          return match.find((t) => t.format === item.format) ?? match[0];
+        const match2 = tags.filter((t) => t.tag === item.tag);
+        if (match2.length > 0)
+          return match2.find((t) => t.format === item.format) ?? match2[0];
       }
       let tagObj = void 0;
       let obj;
       if (identity.isScalar(item)) {
         obj = item.value;
-        let match = tags.filter((t) => t.identify?.(obj));
-        if (match.length > 1) {
-          const testMatch = match.filter((t) => t.test);
+        let match2 = tags.filter((t) => t.identify?.(obj));
+        if (match2.length > 1) {
+          const testMatch = match2.filter((t) => t.test);
           if (testMatch.length > 0)
-            match = testMatch;
+            match2 = testMatch;
         }
-        tagObj = match.find((t) => t.format === item.format) ?? match.find((t) => !t.format);
+        tagObj = match2.find((t) => t.format === item.format) ?? match2.find((t) => !t.format);
       } else {
         obj = item;
         tagObj = tags.find((t) => t.nodeClass && obj instanceof t.nodeClass);
@@ -3127,13 +3127,13 @@ var require_timestamp = __commonJS({
       // assumed to be 00:00:00Z (start of day, UTC).
       test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
       resolve(str) {
-        const match = str.match(timestamp.test);
-        if (!match)
+        const match2 = str.match(timestamp.test);
+        if (!match2)
           throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
-        const [, year, month, day, hour, minute, second] = match.map(Number);
-        const millisec = match[7] ? Number((match[7] + "00").substr(1, 3)) : 0;
+        const [, year, month, day, hour, minute, second] = match2.map(Number);
+        const millisec = match2[7] ? Number((match2[7] + "00").substr(1, 3)) : 0;
         let date = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
-        const tz = match[8];
+        const tz = match2[8];
         if (tz && tz !== "Z") {
           let d = parseSexagesimal(tz, false);
           if (Math.abs(d) < 30)
@@ -4706,8 +4706,8 @@ var require_resolve_flow_scalar = __commonJS({
     }
     function unfoldLines(source) {
       const line = /(.*?)\r?\n/sy;
-      let match = line.exec(source);
-      if (!match)
+      let match2 = line.exec(source);
+      if (!match2)
         return source;
       let trimEnd, trimBoth;
       try {
@@ -4717,11 +4717,11 @@ var require_resolve_flow_scalar = __commonJS({
         trimEnd = /[ \t]+$/;
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
-      let res = match[1].replace(trimEnd, "");
+      let res = match2[1].replace(trimEnd, "");
       let sep = " ";
       let pos = line.lastIndex;
-      while (match = line.exec(source)) {
-        const lm = match[1].replace(trimBoth, "");
+      while (match2 = line.exec(source)) {
+        const lm = match2[1].replace(trimBoth, "");
         if (lm === "") {
           if (sep === "\n")
             res += sep;
@@ -4735,8 +4735,8 @@ var require_resolve_flow_scalar = __commonJS({
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
-      match = last.exec(source);
-      return res + sep + (match?.[1] ?? "");
+      match2 = last.exec(source);
+      return res + sep + (match2?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -7791,10 +7791,10 @@ var require_cronstrue = __commonJS({
                     });
                     var evaluationIndex = 0;
                     var description = this.getSegmentDescription(expression, this.i18n.everyHour(), function(s) {
-                      var match = rangeEndValues.find(function(r) {
+                      var match2 = rangeEndValues.find(function(r) {
                         return r.value === s && r.index === evaluationIndex;
                       });
-                      var isRangeEndWithNonZeroMinute = match && _this.expressionParts[1] !== "0";
+                      var isRangeEndWithNonZeroMinute = match2 && _this.expressionParts[1] !== "0";
                       evaluationIndex++;
                       return isRangeEndWithNonZeroMinute ? _this.formatTime(s, "59", "") : _this.formatTime(s, "0", "");
                     }, function(s) {
@@ -8773,6 +8773,412 @@ function remote(key, job, spans, scenario, { block, level }) {
   return [...tokens, { key: `${key} \u203A secrets`, ...secrets }];
 }
 
+// node_modules/@actions/workflow-parser/dist/templates/tokens/types.js
+var TokenType;
+(function(TokenType3) {
+  TokenType3[TokenType3["String"] = 0] = "String";
+  TokenType3[TokenType3["Sequence"] = 1] = "Sequence";
+  TokenType3[TokenType3["Mapping"] = 2] = "Mapping";
+  TokenType3[TokenType3["BasicExpression"] = 3] = "BasicExpression";
+  TokenType3[TokenType3["InsertExpression"] = 4] = "InsertExpression";
+  TokenType3[TokenType3["Boolean"] = 5] = "Boolean";
+  TokenType3[TokenType3["Number"] = 6] = "Number";
+  TokenType3[TokenType3["Null"] = 7] = "Null";
+})(TokenType || (TokenType = {}));
+function tokenTypeName(type) {
+  switch (type) {
+    case TokenType.String:
+      return "StringToken";
+    case TokenType.Sequence:
+      return "SequenceToken";
+    case TokenType.Mapping:
+      return "MappingToken";
+    case TokenType.BasicExpression:
+      return "BasicExpressionToken";
+    case TokenType.InsertExpression:
+      return "InsertExpressionToken";
+    case TokenType.Boolean:
+      return "BooleanToken";
+    case TokenType.Number:
+      return "NumberToken";
+    case TokenType.Null:
+      return "NullToken";
+    default: {
+      const exhaustiveCheck = type;
+      throw new Error(`Unhandled token type: ${type} ${exhaustiveCheck}}`);
+    }
+  }
+}
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/traversal-state.js
+var TraversalState = class {
+  constructor(parent, token) {
+    this.index = -1;
+    this.isKey = false;
+    this.parent = parent;
+    this._token = token;
+    this.current = token;
+  }
+  moveNext(omitKeys) {
+    switch (this._token.templateTokenType) {
+      case TokenType.Sequence: {
+        const sequence = this._token;
+        if (++this.index < sequence.count) {
+          this.current = sequence.get(this.index);
+          return true;
+        }
+        this.current = void 0;
+        return false;
+      }
+      case TokenType.Mapping: {
+        const mapping = this._token;
+        if (this.isKey) {
+          this.isKey = false;
+          this.currentKey = this.current;
+          this.current = mapping.get(this.index).value;
+          return true;
+        }
+        if (++this.index < mapping.count) {
+          if (omitKeys) {
+            this.isKey = false;
+            this.currentKey = mapping.get(this.index).key;
+            this.current = mapping.get(this.index).value;
+            return true;
+          }
+          this.isKey = true;
+          this.currentKey = void 0;
+          this.current = mapping.get(this.index).key;
+          return true;
+        }
+        this.currentKey = void 0;
+        this.current = void 0;
+        return false;
+      }
+      default:
+        throw new Error(`Unexpected token type '${this._token.templateTokenType}' when traversing state`);
+    }
+  }
+  /**
+   * Returns the ancestor tokens from root to the current token's parent container.
+   */
+  getAncestors() {
+    const ancestors = [];
+    let state = this.parent;
+    while (state) {
+      if (state.current) {
+        ancestors.unshift(state.current);
+      }
+      state = state.parent;
+    }
+    return ancestors;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/template-token.js
+var TemplateTokenError = class extends Error {
+  constructor(message, token) {
+    super(message);
+    this.token = token;
+  }
+};
+var TemplateToken = class {
+  /**
+   * Base class for all template tokens
+   */
+  constructor(type, file, range, definitionInfo) {
+    this.type = type;
+    this.file = file;
+    this.range = range;
+    this.definitionInfo = definitionInfo;
+  }
+  get templateTokenType() {
+    return this.type;
+  }
+  get line() {
+    return this.range?.start.line;
+  }
+  get col() {
+    return this.range?.start.column;
+  }
+  get definition() {
+    return this.definitionInfo?.definition;
+  }
+  get description() {
+    return this._description || this.propertyDefinition?.description || this.definition?.description;
+  }
+  set description(description) {
+    this._description = description;
+  }
+  typeName() {
+    return tokenTypeName(this.type);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertNull(objectDescription) {
+    if (this.type === TokenType.Null) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Null)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertBoolean(objectDescription) {
+    if (this.type === TokenType.Boolean) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Boolean)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertNumber(objectDescription) {
+    if (this.type === TokenType.Number) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Number)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertString(objectDescription) {
+    if (this.type === TokenType.String) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.String)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertScalar(objectDescription) {
+    if (this?.isScalar === true) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type 'ScalarToken' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertSequence(objectDescription) {
+    if (this.type === TokenType.Sequence) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Sequence)}' was expected.`, this);
+  }
+  /**
+   * Asserts expected type and throws a good debug message if unexpected
+   */
+  assertMapping(objectDescription) {
+    if (this.type === TokenType.Mapping) {
+      return this;
+    }
+    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType.Mapping)}' was expected.`, this);
+  }
+  /**
+   * Returns all tokens (depth first)
+   * @param value The object to traverse
+   * @param omitKeys Whether to omit mapping keys
+   * @yields A tuple of [parent, token, keyToken, ancestors] for each token in the tree
+   */
+  static *traverse(value, omitKeys) {
+    yield [void 0, value, void 0, []];
+    switch (value.templateTokenType) {
+      case TokenType.Sequence:
+      case TokenType.Mapping: {
+        let state = new TraversalState(void 0, value);
+        state = new TraversalState(state, value);
+        while (state.parent) {
+          if (state.moveNext(omitKeys ?? false)) {
+            value = state.current;
+            yield [state.parent?.current, value, state.currentKey, state.getAncestors()];
+            switch (value.type) {
+              case TokenType.Sequence:
+              case TokenType.Mapping:
+                state = new TraversalState(state, value);
+                break;
+            }
+          } else {
+            state = state.parent;
+          }
+        }
+        break;
+      }
+    }
+  }
+  toJSON() {
+    return void 0;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/scalar-token.js
+var ScalarToken = class extends TemplateToken {
+  constructor(type, file, range, definitionInfo) {
+    super(type, file, range, definitionInfo);
+  }
+  get isScalar() {
+    return true;
+  }
+  static trimDisplayString(displayString) {
+    let firstLine = displayString.trimStart();
+    const firstNewLine = firstLine.indexOf("\n");
+    const firstCarriageReturn = firstLine.indexOf("\r");
+    if (firstNewLine >= 0 || firstCarriageReturn >= 0) {
+      firstLine = firstLine.substr(0, Math.min(firstNewLine >= 0 ? firstNewLine : Number.MAX_VALUE, firstCarriageReturn >= 0 ? firstCarriageReturn : Number.MAX_VALUE));
+    }
+    return firstLine;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/literal-token.js
+var LiteralToken = class extends ScalarToken {
+  constructor(type, file, range, definitionInfo) {
+    super(type, file, range, definitionInfo);
+  }
+  get isLiteral() {
+    return true;
+  }
+  get isExpression() {
+    return false;
+  }
+  toDisplayString() {
+    return ScalarToken.trimDisplayString(this.toString());
+  }
+  /**
+   * Throws a good debug message when an unexpected literal value is encountered
+   */
+  assertUnexpectedValue(objectDescription) {
+    throw new Error(`Error while reading '${objectDescription}'. Unexpected value '${this.toString()}'`);
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/string-token.js
+var StringToken = class _StringToken extends LiteralToken {
+  constructor(file, range, value, definitionInfo, source, blockScalarHeader) {
+    super(TokenType.String, file, range, definitionInfo);
+    this.value = value;
+    this.source = source;
+    this.blockScalarHeader = blockScalarHeader;
+  }
+  clone(omitSource) {
+    return omitSource ? new _StringToken(void 0, void 0, this.value, this.definitionInfo, this.source, this.blockScalarHeader) : new _StringToken(this.file, this.range, this.value, this.definitionInfo, this.source, this.blockScalarHeader);
+  }
+  toString() {
+    return this.value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/number-token.js
+var NumberToken = class _NumberToken extends LiteralToken {
+  constructor(file, range, value, definitionInfo) {
+    super(TokenType.Number, file, range, definitionInfo);
+    this.num = value;
+  }
+  get value() {
+    return this.num;
+  }
+  clone(omitSource) {
+    return omitSource ? new _NumberToken(void 0, void 0, this.num, this.definitionInfo) : new _NumberToken(this.file, this.range, this.num, this.definitionInfo);
+  }
+  toString() {
+    return `${this.num}`;
+  }
+  toJSON() {
+    return this.num;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/boolean-token.js
+var BooleanToken = class _BooleanToken extends LiteralToken {
+  constructor(file, range, value, definitionInfo) {
+    super(TokenType.Boolean, file, range, definitionInfo);
+    this.bool = value;
+  }
+  get value() {
+    return this.bool;
+  }
+  clone(omitSource) {
+    return omitSource ? new _BooleanToken(void 0, void 0, this.bool, this.definitionInfo) : new _BooleanToken(this.file, this.range, this.bool, this.definitionInfo);
+  }
+  toString() {
+    return this.bool ? "true" : "false";
+  }
+  toJSON() {
+    return this.bool;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/null-token.js
+var NullToken = class _NullToken extends LiteralToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.Null, file, range, definitionInfo);
+  }
+  clone(omitSource) {
+    return omitSource ? new _NullToken(void 0, void 0, this.definitionInfo) : new _NullToken(this.file, this.range, this.definitionInfo);
+  }
+  toString() {
+    return "";
+  }
+  toJSON() {
+    return null;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/key-value-pair.js
+var KeyValuePair = class {
+  constructor(key, value) {
+    this.key = key;
+    this.value = value;
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/sequence-token.js
+var SequenceToken = class _SequenceToken extends TemplateToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.Sequence, file, range, definitionInfo);
+    this.seq = [];
+  }
+  get count() {
+    return this.seq.length;
+  }
+  get isScalar() {
+    return false;
+  }
+  get isLiteral() {
+    return false;
+  }
+  get isExpression() {
+    return false;
+  }
+  add(value) {
+    this.seq.push(value);
+  }
+  get(index) {
+    return this.seq[index];
+  }
+  clone(omitSource) {
+    const result = omitSource ? new _SequenceToken(void 0, void 0, this.definitionInfo) : new _SequenceToken(this.file, this.range, this.definitionInfo);
+    for (const item of this.seq) {
+      result.add(item.clone(omitSource));
+    }
+    return result;
+  }
+  toJSON() {
+    return {
+      type: TokenType.Sequence,
+      seq: this.seq
+    };
+  }
+  *[Symbol.iterator]() {
+    for (const item of this.seq) {
+      yield item;
+    }
+  }
+};
+
 // node_modules/@actions/expressions/dist/ast.js
 var Expr = class {
 };
@@ -9103,7 +9509,7 @@ var FilteredArray = class extends Array2 {
 };
 
 // node_modules/@actions/expressions/dist/lexer.js
-var TokenType;
+var TokenType2;
 (function(TokenType3) {
   TokenType3[TokenType3["UNKNOWN"] = 0] = "UNKNOWN";
   TokenType3[TokenType3["LEFT_PAREN"] = 1] = "LEFT_PAREN";
@@ -9129,14 +9535,14 @@ var TokenType;
   TokenType3[TokenType3["FALSE"] = 21] = "FALSE";
   TokenType3[TokenType3["NULL"] = 22] = "NULL";
   TokenType3[TokenType3["EOF"] = 23] = "EOF";
-})(TokenType || (TokenType = {}));
+})(TokenType2 || (TokenType2 = {}));
 function tokenString(tok) {
   switch (tok.type) {
-    case TokenType.EOF:
+    case TokenType2.EOF:
       return "EOF";
-    case TokenType.NUMBER:
+    case TokenType2.NUMBER:
       return tok.lexeme;
-    case TokenType.STRING:
+    case TokenType2.STRING:
       return tok.value.toString();
     default:
       return tok.lexeme;
@@ -9160,25 +9566,25 @@ var Lexer = class {
       const c = this.next();
       switch (c) {
         case "(":
-          this.addToken(TokenType.LEFT_PAREN);
+          this.addToken(TokenType2.LEFT_PAREN);
           break;
         case ")":
-          this.addToken(TokenType.RIGHT_PAREN);
+          this.addToken(TokenType2.RIGHT_PAREN);
           break;
         case "[":
-          this.addToken(TokenType.LEFT_BRACKET);
+          this.addToken(TokenType2.LEFT_BRACKET);
           break;
         case "]":
-          this.addToken(TokenType.RIGHT_BRACKET);
+          this.addToken(TokenType2.RIGHT_BRACKET);
           break;
         case ",":
-          this.addToken(TokenType.COMMA);
+          this.addToken(TokenType2.COMMA);
           break;
         case ".":
-          if (this.previous() != TokenType.IDENTIFIER && this.previous() != TokenType.RIGHT_BRACKET && this.previous() != TokenType.RIGHT_PAREN && this.previous() != TokenType.STAR) {
+          if (this.previous() != TokenType2.IDENTIFIER && this.previous() != TokenType2.RIGHT_BRACKET && this.previous() != TokenType2.RIGHT_PAREN && this.previous() != TokenType2.STAR) {
             this.consumeNumber();
           } else {
-            this.addToken(TokenType.DOT);
+            this.addToken(TokenType2.DOT);
           }
           break;
         case "-":
@@ -9186,37 +9592,37 @@ var Lexer = class {
           this.consumeNumber();
           break;
         case "!":
-          this.addToken(this.match("=") ? TokenType.BANG_EQUAL : TokenType.BANG);
+          this.addToken(this.match("=") ? TokenType2.BANG_EQUAL : TokenType2.BANG);
           break;
         case "=":
           if (!this.match("=")) {
             this.consumeIdentifier();
             break;
           }
-          this.addToken(TokenType.EQUAL_EQUAL);
+          this.addToken(TokenType2.EQUAL_EQUAL);
           break;
         case "<":
-          this.addToken(this.match("=") ? TokenType.LESS_EQUAL : TokenType.LESS);
+          this.addToken(this.match("=") ? TokenType2.LESS_EQUAL : TokenType2.LESS);
           break;
         case ">":
-          this.addToken(this.match("=") ? TokenType.GREATER_EQUAL : TokenType.GREATER);
+          this.addToken(this.match("=") ? TokenType2.GREATER_EQUAL : TokenType2.GREATER);
           break;
         case "&":
           if (!this.match("&")) {
             this.consumeIdentifier();
             break;
           }
-          this.addToken(TokenType.AND);
+          this.addToken(TokenType2.AND);
           break;
         case "|":
           if (!this.match("|")) {
             this.consumeIdentifier();
             break;
           }
-          this.addToken(TokenType.OR);
+          this.addToken(TokenType2.OR);
           break;
         case "*":
-          this.addToken(TokenType.STAR);
+          this.addToken(TokenType2.STAR);
           break;
         // Ignore whitespace.
         case " ":
@@ -9242,7 +9648,7 @@ var Lexer = class {
       }
     }
     this.tokens.push({
-      type: TokenType.EOF,
+      type: TokenType2.EOF,
       lexeme: "",
       range: this.range()
     });
@@ -9286,7 +9692,7 @@ var Lexer = class {
   previous() {
     const l = this.tokens.length;
     if (l == 0) {
-      return TokenType.EOF;
+      return TokenType2.EOF;
     }
     return this.tokens[l - 1].type;
   }
@@ -9320,7 +9726,7 @@ var Lexer = class {
     if (isNaN(value)) {
       throw new Error(`Unexpected symbol: '${lexeme}'. Located at position ${this.start + 1} within expression: ${this.input}`);
     }
-    this.addToken(TokenType.NUMBER, value);
+    this.addToken(TokenType2.NUMBER, value);
   }
   consumeString() {
     while ((this.peek() !== "'" || this.peekNext() === "'") && !this.atEnd()) {
@@ -9337,32 +9743,32 @@ var Lexer = class {
     this.next();
     let value = this.input.substring(this.start + 1, this.offset - 1);
     value = value.replace("''", "'");
-    this.addToken(TokenType.STRING, value);
+    this.addToken(TokenType2.STRING, value);
   }
   consumeIdentifier() {
     while (!this.atEnd() && !isBoundary(this.peek())) {
       this.next();
     }
-    let tokenType = TokenType.IDENTIFIER;
+    let tokenType = TokenType2.IDENTIFIER;
     let tokenValue = void 0;
     const lexeme = this.input.substring(this.start, this.offset);
-    if (this.previous() != TokenType.DOT) {
+    if (this.previous() != TokenType2.DOT) {
       switch (lexeme) {
         case "true":
-          tokenType = TokenType.TRUE;
+          tokenType = TokenType2.TRUE;
           break;
         case "false":
-          tokenType = TokenType.FALSE;
+          tokenType = TokenType2.FALSE;
           break;
         case "null":
-          tokenType = TokenType.NULL;
+          tokenType = TokenType2.NULL;
           break;
         case "NaN":
-          tokenType = TokenType.NUMBER;
+          tokenType = TokenType2.NUMBER;
           tokenValue = NaN;
           break;
         case "Infinity":
-          tokenType = TokenType.NUMBER;
+          tokenType = TokenType2.NUMBER;
           tokenValue = Infinity;
           break;
       }
@@ -9942,7 +10348,7 @@ var Evaluator = class {
   }
   visitUnary(unary) {
     const r = this.eval(unary.expr);
-    if (unary.operator.type === TokenType.BANG) {
+    if (unary.operator.type === TokenType2.BANG) {
       return new BooleanData(falsy(r));
     }
     throw new Error(`unknown unary operator: ${unary.operator.lexeme}`);
@@ -9951,17 +10357,17 @@ var Evaluator = class {
     const left = this.eval(binary.left);
     const right = this.eval(binary.right);
     switch (binary.operator.type) {
-      case TokenType.EQUAL_EQUAL:
+      case TokenType2.EQUAL_EQUAL:
         return new BooleanData(equals(left, right));
-      case TokenType.BANG_EQUAL:
+      case TokenType2.BANG_EQUAL:
         return new BooleanData(!equals(left, right));
-      case TokenType.GREATER:
+      case TokenType2.GREATER:
         return new BooleanData(greaterThan(left, right));
-      case TokenType.GREATER_EQUAL:
+      case TokenType2.GREATER_EQUAL:
         return new BooleanData(equals(left, right) || greaterThan(left, right));
-      case TokenType.LESS:
+      case TokenType2.LESS:
         return new BooleanData(lessThan(left, right));
-      case TokenType.LESS_EQUAL:
+      case TokenType2.LESS_EQUAL:
         return new BooleanData(equals(left, right) || lessThan(left, right));
     }
     throw new Error(`unknown binary operator: ${binary.operator.lexeme}`);
@@ -9970,7 +10376,7 @@ var Evaluator = class {
     let result;
     for (const arg of logical.args) {
       result = this.eval(arg);
-      if (logical.operator.type === TokenType.AND && falsy(result) || logical.operator.type === TokenType.OR && truthy(result)) {
+      if (logical.operator.type === TokenType2.AND && falsy(result) || logical.operator.type === TokenType2.OR && truthy(result)) {
         break;
       }
     }
@@ -10176,12 +10582,12 @@ var Parser = class {
   }
   logicalOr() {
     let expr = this.logicalAnd();
-    if (this.check(TokenType.OR)) {
+    if (this.check(TokenType2.OR)) {
       this.incrDepth();
       try {
         const logical = new Logical(this.peek(), [expr]);
         expr = logical;
-        while (this.match(TokenType.OR)) {
+        while (this.match(TokenType2.OR)) {
           const right = this.logicalAnd();
           logical.args.push(right);
         }
@@ -10193,12 +10599,12 @@ var Parser = class {
   }
   logicalAnd() {
     let expr = this.equality();
-    if (this.check(TokenType.AND)) {
+    if (this.check(TokenType2.AND)) {
       this.incrDepth();
       try {
         const logical = new Logical(this.peek(), [expr]);
         expr = logical;
-        while (this.match(TokenType.AND)) {
+        while (this.match(TokenType2.AND)) {
           const right = this.equality();
           logical.args.push(right);
         }
@@ -10210,7 +10616,7 @@ var Parser = class {
   }
   equality() {
     let expr = this.comparison();
-    while (this.match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL)) {
+    while (this.match(TokenType2.BANG_EQUAL, TokenType2.EQUAL_EQUAL)) {
       const operator = this.previous();
       const right = this.comparison();
       expr = new Binary(expr, operator, right);
@@ -10219,7 +10625,7 @@ var Parser = class {
   }
   comparison() {
     let expr = this.unary();
-    while (this.match(TokenType.GREATER, TokenType.GREATER_EQUAL, TokenType.LESS, TokenType.LESS_EQUAL)) {
+    while (this.match(TokenType2.GREATER, TokenType2.GREATER_EQUAL, TokenType2.LESS, TokenType2.LESS_EQUAL)) {
       const operator = this.previous();
       const right = this.unary();
       expr = new Binary(expr, operator, right);
@@ -10227,7 +10633,7 @@ var Parser = class {
     return expr;
   }
   unary() {
-    if (this.match(TokenType.BANG)) {
+    if (this.match(TokenType2.BANG)) {
       this.incrDepth();
       const operator = this.previous();
       const unary = this.unary();
@@ -10246,26 +10652,26 @@ var Parser = class {
       let cont = true;
       while (cont) {
         switch (true) {
-          case this.match(TokenType.LEFT_BRACKET): {
+          case this.match(TokenType2.LEFT_BRACKET): {
             let indexExpr;
-            if (this.match(TokenType.STAR)) {
+            if (this.match(TokenType2.STAR)) {
               indexExpr = new Star();
             } else {
               indexExpr = this.expression();
             }
-            this.consume(TokenType.RIGHT_BRACKET, ErrorType.ErrorUnexpectedSymbol);
+            this.consume(TokenType2.RIGHT_BRACKET, ErrorType.ErrorUnexpectedSymbol);
             this.incrDepth();
             depthIncreased++;
             expr = new IndexAccess(expr, indexExpr);
             break;
           }
-          case this.match(TokenType.DOT):
+          case this.match(TokenType2.DOT):
             this.incrDepth();
             depthIncreased++;
-            if (this.match(TokenType.IDENTIFIER)) {
+            if (this.match(TokenType2.IDENTIFIER)) {
               const property = this.previous();
               expr = new IndexAccess(expr, new Literal(new StringData(property.lexeme), property));
-            } else if (this.match(TokenType.STAR)) {
+            } else if (this.match(TokenType2.STAR)) {
               expr = new IndexAccess(expr, new Star());
             } else {
               throw this.buildError(ErrorType.ErrorUnexpectedSymbol, this.peek());
@@ -10282,22 +10688,22 @@ var Parser = class {
     return expr;
   }
   call() {
-    if (!this.check(TokenType.IDENTIFIER)) {
+    if (!this.check(TokenType2.IDENTIFIER)) {
       return this.primary();
     }
     const identifier = this.next();
-    if (!this.match(TokenType.LEFT_PAREN)) {
+    if (!this.match(TokenType2.LEFT_PAREN)) {
       if (!this.extContexts.has(identifier.lexeme.toLowerCase())) {
         throw this.buildError(ErrorType.ErrorUnrecognizedContext, identifier);
       }
       return new ContextAccess(identifier);
     }
     const args = [];
-    while (!this.match(TokenType.RIGHT_PAREN)) {
+    while (!this.match(TokenType2.RIGHT_PAREN)) {
       const aexp = this.expression();
       args.push(aexp);
-      if (!this.check(TokenType.RIGHT_PAREN)) {
-        this.consume(TokenType.COMMA, ErrorType.ErrorUnexpectedSymbol);
+      if (!this.check(TokenType2.RIGHT_PAREN)) {
+        this.consume(TokenType2.COMMA, ErrorType.ErrorUnexpectedSymbol);
       }
     }
     validateFunction(this.context, identifier, args.length);
@@ -10305,22 +10711,22 @@ var Parser = class {
   }
   primary() {
     switch (true) {
-      case this.match(TokenType.FALSE):
+      case this.match(TokenType2.FALSE):
         return new Literal(new BooleanData(false), this.previous());
-      case this.match(TokenType.TRUE):
+      case this.match(TokenType2.TRUE):
         return new Literal(new BooleanData(true), this.previous());
-      case this.match(TokenType.NULL):
+      case this.match(TokenType2.NULL):
         return new Literal(new Null(), this.previous());
-      case this.match(TokenType.NUMBER):
+      case this.match(TokenType2.NUMBER):
         return new Literal(new NumberData(this.previous().value), this.previous());
-      case this.match(TokenType.STRING):
+      case this.match(TokenType2.STRING):
         return new Literal(new StringData(this.previous().value), this.previous());
-      case this.match(TokenType.LEFT_PAREN): {
+      case this.match(TokenType2.LEFT_PAREN): {
         const expr = this.expression();
         if (this.atEnd()) {
           throw this.buildError(ErrorType.ErrorUnexpectedEndOfExpression, this.previous());
         }
-        this.consume(TokenType.RIGHT_PAREN, ErrorType.ErrorUnexpectedSymbol);
+        this.consume(TokenType2.RIGHT_PAREN, ErrorType.ErrorUnexpectedSymbol);
         return new Grouping(expr);
       }
       case this.atEnd():
@@ -10347,7 +10753,7 @@ var Parser = class {
   }
   // atEnd peeks whether the next token is EOF
   atEnd() {
-    return this.peek().type == TokenType.EOF;
+    return this.peek().type == TokenType2.EOF;
   }
   next() {
     if (!this.atEnd()) {
@@ -10385,243 +10791,241 @@ var Parser = class {
   }
 };
 
-// node_modules/@actions/workflow-parser/dist/templates/tokens/types.js
-var TokenType2;
-(function(TokenType3) {
-  TokenType3[TokenType3["String"] = 0] = "String";
-  TokenType3[TokenType3["Sequence"] = 1] = "Sequence";
-  TokenType3[TokenType3["Mapping"] = 2] = "Mapping";
-  TokenType3[TokenType3["BasicExpression"] = 3] = "BasicExpression";
-  TokenType3[TokenType3["InsertExpression"] = 4] = "InsertExpression";
-  TokenType3[TokenType3["Boolean"] = 5] = "Boolean";
-  TokenType3[TokenType3["Number"] = 6] = "Number";
-  TokenType3[TokenType3["Null"] = 7] = "Null";
-})(TokenType2 || (TokenType2 = {}));
-function tokenTypeName(type) {
-  switch (type) {
-    case TokenType2.String:
-      return "StringToken";
-    case TokenType2.Sequence:
-      return "SequenceToken";
-    case TokenType2.Mapping:
-      return "MappingToken";
-    case TokenType2.BasicExpression:
-      return "BasicExpressionToken";
-    case TokenType2.InsertExpression:
-      return "InsertExpressionToken";
-    case TokenType2.Boolean:
-      return "BooleanToken";
-    case TokenType2.Number:
-      return "NumberToken";
-    case TokenType2.Null:
-      return "NullToken";
-    default: {
-      const exhaustiveCheck = type;
-      throw new Error(`Unhandled token type: ${type} ${exhaustiveCheck}}`);
+// node_modules/@actions/workflow-parser/dist/templates/template-constants.js
+var ALLOWED_VALUES = "allowed-values";
+var ANY = "any";
+var BOOLEAN = "boolean";
+var BOOLEAN_DEFINITION = "boolean-definition";
+var BOOLEAN_DEFINITION_PROPERTIES = "boolean-definition-properties";
+var CLOSE_EXPRESSION = "}}";
+var CONSTANT = "constant";
+var CONTEXT = "context";
+var DEFINITION = "definition";
+var DEFINITIONS = "definitions";
+var DESCRIPTION = "description";
+var IGNORE_CASE = "ignore-case";
+var INSERT_DIRECTIVE = "insert";
+var IS_EXPRESSION = "is-expression";
+var ITEM_TYPE = "item-type";
+var LOOSE_KEY_TYPE = "loose-key-type";
+var LOOSE_VALUE_TYPE = "loose-value-type";
+var MAX_CONSTANT = "MAX";
+var MAPPING = "mapping";
+var MAPPING_DEFINITION = "mapping-definition";
+var MAPPING_DEFINITION_PROPERTIES = "mapping-definition-properties";
+var MAPPING_PROPERTY_VALUE = "mapping-property-value";
+var NON_EMPTY_STRING = "non-empty-string";
+var NULL = "null";
+var NULL_DEFINITION = "null-definition";
+var NULL_DEFINITION_PROPERTIES = "null-definition-properties";
+var NUMBER = "number";
+var NUMBER_DEFINITION = "number-definition";
+var NUMBER_DEFINITION_PROPERTIES = "number-definition-properties";
+var ONE_OF = "one-of";
+var ONE_OF_DEFINITION = "one-of-definition";
+var OPEN_EXPRESSION = "${{";
+var PROPERTY_VALUE = "property-value";
+var PROPERTIES = "properties";
+var REQUIRED = "required";
+var REQUIRE_NON_EMPTY = "require-non-empty";
+var SCALAR = "scalar";
+var SEQUENCE = "sequence";
+var SEQUENCE_DEFINITION = "sequence-definition";
+var SEQUENCE_DEFINITION_PROPERTIES = "sequence-definition-properties";
+var TYPE = "type";
+var SEQUENCE_OF_NON_EMPTY_STRING = "sequence-of-non-empty-string";
+var STRING = "string";
+var STRING_DEFINITION = "string-definition";
+var STRING_DEFINITION_PROPERTIES = "string-definition-properties";
+var TEMPLATE_SCHEMA = "template-schema";
+var VERSION = "version";
+
+// node_modules/@actions/workflow-parser/dist/templates/allowed-context.js
+function splitAllowedContext(allowedContext) {
+  const FUNCTION_REGEXP = /^([a-zA-Z0-9_]+)\(([0-9]+),([0-9]+|MAX)\)$/;
+  const namedContexts = [];
+  const functions = [];
+  if (allowedContext.length > 0) {
+    for (const contextItem of allowedContext) {
+      const match2 = contextItem.match(FUNCTION_REGEXP);
+      if (match2) {
+        const functionName = match2[1];
+        const minParameters = Number.parseInt(match2[2]);
+        const maxParametersRaw = match2[3];
+        const maxParameters = maxParametersRaw === MAX_CONSTANT ? Number.MAX_SAFE_INTEGER : Number.parseInt(maxParametersRaw);
+        functions.push({
+          name: functionName,
+          minArgs: minParameters,
+          maxArgs: maxParameters
+        });
+      } else {
+        namedContexts.push(contextItem);
+      }
     }
   }
+  return {
+    namedContexts,
+    functions
+  };
 }
 
-// node_modules/@actions/workflow-parser/dist/templates/tokens/traversal-state.js
-var TraversalState = class {
-  constructor(parent, token) {
-    this.index = -1;
-    this.isKey = false;
-    this.parent = parent;
-    this._token = token;
-    this.current = token;
+// node_modules/@actions/workflow-parser/dist/templates/tokens/expression-token.js
+var ExpressionToken = class extends ScalarToken {
+  constructor(type, file, range, directive, definitionInfo) {
+    super(type, file, range, definitionInfo);
+    this.directive = directive;
   }
-  moveNext(omitKeys) {
-    switch (this._token.templateTokenType) {
-      case TokenType2.Sequence: {
-        const sequence = this._token;
-        if (++this.index < sequence.count) {
-          this.current = sequence.get(this.index);
-          return true;
-        }
-        this.current = void 0;
-        return false;
-      }
-      case TokenType2.Mapping: {
-        const mapping = this._token;
-        if (this.isKey) {
-          this.isKey = false;
-          this.currentKey = this.current;
-          this.current = mapping.get(this.index).value;
-          return true;
-        }
-        if (++this.index < mapping.count) {
-          if (omitKeys) {
-            this.isKey = false;
-            this.currentKey = mapping.get(this.index).key;
-            this.current = mapping.get(this.index).value;
-            return true;
-          }
-          this.isKey = true;
-          this.currentKey = void 0;
-          this.current = mapping.get(this.index).key;
-          return true;
-        }
-        this.currentKey = void 0;
-        this.current = void 0;
-        return false;
-      }
-      default:
-        throw new Error(`Unexpected token type '${this._token.templateTokenType}' when traversing state`);
-    }
+  get isLiteral() {
+    return false;
   }
-  /**
-   * Returns the ancestor tokens from root to the current token's parent container.
-   */
-  getAncestors() {
-    const ancestors = [];
-    let state = this.parent;
-    while (state) {
-      if (state.current) {
-        ancestors.unshift(state.current);
-      }
-      state = state.parent;
-    }
-    return ancestors;
+  get isExpression() {
+    return true;
+  }
+  static validateExpression(expression, allowedContext) {
+    const { namedContexts, functions } = splitAllowedContext(allowedContext);
+    const lexer = new Lexer(expression);
+    const result = lexer.lex();
+    const p = new Parser(result.tokens, namedContexts, functions);
+    p.parse();
   }
 };
 
-// node_modules/@actions/workflow-parser/dist/templates/tokens/template-token.js
-var TemplateTokenError = class extends Error {
-  constructor(message, token) {
-    super(message);
-    this.token = token;
-  }
-};
-var TemplateToken = class {
+// node_modules/@actions/workflow-parser/dist/templates/tokens/basic-expression-token.js
+var BasicExpressionToken = class _BasicExpressionToken extends ExpressionToken {
   /**
-   * Base class for all template tokens
+   * @param file The file ID where this token originated
+   * @param range The range of the entire expression including `${{` and `}}`
+   * @param expression The expression string without `${{` and `}}` markers
+   * @param definitionInfo Schema definition info for this token
+   * @param originalExpressions If transformed from individual expressions (e.g., format()), these are the originals
+   * @param source The original source string from the YAML
+   * @param expressionRange The range of just the expression, excluding `${{` and `}}`
+   * @param blockScalarHeader The block scalar header (e.g., "|", "|-") if parsed from a YAML block scalar
    */
-  constructor(type, file, range, definitionInfo) {
-    this.type = type;
-    this.file = file;
-    this.range = range;
-    this.definitionInfo = definitionInfo;
+  constructor(file, range, expression, definitionInfo, originalExpressions, source, expressionRange, blockScalarHeader) {
+    super(TokenType.BasicExpression, file, range, void 0, definitionInfo);
+    this.expr = expression;
+    this.source = source;
+    this.originalExpressions = originalExpressions;
+    this.expressionRange = expressionRange;
+    this.blockScalarHeader = blockScalarHeader;
   }
-  get templateTokenType() {
-    return this.type;
+  get expression() {
+    return this.expr;
   }
-  get line() {
-    return this.range?.start.line;
+  clone(omitSource) {
+    return omitSource ? new _BasicExpressionToken(void 0, void 0, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader) : new _BasicExpressionToken(this.file, this.range, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader);
   }
-  get col() {
-    return this.range?.start.column;
+  toString() {
+    return `${OPEN_EXPRESSION} ${this.expr} ${CLOSE_EXPRESSION}`;
   }
-  get definition() {
-    return this.definitionInfo?.definition;
-  }
-  get description() {
-    return this._description || this.propertyDefinition?.description || this.definition?.description;
-  }
-  set description(description) {
-    this._description = description;
-  }
-  typeName() {
-    return tokenTypeName(this.type);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertNull(objectDescription) {
-    if (this.type === TokenType2.Null) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Null)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertBoolean(objectDescription) {
-    if (this.type === TokenType2.Boolean) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Boolean)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertNumber(objectDescription) {
-    if (this.type === TokenType2.Number) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Number)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertString(objectDescription) {
-    if (this.type === TokenType2.String) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.String)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertScalar(objectDescription) {
-    if (this?.isScalar === true) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type 'ScalarToken' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertSequence(objectDescription) {
-    if (this.type === TokenType2.Sequence) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Sequence)}' was expected.`, this);
-  }
-  /**
-   * Asserts expected type and throws a good debug message if unexpected
-   */
-  assertMapping(objectDescription) {
-    if (this.type === TokenType2.Mapping) {
-      return this;
-    }
-    throw new TemplateTokenError(`Unexpected type '${this.typeName()}' encountered while reading '${objectDescription}'. The type '${tokenTypeName(TokenType2.Mapping)}' was expected.`, this);
-  }
-  /**
-   * Returns all tokens (depth first)
-   * @param value The object to traverse
-   * @param omitKeys Whether to omit mapping keys
-   * @yields A tuple of [parent, token, keyToken, ancestors] for each token in the tree
-   */
-  static *traverse(value, omitKeys) {
-    yield [void 0, value, void 0, []];
-    switch (value.templateTokenType) {
-      case TokenType2.Sequence:
-      case TokenType2.Mapping: {
-        let state = new TraversalState(void 0, value);
-        state = new TraversalState(state, value);
-        while (state.parent) {
-          if (state.moveNext(omitKeys ?? false)) {
-            value = state.current;
-            yield [state.parent?.current, value, state.currentKey, state.getAncestors()];
-            switch (value.type) {
-              case TokenType2.Sequence:
-              case TokenType2.Mapping:
-                state = new TraversalState(state, value);
-                break;
-            }
-          } else {
-            state = state.parent;
-          }
-        }
-        break;
-      }
-    }
+  toDisplayString() {
+    return ScalarToken.trimDisplayString(this.toString());
   }
   toJSON() {
-    return void 0;
+    return {
+      type: TokenType.BasicExpression,
+      expr: this.expr
+    };
   }
 };
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/insert-expression-token.js
+var InsertExpressionToken = class _InsertExpressionToken extends ExpressionToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.InsertExpression, file, range, INSERT_DIRECTIVE, definitionInfo);
+  }
+  clone(omitSource) {
+    return omitSource ? new _InsertExpressionToken(void 0, void 0, this.definitionInfo) : new _InsertExpressionToken(this.file, this.range, this.definitionInfo);
+  }
+  toString() {
+    return `${OPEN_EXPRESSION} ${INSERT_DIRECTIVE} ${CLOSE_EXPRESSION}`;
+  }
+  toDisplayString() {
+    return ScalarToken.trimDisplayString(this.toString());
+  }
+  toJSON() {
+    return {
+      type: TokenType.InsertExpression,
+      expr: "insert"
+    };
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/mapping-token.js
+var MappingToken = class _MappingToken extends TemplateToken {
+  constructor(file, range, definitionInfo) {
+    super(TokenType.Mapping, file, range, definitionInfo);
+    this.map = [];
+  }
+  get count() {
+    return this.map.length;
+  }
+  get isScalar() {
+    return false;
+  }
+  get isLiteral() {
+    return false;
+  }
+  get isExpression() {
+    return false;
+  }
+  add(key, value) {
+    this.map.push(new KeyValuePair(key, value));
+  }
+  get(index) {
+    return this.map[index];
+  }
+  find(key) {
+    const pair = this.map.find((pair2) => pair2.key.toString() === key);
+    return pair?.value;
+  }
+  remove(index) {
+    this.map.splice(index, 1);
+  }
+  clone(omitSource) {
+    const result = omitSource ? new _MappingToken(void 0, void 0, this.definitionInfo) : new _MappingToken(this.file, this.range, this.definitionInfo);
+    for (const item of this.map) {
+      result.add(item.key.clone(omitSource), item.value.clone(omitSource));
+    }
+    return result;
+  }
+  toJSON() {
+    const items = [];
+    for (const item of this.map) {
+      items.push({ Key: item.key, Value: item.value });
+    }
+    return {
+      type: TokenType.Mapping,
+      map: items
+    };
+  }
+  *[Symbol.iterator]() {
+    for (const item of this.map) {
+      yield item;
+    }
+  }
+};
+
+// node_modules/@actions/workflow-parser/dist/templates/tokens/type-guards.js
+function isLiteral(t) {
+  return t.isLiteral;
+}
+function isScalar(t) {
+  return t.isScalar;
+}
+function isString(t) {
+  return isLiteral(t) && t.templateTokenType === TokenType.String;
+}
+function isBasicExpression(t) {
+  return isScalar(t) && t.templateTokenType === TokenType.BasicExpression;
+}
+function isSequence(t) {
+  return t instanceof SequenceToken;
+}
+function isMapping(t) {
+  return t instanceof MappingToken;
+}
 
 // node_modules/@actions/workflow-parser/dist/templates/template-validation-error.js
 var TemplateValidationError = class {
@@ -10789,407 +11193,6 @@ var DefinitionType;
   DefinitionType2[DefinitionType2["AllowedValues"] = 7] = "AllowedValues";
 })(DefinitionType || (DefinitionType = {}));
 
-// node_modules/@actions/workflow-parser/dist/templates/template-constants.js
-var ALLOWED_VALUES = "allowed-values";
-var ANY = "any";
-var BOOLEAN = "boolean";
-var BOOLEAN_DEFINITION = "boolean-definition";
-var BOOLEAN_DEFINITION_PROPERTIES = "boolean-definition-properties";
-var CLOSE_EXPRESSION = "}}";
-var CONSTANT = "constant";
-var CONTEXT = "context";
-var DEFINITION = "definition";
-var DEFINITIONS = "definitions";
-var DESCRIPTION = "description";
-var IGNORE_CASE = "ignore-case";
-var INSERT_DIRECTIVE = "insert";
-var IS_EXPRESSION = "is-expression";
-var ITEM_TYPE = "item-type";
-var LOOSE_KEY_TYPE = "loose-key-type";
-var LOOSE_VALUE_TYPE = "loose-value-type";
-var MAX_CONSTANT = "MAX";
-var MAPPING = "mapping";
-var MAPPING_DEFINITION = "mapping-definition";
-var MAPPING_DEFINITION_PROPERTIES = "mapping-definition-properties";
-var MAPPING_PROPERTY_VALUE = "mapping-property-value";
-var NON_EMPTY_STRING = "non-empty-string";
-var NULL = "null";
-var NULL_DEFINITION = "null-definition";
-var NULL_DEFINITION_PROPERTIES = "null-definition-properties";
-var NUMBER = "number";
-var NUMBER_DEFINITION = "number-definition";
-var NUMBER_DEFINITION_PROPERTIES = "number-definition-properties";
-var ONE_OF = "one-of";
-var ONE_OF_DEFINITION = "one-of-definition";
-var OPEN_EXPRESSION = "${{";
-var PROPERTY_VALUE = "property-value";
-var PROPERTIES = "properties";
-var REQUIRED = "required";
-var REQUIRE_NON_EMPTY = "require-non-empty";
-var SCALAR = "scalar";
-var SEQUENCE = "sequence";
-var SEQUENCE_DEFINITION = "sequence-definition";
-var SEQUENCE_DEFINITION_PROPERTIES = "sequence-definition-properties";
-var TYPE = "type";
-var SEQUENCE_OF_NON_EMPTY_STRING = "sequence-of-non-empty-string";
-var STRING = "string";
-var STRING_DEFINITION = "string-definition";
-var STRING_DEFINITION_PROPERTIES = "string-definition-properties";
-var TEMPLATE_SCHEMA = "template-schema";
-var VERSION = "version";
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/scalar-token.js
-var ScalarToken = class extends TemplateToken {
-  constructor(type, file, range, definitionInfo) {
-    super(type, file, range, definitionInfo);
-  }
-  get isScalar() {
-    return true;
-  }
-  static trimDisplayString(displayString) {
-    let firstLine = displayString.trimStart();
-    const firstNewLine = firstLine.indexOf("\n");
-    const firstCarriageReturn = firstLine.indexOf("\r");
-    if (firstNewLine >= 0 || firstCarriageReturn >= 0) {
-      firstLine = firstLine.substr(0, Math.min(firstNewLine >= 0 ? firstNewLine : Number.MAX_VALUE, firstCarriageReturn >= 0 ? firstCarriageReturn : Number.MAX_VALUE));
-    }
-    return firstLine;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/literal-token.js
-var LiteralToken = class extends ScalarToken {
-  constructor(type, file, range, definitionInfo) {
-    super(type, file, range, definitionInfo);
-  }
-  get isLiteral() {
-    return true;
-  }
-  get isExpression() {
-    return false;
-  }
-  toDisplayString() {
-    return ScalarToken.trimDisplayString(this.toString());
-  }
-  /**
-   * Throws a good debug message when an unexpected literal value is encountered
-   */
-  assertUnexpectedValue(objectDescription) {
-    throw new Error(`Error while reading '${objectDescription}'. Unexpected value '${this.toString()}'`);
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/string-token.js
-var StringToken = class _StringToken extends LiteralToken {
-  constructor(file, range, value, definitionInfo, source, blockScalarHeader) {
-    super(TokenType2.String, file, range, definitionInfo);
-    this.value = value;
-    this.source = source;
-    this.blockScalarHeader = blockScalarHeader;
-  }
-  clone(omitSource) {
-    return omitSource ? new _StringToken(void 0, void 0, this.value, this.definitionInfo, this.source, this.blockScalarHeader) : new _StringToken(this.file, this.range, this.value, this.definitionInfo, this.source, this.blockScalarHeader);
-  }
-  toString() {
-    return this.value;
-  }
-  toJSON() {
-    return this.value;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/number-token.js
-var NumberToken = class _NumberToken extends LiteralToken {
-  constructor(file, range, value, definitionInfo) {
-    super(TokenType2.Number, file, range, definitionInfo);
-    this.num = value;
-  }
-  get value() {
-    return this.num;
-  }
-  clone(omitSource) {
-    return omitSource ? new _NumberToken(void 0, void 0, this.num, this.definitionInfo) : new _NumberToken(this.file, this.range, this.num, this.definitionInfo);
-  }
-  toString() {
-    return `${this.num}`;
-  }
-  toJSON() {
-    return this.num;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/boolean-token.js
-var BooleanToken = class _BooleanToken extends LiteralToken {
-  constructor(file, range, value, definitionInfo) {
-    super(TokenType2.Boolean, file, range, definitionInfo);
-    this.bool = value;
-  }
-  get value() {
-    return this.bool;
-  }
-  clone(omitSource) {
-    return omitSource ? new _BooleanToken(void 0, void 0, this.bool, this.definitionInfo) : new _BooleanToken(this.file, this.range, this.bool, this.definitionInfo);
-  }
-  toString() {
-    return this.bool ? "true" : "false";
-  }
-  toJSON() {
-    return this.bool;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/null-token.js
-var NullToken = class _NullToken extends LiteralToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.Null, file, range, definitionInfo);
-  }
-  clone(omitSource) {
-    return omitSource ? new _NullToken(void 0, void 0, this.definitionInfo) : new _NullToken(this.file, this.range, this.definitionInfo);
-  }
-  toString() {
-    return "";
-  }
-  toJSON() {
-    return null;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/key-value-pair.js
-var KeyValuePair = class {
-  constructor(key, value) {
-    this.key = key;
-    this.value = value;
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/sequence-token.js
-var SequenceToken = class _SequenceToken extends TemplateToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.Sequence, file, range, definitionInfo);
-    this.seq = [];
-  }
-  get count() {
-    return this.seq.length;
-  }
-  get isScalar() {
-    return false;
-  }
-  get isLiteral() {
-    return false;
-  }
-  get isExpression() {
-    return false;
-  }
-  add(value) {
-    this.seq.push(value);
-  }
-  get(index) {
-    return this.seq[index];
-  }
-  clone(omitSource) {
-    const result = omitSource ? new _SequenceToken(void 0, void 0, this.definitionInfo) : new _SequenceToken(this.file, this.range, this.definitionInfo);
-    for (const item of this.seq) {
-      result.add(item.clone(omitSource));
-    }
-    return result;
-  }
-  toJSON() {
-    return {
-      type: TokenType2.Sequence,
-      seq: this.seq
-    };
-  }
-  *[Symbol.iterator]() {
-    for (const item of this.seq) {
-      yield item;
-    }
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/mapping-token.js
-var MappingToken = class _MappingToken extends TemplateToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.Mapping, file, range, definitionInfo);
-    this.map = [];
-  }
-  get count() {
-    return this.map.length;
-  }
-  get isScalar() {
-    return false;
-  }
-  get isLiteral() {
-    return false;
-  }
-  get isExpression() {
-    return false;
-  }
-  add(key, value) {
-    this.map.push(new KeyValuePair(key, value));
-  }
-  get(index) {
-    return this.map[index];
-  }
-  find(key) {
-    const pair = this.map.find((pair2) => pair2.key.toString() === key);
-    return pair?.value;
-  }
-  remove(index) {
-    this.map.splice(index, 1);
-  }
-  clone(omitSource) {
-    const result = omitSource ? new _MappingToken(void 0, void 0, this.definitionInfo) : new _MappingToken(this.file, this.range, this.definitionInfo);
-    for (const item of this.map) {
-      result.add(item.key.clone(omitSource), item.value.clone(omitSource));
-    }
-    return result;
-  }
-  toJSON() {
-    const items = [];
-    for (const item of this.map) {
-      items.push({ Key: item.key, Value: item.value });
-    }
-    return {
-      type: TokenType2.Mapping,
-      map: items
-    };
-  }
-  *[Symbol.iterator]() {
-    for (const item of this.map) {
-      yield item;
-    }
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/allowed-context.js
-function splitAllowedContext(allowedContext) {
-  const FUNCTION_REGEXP = /^([a-zA-Z0-9_]+)\(([0-9]+),([0-9]+|MAX)\)$/;
-  const namedContexts = [];
-  const functions = [];
-  if (allowedContext.length > 0) {
-    for (const contextItem of allowedContext) {
-      const match = contextItem.match(FUNCTION_REGEXP);
-      if (match) {
-        const functionName = match[1];
-        const minParameters = Number.parseInt(match[2]);
-        const maxParametersRaw = match[3];
-        const maxParameters = maxParametersRaw === MAX_CONSTANT ? Number.MAX_SAFE_INTEGER : Number.parseInt(maxParametersRaw);
-        functions.push({
-          name: functionName,
-          minArgs: minParameters,
-          maxArgs: maxParameters
-        });
-      } else {
-        namedContexts.push(contextItem);
-      }
-    }
-  }
-  return {
-    namedContexts,
-    functions
-  };
-}
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/expression-token.js
-var ExpressionToken = class extends ScalarToken {
-  constructor(type, file, range, directive, definitionInfo) {
-    super(type, file, range, definitionInfo);
-    this.directive = directive;
-  }
-  get isLiteral() {
-    return false;
-  }
-  get isExpression() {
-    return true;
-  }
-  static validateExpression(expression, allowedContext) {
-    const { namedContexts, functions } = splitAllowedContext(allowedContext);
-    const lexer = new Lexer(expression);
-    const result = lexer.lex();
-    const p = new Parser(result.tokens, namedContexts, functions);
-    p.parse();
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/basic-expression-token.js
-var BasicExpressionToken = class _BasicExpressionToken extends ExpressionToken {
-  /**
-   * @param file The file ID where this token originated
-   * @param range The range of the entire expression including `${{` and `}}`
-   * @param expression The expression string without `${{` and `}}` markers
-   * @param definitionInfo Schema definition info for this token
-   * @param originalExpressions If transformed from individual expressions (e.g., format()), these are the originals
-   * @param source The original source string from the YAML
-   * @param expressionRange The range of just the expression, excluding `${{` and `}}`
-   * @param blockScalarHeader The block scalar header (e.g., "|", "|-") if parsed from a YAML block scalar
-   */
-  constructor(file, range, expression, definitionInfo, originalExpressions, source, expressionRange, blockScalarHeader) {
-    super(TokenType2.BasicExpression, file, range, void 0, definitionInfo);
-    this.expr = expression;
-    this.source = source;
-    this.originalExpressions = originalExpressions;
-    this.expressionRange = expressionRange;
-    this.blockScalarHeader = blockScalarHeader;
-  }
-  get expression() {
-    return this.expr;
-  }
-  clone(omitSource) {
-    return omitSource ? new _BasicExpressionToken(void 0, void 0, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader) : new _BasicExpressionToken(this.file, this.range, this.expr, this.definitionInfo, this.originalExpressions, this.source, this.expressionRange, this.blockScalarHeader);
-  }
-  toString() {
-    return `${OPEN_EXPRESSION} ${this.expr} ${CLOSE_EXPRESSION}`;
-  }
-  toDisplayString() {
-    return ScalarToken.trimDisplayString(this.toString());
-  }
-  toJSON() {
-    return {
-      type: TokenType2.BasicExpression,
-      expr: this.expr
-    };
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/insert-expression-token.js
-var InsertExpressionToken = class _InsertExpressionToken extends ExpressionToken {
-  constructor(file, range, definitionInfo) {
-    super(TokenType2.InsertExpression, file, range, INSERT_DIRECTIVE, definitionInfo);
-  }
-  clone(omitSource) {
-    return omitSource ? new _InsertExpressionToken(void 0, void 0, this.definitionInfo) : new _InsertExpressionToken(this.file, this.range, this.definitionInfo);
-  }
-  toString() {
-    return `${OPEN_EXPRESSION} ${INSERT_DIRECTIVE} ${CLOSE_EXPRESSION}`;
-  }
-  toDisplayString() {
-    return ScalarToken.trimDisplayString(this.toString());
-  }
-  toJSON() {
-    return {
-      type: TokenType2.InsertExpression,
-      expr: "insert"
-    };
-  }
-};
-
-// node_modules/@actions/workflow-parser/dist/templates/tokens/type-guards.js
-function isLiteral(t) {
-  return t.isLiteral;
-}
-function isScalar(t) {
-  return t.isScalar;
-}
-function isString(t) {
-  return isLiteral(t) && t.templateTokenType === TokenType2.String;
-}
-function isSequence(t) {
-  return t instanceof SequenceToken;
-}
-function isMapping(t) {
-  return t instanceof MappingToken;
-}
-
 // node_modules/@actions/workflow-parser/dist/templates/template-reader.js
 var WHITESPACE_PATTERN = /\s/;
 var backgroundStepProperties = /* @__PURE__ */ new Set(["background", "wait", "wait-all", "cancel"]);
@@ -11289,7 +11292,7 @@ var TemplateReader = class {
         }
         continue;
       }
-      const nextKey = nextKeyScalar.templateTokenType === TokenType2.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
+      const nextKey = nextKeyScalar.templateTokenType === TokenType.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
       if (nextKey.value) {
         const upperKey = nextKey.value.toUpperCase();
         if (upperKeys[upperKey]) {
@@ -11375,7 +11378,7 @@ var TemplateReader = class {
         }
         continue;
       }
-      const nextKey = nextKeyScalar.templateTokenType === TokenType2.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
+      const nextKey = nextKeyScalar.templateTokenType === TokenType.String ? nextKeyScalar : new StringToken(nextKeyScalar.file, nextKeyScalar.range, nextKeyScalar.toString(), nextKeyScalar.definitionInfo);
       if (nextKey.value) {
         const upperKey = nextKey.value.toUpperCase();
         if (upperKeys[upperKey]) {
@@ -11415,10 +11418,10 @@ var TemplateReader = class {
   }
   validate(scalar, definition) {
     switch (scalar.templateTokenType) {
-      case TokenType2.Null:
-      case TokenType2.Boolean:
-      case TokenType2.Number:
-      case TokenType2.String: {
+      case TokenType.Null:
+      case TokenType.Boolean:
+      case TokenType.Number:
+      case TokenType.String: {
         const literal = scalar;
         const scalarDefinitions = definition.getScalarDefinitions();
         let relevantDefinition;
@@ -11426,7 +11429,7 @@ var TemplateReader = class {
           scalar.definitionInfo = new DefinitionInfo(definition, relevantDefinition);
           return scalar;
         }
-        if (literal.templateTokenType !== TokenType2.String) {
+        if (literal.templateTokenType !== TokenType.String) {
           const stringLiteral = new StringToken(literal.file, literal.range, literal.toString(), literal.definitionInfo);
           if (relevantDefinition = scalarDefinitions.find((x) => x.isMatch(stringLiteral))) {
             stringLiteral.definitionInfo = new DefinitionInfo(definition, relevantDefinition);
@@ -11436,7 +11439,7 @@ var TemplateReader = class {
         this._context.error(literal, `Unexpected value '${literal.toString()}'`);
         return scalar;
       }
-      case TokenType2.BasicExpression:
+      case TokenType.BasicExpression:
         if (definition.allowedContext.length === 0) {
           this._context.error(scalar, "A template expression is not allowed in this context");
         }
@@ -11519,7 +11522,7 @@ var TemplateReader = class {
     if (encounteredError) {
       return token;
     }
-    if (segments.length === 1 && segments[0].templateTokenType === TokenType2.BasicExpression) {
+    if (segments.length === 1 && segments[0].templateTokenType === TokenType.BasicExpression) {
       const basicExpression = segments[0];
       const str = this.getExpressionString(basicExpression.expression);
       if (str !== void 0) {
@@ -11598,7 +11601,7 @@ var TemplateReader = class {
     };
   }
   addString(segments, range, value, definition) {
-    if (segments.length > 0 && segments[segments.length - 1].templateTokenType === TokenType2.String) {
+    if (segments.length > 0 && segments[segments.length - 1].templateTokenType === TokenType.String) {
       const lastSegment = segments[segments.length - 1];
       segments[segments.length - 1] = new StringToken(this._fileId, range, `${lastSegment.value}${value}`, definition);
     } else {
@@ -11916,7 +11919,7 @@ var BooleanDefinition = class extends ScalarDefinition {
     return DefinitionType.Boolean;
   }
   isMatch(literal) {
-    return literal.templateTokenType === TokenType2.Boolean;
+    return literal.templateTokenType === TokenType.Boolean;
   }
   validate() {
   }
@@ -11927,7 +11930,7 @@ var PropertyDefinition = class {
   constructor(token) {
     this.type = "";
     this.required = false;
-    if (token.templateTokenType === TokenType2.String) {
+    if (token.templateTokenType === TokenType.String) {
       this.type = token.value;
     } else {
       const mapping = token.assertMapping(MAPPING_PROPERTY_VALUE);
@@ -12052,7 +12055,7 @@ var NullDefinition = class extends ScalarDefinition {
     return DefinitionType.Null;
   }
   isMatch(literal) {
-    return literal.templateTokenType === TokenType2.Null;
+    return literal.templateTokenType === TokenType.Null;
   }
   validate() {
   }
@@ -12088,7 +12091,7 @@ var NumberDefinition = class extends ScalarDefinition {
     return DefinitionType.Number;
   }
   isMatch(literal) {
-    return literal.templateTokenType === TokenType2.Number;
+    return literal.templateTokenType === TokenType.Number;
   }
   validate() {
   }
@@ -12328,7 +12331,7 @@ var StringDefinition = class extends ScalarDefinition {
     return DefinitionType.String;
   }
   isMatch(literal) {
-    if (literal.templateTokenType === TokenType2.String) {
+    if (literal.templateTokenType === TokenType.String) {
       const value = literal.value;
       if (this.constant) {
         return this.ignoreCase ? this.constant.toUpperCase() === value.toUpperCase() : this.constant === value;
@@ -12412,10 +12415,10 @@ var TemplateSchema = class _TemplateSchema {
                     break;
                   case ALLOWED_VALUES:
                     for (const item of mappingToken) {
-                      if (item.value.templateTokenType === TokenType2.Sequence) {
+                      if (item.value.templateTokenType === TokenType.Sequence) {
                         const sequenceToken = item.value;
                         for (const activity of sequenceToken) {
-                          if (activity.templateTokenType === TokenType2.String) {
+                          if (activity.templateTokenType === TokenType.String) {
                             const stringToken = activity;
                             const allowedValuesKey = definitionsKey.value + "-" + stringToken.value;
                             const allowedValuesDef = new StringDefinition(allowedValuesKey);
@@ -13240,7 +13243,7 @@ function convertOn(context, token) {
     for (const item of token) {
       const eventKey = item.key.assertString("event name");
       const eventName = eventKey.value;
-      if (item.value.templateTokenType === TokenType2.Null) {
+      if (item.value.templateTokenType === TokenType.Null) {
         result[eventName] = {};
         continue;
       }
@@ -14270,6 +14273,7 @@ var defaultOptions = {
 
 // src/core/parser.ts
 var import_yaml2 = __toESM(require_dist(), 1);
+var checkName = (job) => job.name && isString(job.name) ? job.name.value : void 0;
 var ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
 var SCHEMA_LAG = { root: ["cache-mode"], step: ["background"] };
 function parseWorkflowFile(path, text) {
@@ -14423,6 +14427,7 @@ function indexOn(doc, span) {
     const steps = resolve2(doc, field("steps")?.pair.value);
     jobSpans.set(id, {
       id: span(item.key),
+      name: field("name")?.span,
       if: field("if")?.span,
       needs: field("needs")?.span,
       continueOnError: (0, import_yaml2.isScalar)(coeValue) && coeValue.value === true ? coe.span : void 0,
@@ -15721,7 +15726,7 @@ function trigger(parsed, event, defaultBranch) {
   if (decided.value === "skipped") return decided;
   const result = shaLike(byPaths(parsed, event, decided), event, defaultBranch);
   const message = event.message;
-  if (result.value === "skipped" || event.name === "pull_request_target" || message === void 0 || !SKIP.test(message))
+  if (result.value === "skipped" || event.name === "pull_request_target" || event.name === "merge_group" || message === void 0 || !SKIP.test(message))
     return result;
   const entry = parsed.onEntries.get(event.name);
   return {
@@ -15757,6 +15762,7 @@ function shaLike(result, event, defaultBranch) {
 }
 function byPaths(parsed, event, decided) {
   const name2 = event.name;
+  if (name2 === "merge_group") return decided;
   const settings = settingsOf(parsed, name2);
   const has = (key2) => Object.hasOwn(settings, key2);
   const key = has("paths") ? "paths" : "paths-ignore";
@@ -15847,10 +15853,11 @@ function byRef(parsed, event, defaultBranch) {
   const listed = { rule: "EV-0", spans: spans(name2), inputs: [named] };
   const after = [];
   if (name2 !== "push") {
-    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : PR_DEFAULT_TYPES;
-    const wanted = event.type === void 0 ? PR_DEFAULT_TYPES : [event.type];
+    const defaults = name2 === "merge_group" ? ["checks_requested"] : PR_DEFAULT_TYPES;
+    const types = Array.isArray(settings.types) && settings.types.length > 0 ? settings.types.map(String) : defaults;
+    const wanted = event.type === void 0 ? defaults : [event.type];
     const typed = {
-      rule: "EV-1",
+      rule: name2 === "merge_group" ? "EV-6" : "EV-1",
       spans: spans(has("types") ? `${name2}.types` : name2),
       inputs: event.type === void 0 ? [] : [{ path: "event.type", value: event.type }]
     };
@@ -15861,7 +15868,8 @@ function byRef(parsed, event, defaultBranch) {
       after.push({ ...typed, rule: "EV-4", spans: spans(`${name2}.types`) });
   }
   const copy = { push: "DB-2", pull_request: "DB-3" }[name2] ?? "DB-4";
-  after.push({ rule: copy, spans: [], inputs: [named] });
+  if (name2 !== "merge_group")
+    after.push({ rule: copy, spans: [], inputs: [named] });
   const given = name2 === "push" ? event.ref : event.base;
   const input = given === void 0 ? { path: "repo.defaultBranch", value: defaultBranch } : { path: name2 === "push" ? "event.ref" : "event.base", value: given };
   const ref = given ?? `refs/heads/${defaultBranch}`;
@@ -15887,7 +15895,7 @@ function byRef(parsed, event, defaultBranch) {
   const base = decide(patterns);
   const at = (i) => spans(i >= 0 ? `${name2}.${key}.${i}` : `${name2}.${key}`);
   const matched = {
-    rule: name2 === "push" ? "BR-3" : "BR-2",
+    rule: name2 === "push" ? "BR-3" : name2 === "merge_group" ? "BR-10" : "BR-2",
     spans: spans(`${name2}.${key}`),
     inputs: [input]
   };
@@ -16304,7 +16312,13 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
               job.if.expression,
               { ...contexts, needs: results("success") },
               { success: true, failure: false },
-              resolver(id, needs, assigned, [])
+              // Each need's outputs as a success would set them, not the empty ones it left.
+              resolver(
+                id,
+                needs.map(([n, o]) => [n, { ...o, conclusion: "success" }]),
+                assigned,
+                []
+              )
             );
           } catch (e) {
             if (!(e instanceof RuntimeValueNeeded)) throw e;
@@ -16468,6 +16482,268 @@ function githubContext({ event, repo }) {
   };
 }
 
+// src/core/checks.ts
+var RANK = [
+  "fails and blocks merge",
+  "pending and blocks merge",
+  "uncertain",
+  "may not block",
+  "passes"
+];
+var cause3 = (rule, inputs = []) => ({
+  rule,
+  spans: [],
+  inputs
+});
+function nameOf(job, scenario) {
+  if (!job.name || !isBasicExpression(job.name))
+    return { name: checkName(job) };
+  const vars = scenario.repo.vars ?? {};
+  try {
+    const name2 = evaluateTemplate(
+      `\${{ ${job.name.expression} }}`,
+      {
+        github: githubContext(scenario),
+        vars: {},
+        needs: {},
+        strategy: {},
+        matrix: {},
+        inputs: {}
+      },
+      ([context, field]) => {
+        if (context.toLowerCase() === "github") return void 0;
+        if (context.toLowerCase() === "vars" && field !== void 0) {
+          const found = Object.keys(vars).find(
+            (k) => k.toLowerCase() === field.toLowerCase()
+          );
+          return found === void 0 ? { needed: `vars.${field}` } : { value: vars[found] };
+        }
+        return { needed: [context, field].filter(Boolean).join(".") };
+      }
+    );
+    return { name: name2 };
+  } catch (e) {
+    if (!(e instanceof RuntimeValueNeeded)) throw e;
+    return { name: void 0, needed: e.needed };
+  }
+}
+function unreadable(key, file, scenario) {
+  const { path, line, col, endLine, endCol } = file.diagnostics[0];
+  return file.jobs.map((job) => {
+    const spans = file.jobSpans.get(job.id.value);
+    const unread = {
+      key: `${key} \u203A ${job.id.value}`,
+      value: "uncertain",
+      causes: [
+        {
+          rule: "RQ-0",
+          spans: [
+            ...spans ? [spans.id] : [],
+            { path, line, col, endLine, endCol }
+          ],
+          inputs: []
+        }
+      ],
+      settle: []
+    };
+    return {
+      id: job.id.value,
+      ...nameOf(job, scenario),
+      job: unread,
+      workflow: unread,
+      spans
+    };
+  });
+}
+function checkVerdicts(producers, { event, repo }, queued) {
+  const names = [...new Set(repo.required)];
+  if (event.name !== "push" && event.type !== void 0 && !PR_DEFAULT_TYPES.includes(event.type))
+    return names.map((name2) => ({
+      key: `check \u203A ${name2}`,
+      value: "unsupported",
+      causes: [cause3("WN-3", [{ path: "event.type", value: event.type }])]
+    }));
+  const notes = repo.strict ? [cause3("RQ-10", [{ path: "repo.strict", value: true }])] : [];
+  const filtered = (workflow) => /^(BR|PA|SK)-/.test(workflow.causes[0]?.rule ?? "") ? [cause3("RQ-1")] : [];
+  const unqueued = () => [
+    cause3("RQ-6", [{ path: "repo.mergeQueue", value: true }])
+  ];
+  return names.map((name2) => {
+    const pr = derivedBadge(name2, producers, filtered);
+    const queue = queued && derivedBadge(name2, queued, unqueued);
+    const { causes, ...rest } = queue && RANK.indexOf(queue.value) < RANK.indexOf(pr.value) ? queue : pr;
+    return { key: `check \u203A ${name2}`, ...rest, causes: [...causes, ...notes] };
+  });
+}
+var isCheck = (key) => key.startsWith("check \u203A ");
+var reports = (p) => !(p.job.value === "no-run" && p.workflow.value === "skipped");
+var prefixed = (p, name2) => p.name !== void 0 && (p.via === "remote" ? name2.startsWith(`${p.name} / `) : p.via === "matrix" && name2.startsWith(`${p.name} (`));
+function match(producers, name2) {
+  return producers.find((p) => p.name === name2 && p.via !== "remote") ?? producers.find((p) => prefixed(p, name2));
+}
+var orUnreported = (v, root) => ({
+  value: "uncertain",
+  causes: [root, ...v.causes],
+  possible: [
+    .../* @__PURE__ */ new Set([...v.possible ?? [v.value], "pending and blocks merge"])
+  ].sort(),
+  settle: []
+});
+function derivedBadge(name2, producers, skipped) {
+  const computed = badge(name2, producers, skipped);
+  const producer = match(producers, name2);
+  const caller = producer?.via === "remote" ? producers.find(
+    (p) => p.via === "remote" && prefixed(p, name2) && p.job.value === "runs"
+  ) : void 0;
+  if (caller)
+    return {
+      value: "uncertain",
+      causes: [
+        { rule: "WN-6", spans: [caller.uses], inputs: [] },
+        ...caller.job.causes
+      ],
+      settle: []
+    };
+  if (producer?.via === "callee")
+    return {
+      ...computed,
+      causes: [computed.causes[0], cause3("RQ-9"), ...computed.causes.slice(1)]
+    };
+  if (producer?.via === "matrix")
+    return orUnreported(
+      computed,
+      cause3("RQ-9", [{ path: "repo.required", value: name2 }])
+    );
+  return computed;
+}
+function badge(name2, producers, skipped) {
+  const pending = (...causes) => ({
+    value: "pending and blocks merge",
+    causes: [...causes, cause3("RQ-8")]
+  });
+  const typed = { path: "repo.required", value: name2 };
+  const exact = producers.filter((p) => p.name === name2 && p.via !== "remote");
+  const cased = producers.filter(
+    (p) => p.via !== "remote" && p.name?.toLowerCase() === name2.toLowerCase()
+  );
+  const matched = exact.length > 0 ? exact : cased.length > 0 ? cased : producers.filter((p) => prefixed(p, name2));
+  const byJob = (ps) => {
+    const jobs2 = /* @__PURE__ */ new Map();
+    for (const p of ps)
+      jobs2.set(p.job.key, [...jobs2.get(p.job.key) ?? [], p]);
+    return [...jobs2.values()];
+  };
+  const jobs = byJob(matched);
+  if (jobs.length === 0) {
+    const unknown = byJob(
+      producers.filter((p) => p.needed !== void 0 && reports(p))
+    ).map((stages) => stages[0]);
+    if (unknown.length === 0) return pending(cause3("RQ-0", [typed]));
+    return {
+      value: "uncertain",
+      causes: [
+        {
+          rule: "WN-4",
+          spans: unknown.flatMap((p) => p.spans?.name ? [p.spans.name] : []),
+          inputs: []
+        },
+        cause3("RQ-0", [typed])
+      ],
+      settle: [...new Set(unknown.map((p) => p.needed))].filter(settleable)
+    };
+  }
+  const live = jobs.map((stages) => stages.filter(reports)).filter((stages) => stages.length > 0);
+  const badges = (live.length > 0 ? live : jobs.slice(0, 1)).map(
+    (stages) => stages.map((p) => producerBadge(p, pending, skipped)).reduce(
+      (a, b) => RANK.indexOf(b.value) < RANK.indexOf(a.value) ? b : a
+    )
+  );
+  const ids = (ps) => ps.flatMap((p) => p.spans ? [p.spans.id] : []);
+  const values = [...new Set(badges.map((b) => b.value))].sort();
+  if (badges.length > 1)
+    return {
+      value: "uncertain",
+      causes: [
+        {
+          rule: "RQ-0",
+          spans: live.flatMap((ps) => ids(ps.slice(0, 1))),
+          inputs: [typed]
+        }
+      ],
+      ...values.length <= 3 && { possible: values },
+      settle: []
+    };
+  const result = badges[0];
+  if (exact.length > 0 || cased.length === 0) return result;
+  return orUnreported(result, {
+    rule: "RQ-0",
+    spans: ids(matched.slice(0, 1)),
+    inputs: [typed]
+  });
+}
+function producerBadge({ job, workflow, spans }, pending, skipped) {
+  if (job.value === "runs")
+    return { value: "passes", causes: [cause3("RQ-4"), ...job.causes] };
+  if (job.value === "fails") {
+    const causes = [cause3("RQ-4"), ...job.causes];
+    if (spans?.continueOnError)
+      return {
+        value: "uncertain",
+        causes: [
+          { rule: "JG-11", spans: [spans.continueOnError], inputs: [] },
+          ...causes
+        ],
+        possible: ["fails and blocks merge", "passes"],
+        settle: []
+      };
+    return { value: "fails and blocks merge", causes };
+  }
+  if (job.value === "skipped")
+    return job.causes[0]?.rule === "JG-3" ? { value: "passes", causes: [cause3("RQ-2"), ...job.causes] } : { value: "may not block", causes: [cause3("RQ-3"), ...job.causes] };
+  if (job.value === "no-run") {
+    if (workflow.value === "skipped")
+      return pending(...skipped(workflow), ...job.causes);
+    if (workflow.value === "pending") return pending(...job.causes);
+    if (workflow.value === "fails")
+      return {
+        value: "fails and blocks merge",
+        causes: [cause3("RQ-4"), ...job.causes]
+      };
+  }
+  return {
+    value: "uncertain",
+    causes: job.causes,
+    settle: job.settle ?? [],
+    ...job.hints && { hints: job.hints }
+  };
+}
+
+// src/core/names.ts
+var isMatrix = (job) => job.strategy !== void 0 && (!isMapping(job.strategy) || job.strategy.find("matrix") !== void 0);
+function namesOf(file, files, nameOf2) {
+  const called2 = new Map(calls(file).map((c) => [c.job.id.value, c]));
+  return file.jobs.flatMap((job) => {
+    const id = job.id.value;
+    const caller = nameOf2(job);
+    const call = called2.get(id);
+    if (!call)
+      return [{ id, ...caller, ...isMatrix(job) && { via: "matrix" } }];
+    if (call.path === void 0)
+      return [{ id, ...caller, via: "remote", uses: call.span }];
+    const callee = files.get(calleeKey(call.path) ?? "");
+    return (callee?.jobs ?? []).map((inner) => {
+      const own = nameOf2(inner);
+      const needed = caller.needed ?? own.needed;
+      return {
+        id: `${id}/${inner.id.value}`,
+        name: caller.name === void 0 || own.name === void 0 ? void 0 : `${caller.name} / ${own.name}`,
+        ...needed !== void 0 && { needed },
+        via: isMatrix(inner) ? "matrix" : "callee"
+      };
+    });
+  });
+}
+
 // src/core/baseline.ts
 var PLATFORM_BASELINE = [
   "Actions are enabled for the repo, org and enterprise, and the GitHub workflow isn't disabled (PL-1, PL-2).",
@@ -16500,6 +16776,12 @@ var rows = [
     text: "The parser accepts a `stacked` activity type for `pull_request`, but GitHub's docs don't list it: valid syntax with undocumented meaning.",
     url: "https://github.com/actions/languageservices/blob/4043eda/workflow-parser/src/workflow-v1.0.json",
     confidence: "Med"
+  },
+  {
+    id: "EV-6",
+    text: "`merge_group` has one activity type, `checks_requested`: a merge queue asks for its required checks on the merge group's commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High"
   },
   {
     id: "BR-1",
@@ -16548,6 +16830,12 @@ var rows = [
     text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
     confidence: "Med"
+  },
+  {
+    id: "BR-10",
+    text: "For `merge_group`, `branches` and `branches-ignore` match the merge group's target branch. `merge_group` has no path filters.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High"
   },
   {
     id: "GL-1",
@@ -16602,6 +16890,12 @@ var rows = [
     text: "With a path filter, if no files changed the GitHub workflow doesn't run.",
     url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
     confidence: "High"
+  },
+  {
+    id: "PA-4",
+    text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "Med"
   },
   {
     id: "PA-5",
@@ -16862,6 +17156,60 @@ var rows = [
     confidence: "Low"
   },
   {
+    id: "RQ-0",
+    text: `A workflow job's required-check name is its job name: \`name:\` if set and non-empty, otherwise the job id, with any expression in it evaluated. "Required status checks do not take workflow, matrix, or event trigger types into account." Two jobs with one name give "ambiguous status check results", and GitHub's docs don't say whether matching a name ignores case.`,
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-1",
+    text: 'A GitHub workflow skipped by a path filter, a branch filter or a commit-message skip creates no check runs: its required checks stay Pending ("Waiting for status to be reported") and block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-2",
+    text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-3",
+    text: 'A job skipped because a `needs` dependency failed "may not block merging". The fix is `if: always()` (or `!cancelled()`) on a required aggregator job.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-4",
+    text: "A required check passes with a `success`, `skipped` or `neutral` conclusion on the latest head SHA.",
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging",
+    confidence: "High"
+  },
+  {
+    id: "RQ-6",
+    text: "With a merge queue, a required check must also be reported for the merge group: a GitHub workflow without a `merge_group` trigger never reports it there, so the merge waits and fails.",
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-8",
+    text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-9",
+    text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "Med"
+  },
+  {
+    id: "RQ-10",
+    text: `Strict mode ("Require branches to be up to date before merging"): a pull request behind its base can't merge even with every check green, and bringing it up to date creates a new head SHA whose required checks must pass again.`,
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging",
+    confidence: "High"
+  },
+  {
     id: "WN-1",
     text: "Assumption: this job fails.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
@@ -16914,6 +17262,7 @@ function utf8Length(text) {
   return bytes;
 }
 var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
+var isJobKey = (key) => key.split(" \u203A ").length === 2 && !isCheck(key);
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
@@ -16996,7 +17345,7 @@ function simulate(files, input) {
   };
 }
 function unmatched(scenario, verdicts) {
-  const jobs = verdicts.map((v) => v.key.split(" \u203A ")).filter((parts) => parts.length === 2);
+  const jobs = verdicts.filter((v) => isJobKey(v.key)).map((v) => v.key.split(" \u203A "));
   return Object.keys(scenario.assume ?? {}).flatMap((key) => {
     const [file, id] = key.split(" \u203A ");
     if (jobs.some(([f, j]) => f === file && j === id)) return [];
@@ -17008,40 +17357,100 @@ function evaluate2(parsed, scenario) {
   const { event, repo } = scenario;
   const files = new Map(parsed.map((p) => [p.key, p]));
   const verdicts = [];
+  const producers = [];
+  const queue = repo.mergeQueue && event.name !== "push" ? {
+    ...scenario,
+    event: { ...event, name: "merge_group", type: "checks_requested" }
+  } : void 0;
+  const queued = [];
+  const pushed = event.name !== "push" && event.actor !== "fork" ? { ...scenario, event: { ...event, name: "push" } } : void 0;
+  const pa4 = {
+    rule: "PA-4",
+    spans: [],
+    inputs: [{ path: "event.changed", value: event.changed }]
+  };
   for (const { key, bytes, ...file } of parsed) {
+    if (file.diagnostics.length > 0 && !calleeOnly(file)) {
+      const unread = unreadable(key, file, scenario);
+      producers.push(...unread);
+      queued.push(...unread);
+    }
     if (file.diagnostics.length > 0 || calleeOnly(file)) continue;
-    const workflow = bytes > MAX_BYTES ? {
-      key,
-      value: "skipped",
-      causes: [{ rule: "PL-9", spans: [], inputs: [] }]
-    } : {
-      key,
-      ...called(
-        policy(
-          awaiting(trigger(file, event, repo.defaultBranch), event),
-          scenario
-        ),
-        file,
-        files
-      )
+    const run = (s, merging = false) => {
+      if (bytes > MAX_BYTES)
+        return {
+          key,
+          value: "skipped",
+          causes: [{ rule: "PL-9", spans: [], inputs: [] }]
+        };
+      const triggered = trigger(file, s.event, repo.defaultBranch);
+      return {
+        key,
+        ...called(
+          merging ? triggered : policy(awaiting(triggered, s.event), s),
+          file,
+          files
+        )
+      };
     };
-    const jobs = jobVerdicts(`${key} \u203A `, file, workflow, scenario);
+    const workflow = run(scenario);
+    const callees = calls(file).flatMap(({ job, path }) => {
+      const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
+      return callee ? [{ job, callee }] : [];
+    });
+    const jobsWithCallees = (workflow2, scenario2) => {
+      const jobs2 = jobVerdicts(`${key} \u203A `, file, workflow2, scenario2);
+      for (const { job, callee } of callees) {
+        const caller = jobs2.find((v) => v.key === `${key} \u203A ${job.id.value}`);
+        jobs2.push(
+          ...jobVerdicts(
+            `${key} \u203A ${job.id.value}/`,
+            callee,
+            caller,
+            scenario2,
+            inputsOf(job, callee)
+          )
+        );
+      }
+      return jobs2;
+    };
+    const producing = (s, jobs2, workflow2, note = []) => (
+      // Each `name:`, a caller's too, is evaluated against the Scenario (WN-4).
+      namesOf(file, files, (job) => nameOf(job, s)).map((named) => {
+        const v = jobs2.find((v2) => v2.key === `${key} \u203A ${named.id}`);
+        return {
+          ...named,
+          job: { ...v, causes: [...note, ...v.causes] },
+          workflow: workflow2,
+          spans: file.jobSpans.get(named.id)
+        };
+      })
+    );
+    const jobs = jobsWithCallees(workflow, scenario);
+    producers.push(...producing(scenario, jobs, workflow));
+    if (pushed) {
+      const w = run(pushed);
+      producers.push(
+        ...producing(pushed, jobsWithCallees(w, pushed), w, [pa4])
+      );
+    }
+    if (queue) {
+      const w = run(queue, true);
+      queued.push(...producing(queue, jobsWithCallees(w, queue), w));
+    }
     verdicts.push(
       workflow,
       ...jobs,
-      ...accessVerdicts(`${key} \u203A `, file, scenario)
+      ...accessVerdicts(`${key} \u203A `, file, scenario),
+      ...callees.flatMap(
+        ({ job, callee }) => accessVerdicts(`${key} \u203A ${job.id.value}/`, callee, scenario, {
+          parsed: file,
+          job
+        })
+      )
     );
-    for (const { job, path } of calls(file)) {
-      const callee = path === void 0 ? void 0 : files.get(calleeKey(path));
-      if (!callee) continue;
-      const prefix = `${key} \u203A ${job.id.value}/`;
-      const caller = jobs.find((v) => v.key === `${key} \u203A ${job.id.value}`);
-      verdicts.push(
-        ...jobVerdicts(prefix, callee, caller, scenario, inputsOf(job, callee)),
-        ...accessVerdicts(prefix, callee, scenario, { parsed: file, job })
-      );
-    }
   }
+  verdicts.push(...checkVerdicts(producers, scenario, queue && queued));
   return verdicts;
 }
 function called(verdict, file, files) {
@@ -17093,10 +17502,10 @@ function policy(verdict, { event, repo }) {
   const input = (path, value) => ({ path, value });
   const visibility = input("repo.visibility", repo.visibility);
   const date = input("repo.date", repo.date);
-  const ran = event.actor === "fork" ? [cause3("FK-6")] : [];
+  const ran = event.actor === "fork" ? [cause4("FK-6")] : [];
   const runs = (rule, ...inputs) => ({
     ...verdict,
-    causes: [...verdict.causes, ...ran, cause3(rule, inputs)]
+    causes: [...verdict.causes, ...ran, cause4(rule, inputs)]
   });
   if (repo.visibility !== "public") return runs("PRT-2", visibility);
   if (repo.date < ENFORCED) return runs("PRT-3", date);
@@ -17105,8 +17514,8 @@ function policy(verdict, { event, repo }) {
   const failed = (...root) => {
     const causes = [
       ...root,
-      cause3("PRT-5"),
-      cause3("PL-10"),
+      cause4("PRT-5"),
+      cause4("PL-10"),
       ...verdict.causes,
       ...ran
     ];
@@ -17117,16 +17526,16 @@ function policy(verdict, { event, repo }) {
     };
   };
   if (repo.eventPolicy === "blocks")
-    return failed(cause3("PRT-1", [policyInput]));
+    return failed(cause4("PRT-1", [policyInput]));
   if (repo.predates)
     return failed(
-      cause3("PRT-2", [visibility, policyInput]),
-      cause3("PRT-3", [date])
+      cause4("PRT-2", [visibility, policyInput]),
+      cause4("PRT-3", [date])
     );
   return {
     value: "uncertain",
     causes: [
-      cause3("PRT-4", [input("repo.predates", false), policyInput, date]),
+      cause4("PRT-4", [input("repo.predates", false), policyInput, date]),
       ...verdict.causes,
       ...ran
     ],
@@ -17141,7 +17550,7 @@ function policy(verdict, { event, repo }) {
     ]
   };
 }
-var cause3 = (rule, inputs = []) => ({
+var cause4 = (rule, inputs = []) => ({
   rule,
   spans: [],
   inputs
@@ -17157,7 +17566,7 @@ var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
   if (argv.length === 1 && argv[0] === "--version") {
-    process.stdout.write(`whynorun ${"0.1.0"}
+    process.stdout.write(`whynorun ${"0.2.0"}
 `);
     return 0;
   }
@@ -17245,7 +17654,7 @@ function show(args, stdin) {
   ].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, text]) => text);
   process.stdout.write(
     [
-      `whynorun ${"0.1.0"}`,
+      `whynorun ${"0.2.0"}`,
       "",
       "What WhyNoRun always assumes:",
       ...PLATFORM_BASELINE.map((item) => `- ${item}`),

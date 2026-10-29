@@ -22,6 +22,7 @@ import type { FunctionDefinition } from "@actions/expressions/funcs/info";
 import { truthy } from "@actions/expressions/result";
 import {
   NoOperationTraceWriter,
+  isString,
   parseWorkflow,
 } from "@actions/workflow-parser";
 import { convertConcurrency } from "@actions/workflow-parser/model/converter/concurrency";
@@ -99,6 +100,8 @@ export interface Permissions {
 /** A job's positions; a job reached through an alias points every field at the alias. */
 export interface JobSpans {
   id: Span;
+  /** The `name:` value. */
+  name?: Span;
   if?: Span;
   needs?: Span;
   /** Only when job-level `continue-on-error` is literally `true`. */
@@ -128,6 +131,13 @@ export interface Checkout {
   /** Only when step-level `continue-on-error` is literally `true`. */
   continueOnError?: Span;
 }
+
+/**
+ * A job's required-check name (RQ-0): its `name:` if set and non-empty, else its id, as the
+ * parser's `jobName()` gives it. Undefined when `name:` is an expression.
+ */
+export const checkName = (job: WorkflowJob): string | undefined =>
+  job.name && isString(job.name) ? job.name.value : undefined;
 
 const ALIAS_BOMB = "Too many YAML aliases: WhyNoRun stopped reading this file";
 
@@ -319,6 +329,7 @@ function indexOn(
     const steps = resolve(doc, field("steps")?.pair.value);
     jobSpans.set(id, {
       id: span(item.key as Node),
+      name: field("name")?.span,
       if: field("if")?.span,
       needs: field("needs")?.span,
       continueOnError:

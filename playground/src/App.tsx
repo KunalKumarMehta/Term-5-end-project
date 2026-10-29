@@ -10,7 +10,9 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  isJobKey,
   isLoaded,
+  producedChecks,
   setScenarioValue,
   settleValue,
   simulate,
@@ -37,6 +39,7 @@ import {
   type CauseLinks,
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
+import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { PasteDialog } from "./PasteDialog";
 import { RepoFacts, sourceOf, type Fact } from "./RepoFacts";
 import { fromDropped, fromPicked, type Upload } from "./upload";
@@ -95,9 +98,6 @@ function diagnosticNews(
   });
 }
 
-/** A job key is `<file> › <jobId>`. */
-const isJob = (key: string) => key.split(" › ").length === 2;
-
 /** A nested payload's leaves as `[path segments, value]`; a list is one leaf. */
 function leaves(node: unknown, at: string[] = []): [string[], unknown][] {
   return typeof node === "object" && node !== null && !Array.isArray(node)
@@ -134,8 +134,8 @@ export function App() {
   // An owner/repo the check refused, shown while the Scenario keeps its last value (addendum B).
   const [repoDraft, setRepoDraft] = useState<string>();
   const [diffOnly, setDiffOnly] = useState(false);
-  // The results tab (#9 §1); Merge readiness and Concurrency arrive with their tickets.
-  const [tab, setTab] = useState<"access" | "all">("all");
+  // The results tab (#9 §1); Concurrency arrives with its ticket.
+  const [tab, setTab] = useState<"access" | "checks" | "all">("all");
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
   const [touched, setTouched] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>();
@@ -587,7 +587,7 @@ export function App() {
   );
   // The jobs the form's Scenario could assume to fail.
   const unassumed = (runs[form] ?? [])
-    .filter((v) => isJob(v.key) && !Object.hasOwn(assume, v.key))
+    .filter((v) => isJobKey(v.key) && !Object.hasOwn(assume, v.key))
     .map((v) => v.key);
 
   // Addendum C: a Scenario is blocked by a missing date, else by being unsupported.
@@ -618,6 +618,33 @@ export function App() {
     ? "No Verdicts: every file has Diagnostics (see above)."
     : `No Verdicts: every file${diagnosed.size > 0 ? " has Diagnostics (see above) or" : ""} is only a called workflow (on: workflow_call), and its jobs appear under the jobs that call it.`;
 
+  // #9 §4: the form Scenario's required checks, in Repo facts and atop Merge readiness.
+  const requiredChecks = (
+    <RequiredChecks
+      required={scenario.repo.required ?? []}
+      strict={scenario.repo.strict ?? false}
+      mergeQueue={scenario.repo.mergeQueue ?? false}
+      onChange={(field, value) => setInput(["repo", field], value)}
+      announce={announce}
+      onRequireProduced={() => {
+        // Ordinary Repo facts: the button stores nothing about itself (#9 §4).
+        const required = scenario.repo.required ?? [];
+        const { names, left } = producedChecks(files, scenario);
+        const added = names.filter((n) => !required.includes(n));
+        setInput(["repo", "required"], [...required, ...added]);
+        setToast({ id: Date.now(), node: producedNews(added.length, left) });
+      }}
+    />
+  );
+  const mergeReadiness = (
+    <MergeReadiness
+      columns={columns}
+      control={requiredChecks}
+      open={open}
+      onOpen={openExplanation}
+    />
+  );
+
   let results: ReactNode;
   if (files.length === 0)
     results = (
@@ -628,7 +655,9 @@ export function App() {
     );
   else if (compare)
     results =
-      tab === "access" ? (
+      tab === "checks" ? (
+        mergeReadiness
+      ) : tab === "access" ? (
         <Access
           columns={columns}
           open={open}
@@ -658,6 +687,8 @@ export function App() {
   else if (verdicts === undefined) results = null;
   else if (unsupported)
     results = <UnsupportedPanel verdict={unsupported} {...linksFor(0)} />;
+  // With no required checks there may be no Verdicts, and the control must stay (addendum F).
+  else if (tab === "checks") results = mergeReadiness;
   else if (verdicts.length === 0) results = <p>{noVerdicts}</p>;
   else if (tab === "access")
     results = (
@@ -677,7 +708,7 @@ export function App() {
           <li
             key={v.key}
             className={
-              isJob(v.key) ? "job" : isAccess(v.key) ? "access" : undefined
+              isJobKey(v.key) ? "job" : isAccess(v.key) ? "access" : undefined
             }
           >
             <button
@@ -997,6 +1028,7 @@ export function App() {
               </button>
             </div>
             <RepoFacts scenario={scenario} onChange={setRepoFact} />
+            {requiredChecks}
             <label htmlFor="repo-repository">
               <code>owner/repo</code>{" "}
               <span className="optional">(optional)</span>
@@ -1039,7 +1071,7 @@ export function App() {
               <ul className="assumptions">
                 {Object.entries(assume).map(([key, value]) => (
                   <li key={key}>
-                    {isJob(key) ? (
+                    {isJobKey(key) ? (
                       <>
                         job <code>{key}</code> {value}
                       </>
@@ -1088,6 +1120,7 @@ export function App() {
             {(
               [
                 ["access", "Access"],
+                ["checks", "Merge readiness"],
                 ["all", "All Verdicts"],
               ] as const
             ).map(([id, name]) => (

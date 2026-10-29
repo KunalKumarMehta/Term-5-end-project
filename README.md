@@ -2,7 +2,7 @@
 
 Know what your GitHub Actions workflows will do before you push.
 
-**Status:** 0.1.0: flow 1 works. End-term project, SST MERN 2029 batch.
+**Status:** 0.2.0: flows 1–2 work. End-term project, SST MERN 2029 batch.
 
 [Playground](https://kunalkumarmehta.github.io/whynorun/) · [npm](https://www.npmjs.com/package/whynorun) · GitHub Action (planned for 1.0.0) · Demo video playlist (planned)
 
@@ -30,7 +30,9 @@ Pick a Scenario (a push, a same-repo or fork pull request, `pull_request_target`
 
 ### Merge-readiness check (core flow 2)
 
-Planned: one badge per required check, such as Pending and blocks merge.
+Type your branch protection's required checks (or click Require every produced check) and the Merge readiness tab gives each one a Merge-readiness badge: Passes, Pending and blocks merge, Fails and blocks merge, May not block, or Uncertain. A check is named after the job that reports it, `name:` or the job id (RQ-0). A GitHub workflow skipped by a path, branch or commit-message filter reports nothing, so its required checks stay Pending and block merge (RQ-1): GitHub's own advice is to avoid requiring workflows that can be skipped (RQ-8). A job skipped by its own `if:` passes (RQ-2), one skipped because a `needs` dependency failed may not block (RQ-3), and a job that fails, or the "job X fails" Assumption, fails and blocks merge (RQ-4). It also counts the push of a same-repo or Dependabot pull request's head branch (PA-4), the merge queue's `merge_group` run (RQ-6), and reusable workflows' `<caller> / <callee>` check names (RQ-9). With Compare on, ◆ marks each check whose badge differs, and its Explanation names the YAML line that decided it. Merge readiness is in the playground for now; the CLI's `--flow checks` arrives with `whynorun test` and `show --from`.
+
+![Merge-readiness check (core flow 2): the example's Fork PR and Member PR side by side. With only docs/README.md changed, the Member PR's check › build and check › test are Pending and blocks merge, against Passes for the Fork PR, rooted in RQ-1 and the paths filter on ci.yml line 5.](docs/images/merge-readiness.png)
 
 ### Concurrency outcome (core flow 3)
 

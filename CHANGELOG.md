@@ -11,6 +11,30 @@ A released rule ID never changes meaning. A release that changes any pinned
 affected rule under `### Affected rules` as `- RULE-ID: what changed`
 ([ADR 0002](docs/adr/0002-test-files-embed-the-core-scenario.md)).
 
+## [0.2.0] - 2026-10-29
+
+Core flow 2, the merge-readiness check, works end to end.
+
+### Added
+
+- The merge-readiness check (core flow 2): each required check gets a Merge-readiness badge (`check › <name>`): Passes, Pending and blocks merge, Fails and blocks merge, May not block or Uncertain, worked out from the job whose check name it is (RQ-0).
+- A GitHub workflow skipped by a path, branch or commit-message filter leaves its required checks Pending and blocks merge (RQ-1), quoting GitHub's advice (RQ-8). A job skipped by its own `if:` passes (RQ-2), one skipped because a `needs` dependency failed may not block (RQ-3), and a failing job or the "job X fails" Assumption fails and blocks merge (RQ-4). A fork run awaiting approval leaves its checks Pending and blocks merge (FK-4). A blocked `pull_request_target` run fails and blocks merge, noting that its check conclusion is undocumented (PRT-5).
+- Uncertain checks: duplicate or case-only name matches and a producer whose file has a Diagnostic (RQ-0), a job `name:` the Scenario can't evaluate (WN-4), a failing producer with job-level `continue-on-error` (JG-11), a producer whose own Verdict is Uncertain, and names matched only through a matrix job (RQ-9) or a remote reusable caller (WN-6).
+- Same-repo and Dependabot pull requests also count checks from the push of their head branch, reusing the pull request's changed files (PA-4).
+- The merge queue: with it on, checks must also pass on a synthesised `merge_group` run (EV-6, BR-10), and a merge group no GitHub workflow runs for leaves them Pending (RQ-6).
+- Local reusable workflows' checks are named `<caller job name> / <callee job name>` (RQ-9). Strict mode notes that a pull request behind its base must pass again once brought up to date (RQ-10).
+- The playground's Merge readiness tab, with required checks as chips in Repo facts and atop the tab, strict or loose, the merge-queue toggle, "Require every produced check", and ◆ under Compare. All Verdicts groups the checks under Required checks.
+- Rules RQ-0, RQ-1, RQ-2, RQ-3, RQ-4, RQ-6, RQ-8, RQ-9, RQ-10, EV-6, BR-10 and PA-4.
+
+### Fixed
+
+- A job skipped because a `needs` dependency failed is put down to that dependency even when its `if:` reads the dependency's outputs: they are now read as a success would set them, not left empty.
+
+### Affected rules
+
+- JG-3: a job whose `if:` reads a failed need's outputs, such as the example's `ci.yml › e2e` with the "`ci.yml › changes` fails" Assumption, is no longer rooted in its own `if:`; its root now follows the failed need, here WN-1.
+- WN-1: now the root of a job skipped by a failed need even when its `if:` reads that need's outputs (was JG-3).
+
 ## [0.1.0] - 2026-10-29
 
 The first release: core flow 1, the access report, works end to end.
