@@ -422,7 +422,10 @@ export interface TestToWrite {
   label: string;
   scenario: Scenario;
   pinned: Verdict[];
-  /** Loaded pins keep their own field list, and one with no Verdict is written as loaded (#12 §9). */
+  /**
+   * Loaded pins are written as loaded, their own field list and values (#12 §9): Save accepts
+   * no change, so only Accept all ({@link updatedPins}) rewrites a pinned value (story 107).
+   */
   loaded?: Record<string, Pin>;
 }
 
@@ -444,9 +447,8 @@ export function writeTestFile(tests: TestToWrite[], opened?: TestFile): string {
       ) as Scenario,
       pins: Object.fromEntries(
         [...keys].map((key) => {
-          const v = verdicts.get(key);
           const pin = Object.hasOwn(loaded, key) ? loaded[key] : undefined;
-          return [key, pin ? (v ? updatePin(pin, v) : pin) : pinOf(v!)];
+          return [key, pin ?? pinOf(verdicts.get(key)!)];
         }),
       ),
     };

@@ -22,6 +22,8 @@ const opened = (page: Page) =>
   results(page).getByRole("region", { name: "Opened Test file" });
 const saveDialog = (page: Page) =>
   page.getByRole("dialog", { name: "Save as Behaviour test" });
+const acceptAll = (page: Page) =>
+  results(page).getByRole("button", { name: "Accept all changes" });
 const confirm = (page: Page) => page.getByRole("alertdialog");
 const toast = (page: Page) => page.locator("#toasts");
 const ci = readFileSync("playground/src/example/ci.yml", "utf8");
@@ -241,6 +243,11 @@ test("a loaded pin whose root the Maintainer deleted stays loose when saved", as
   );
   await expect(trayStatus(page)).toHaveText("2 would fail");
 
+  // Save alone accepts no change: A is written as pinned (story 107).
+  const unaccepted = yaml((await save(page)).text);
+  expect(unaccepted.tests[0]!.pins).toEqual(demo.tests[0]!.pins);
+
+  await acceptAll(page).click();
   const saved = yaml((await save(page)).text);
   const a = saved.tests[0]!.pins["ci.yml › concurrency.A"]!;
   expect(a.value).toBe("runs");
@@ -342,8 +349,6 @@ tests:
   );
 });
 
-const acceptAll = (page: Page) =>
-  results(page).getByRole("button", { name: "Accept all changes" });
 const blockedBy = (page: Page) => results(page).locator(".blocked-by");
 
 test("with the demo's fork-pr.test.yml open, after editing ci.yml so A isn't cancelled, Accept all rewrites the pins", async ({
