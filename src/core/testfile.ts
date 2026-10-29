@@ -297,23 +297,79 @@ function pinOf(verdict: Verdict): Pin {
   return pin;
 }
 
+const OPTIONAL = new Set<keyof Pin>(["possible", "group", "continuing"]);
+
+/**
+ * `test --update`'s rule within one loaded pin (#10 §6): it keeps its own field list. A field
+ * that matches stays as written; a changed one is rewritten, and `possible`, `group` and
+ * `continuing` are dropped when the Verdict lacks them. They are added only when the pin moves
+ * into a shape where they first apply (decided → Uncertain, `no-run` → `runs`), so a key the
+ * Maintainer deleted is never re-added.
+ */
+export function updatePin(pin: Pin, verdict: Verdict): Pin {
+  const was = pin.value;
+  const next: Pin = {};
+  for (const field of FIELDS) {
+    const now = current(verdict, field);
+    if (!Object.hasOwn(pin, field)) {
+      const applies =
+        field === "possible"
+          ? was !== undefined &&
+            was !== "uncertain" &&
+            verdict.value === "uncertain"
+          : was === "no-run" && verdict.value !== "no-run";
+      if (OPTIONAL.has(field) && applies && now !== undefined)
+        Object.assign(next, { [field]: now });
+    } else if (same(field, pin[field], now))
+      Object.assign(next, { [field]: pin[field] });
+    else if (now !== undefined || !OPTIONAL.has(field))
+      Object.assign(next, { [field]: now ?? null });
+  }
+  return next;
+}
+
+/** A test to write: its pinned Verdicts, and the pins it was loaded with, if any. */
+export interface TestToWrite {
+  label: string;
+  scenario: Scenario;
+  pinned: Verdict[];
+  /** Loaded pins keep their own field list, and one with no Verdict is written as loaded (#12 §9). */
+  loaded?: Record<string, Pin>;
+}
+
 /**
  * Writes one Test file: `version: 1`, then one `{ label, scenario, pins }` entry per test,
  * each Scenario with every default written out so a later release can't change it (#10 §1–3).
+ * Over an `opened` file, entries replace its tests by label and the others are kept as they
+ * were parsed, in their order (#12 §9).
  */
-export function writeTestFile(
-  tests: { label: string; scenario: Scenario; pinned: Verdict[] }[],
-): string {
-  const file: TestFile = {
-    version: 1,
-    tests: tests.map(({ label, scenario, pinned }) => ({
+export function writeTestFile(tests: TestToWrite[], opened?: TestFile): string {
+  const entries = tests.map(({ label, scenario, pinned, loaded = {} }) => {
+    const verdicts = new Map(pinned.map((v) => [v.key, v]));
+    const keys = new Set([...Object.keys(loaded), ...verdicts.keys()]);
+    return {
       label,
       // A plain copy: withDefaults keeps the Maintainer's maps null-prototype.
       scenario: JSON.parse(
         JSON.stringify(withDefaults(scenario).scenario),
       ) as Scenario,
-      pins: Object.fromEntries(pinned.map((v) => [v.key, pinOf(v)])),
-    })) as TestFile["tests"],
+      pins: Object.fromEntries(
+        [...keys].map((key) => {
+          const v = verdicts.get(key);
+          const pin = Object.hasOwn(loaded, key) ? loaded[key] : undefined;
+          return [key, pin ? (v ? updatePin(pin, v) : pin) : pinOf(v!)];
+        }),
+      ),
+    };
+  });
+  const byLabel = new Map(entries.map((e) => [e.label, e]));
+  const kept = (opened?.tests ?? []).map((t) => byLabel.get(t.label) ?? t);
+  const file: TestFile = {
+    version: 1,
+    tests: [
+      ...kept,
+      ...entries.filter((e) => !kept.includes(e)),
+    ] as TestFile["tests"],
   };
   // The YAML 1.2 core schema the loader reads with, so a string "true" stays quoted (#10 §1).
   return `${SCHEMA_LINE}\n${stringify(file, { version: "1.2", schema: "core", lineWidth: 0 })}`;

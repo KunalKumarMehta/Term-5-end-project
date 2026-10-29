@@ -56,12 +56,15 @@ export {
   compareTest,
   findingText,
   parseTestFile,
+  shown,
+  updatePin,
   writeTestFile,
   type Change,
   type Finding,
   type Pin,
   type Test,
   type TestFile,
+  type TestToWrite,
 } from "./testfile";
 
 export interface WorkflowFile {
