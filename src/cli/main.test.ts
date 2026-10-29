@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { PLATFORM_BASELINE, simulate, type Scenario } from "../core";
 import { main } from "./main";
 
@@ -21,8 +21,15 @@ const { version } = JSON.parse(
 const fixture = fileURLToPath(new URL("fixtures/repo", import.meta.url));
 const cwd = process.cwd();
 
+// This suite runs in GitHub Actions too: only the tests that want CI output get it.
+beforeEach(() => {
+  vi.stubEnv("GITHUB_ACTIONS", "");
+  vi.stubEnv("GITHUB_STEP_SUMMARY", "");
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   process.chdir(cwd);
 });
 
@@ -825,6 +832,179 @@ test("test without .github/workflows/ exits 2 and names the folder", () => {
   const { code, stderr } = run("test", "x.test.yml");
   expect(code).toBe(2);
   expect(stderr).toContain(".github/workflows/");
+});
+
+// A fork's PR on the tests fixture: release is skipped at its if: (JG-3, line 12), and
+// secrets go empty (FK-2, which has no YAML span).
+const forkPrPins = `version: 1
+tests:
+  - label: Fork PR
+    scenario:
+      event: { name: pull_request, actor: fork, ref: feature, base: main }
+      repo: { date: 2026-12-03 }
+    pins:
+      ci.yml › release: { value: runs }
+      ci.yml › tset: { value: runs }
+      ci.yml › test › secrets: { value: available, root: FK-0 }
+      ci.yml › test: { value: runs }
+`;
+
+/** Runs `whynorun test` as GitHub Actions does, with a step summary that already has a line. */
+function inActions(...argv: string[]) {
+  const summary = join(process.cwd(), "summary.md");
+  writeFileSync(summary, "earlier step\n");
+  vi.stubEnv("GITHUB_ACTIONS", "true");
+  vi.stubEnv("GITHUB_STEP_SUMMARY", summary);
+  const result = run("test", ...argv);
+  return { ...result, summary: readFileSync(summary, "utf8") };
+}
+
+test("with GITHUB_ACTIONS=true, test annotates the new root's YAML line, or the pin's line when the root has no span, and appends a diff table to the step summary", () => {
+  testRepo(testsFixture("changed"), {
+    ".github/whynorun/fork-pr.test.yml": forkPrPins,
+  });
+  const { code, stderr, summary } = inActions();
+  expect(code).toBe(1);
+  expect(stderr).toMatchInlineSnapshot(`
+    "::error file=.github/workflows/ci.yml,line=12::Fork PR (.github/whynorun/fork-pr.test.yml): ci.yml › release: runs → skipped
+    ::error file=.github/whynorun/fork-pr.test.yml,line=9::Fork PR (.github/whynorun/fork-pr.test.yml): pinned subject not found: ci.yml › tset (candidates: ci.yml › release, ci.yml › test)
+    ::error file=.github/whynorun/fork-pr.test.yml,line=10::Fork PR (.github/whynorun/fork-pr.test.yml): ci.yml › test › secrets: available → empty (root FK-0 → FK-2)
+    "
+  `);
+  expect(summary.replaceAll(version, "<version>")).toMatchInlineSnapshot(`
+    "earlier step
+    ### whynorun <version>
+
+    | Test | Subject | Pinned | Now |
+    | --- | --- | --- | --- |
+    | .github/whynorun/fork-pr.test.yml: Fork PR | ci.yml › release | runs | skipped |
+    | .github/whynorun/fork-pr.test.yml: Fork PR | ci.yml › tset | — | pinned subject not found (candidates: ci.yml › release, ci.yml › test) |
+    | .github/whynorun/fork-pr.test.yml: Fork PR | ci.yml › test › secrets | available; root FK-0 | empty; root FK-2 |
+    "
+  `);
+});
+
+test("test --json prints exactly one JSON document on stdout, starting with format 1 and the version, with the annotations on stderr", () => {
+  testRepo(testsFixture("changed"), {
+    ".github/whynorun/fork-pr.test.yml": forkPrPins,
+  });
+  const { code, stdout, stderr } = inActions("--json");
+  expect(code).toBe(1);
+  expect(stdout).toMatch(/^\{\n {2}"format": 1,\n {2}"version": "[^"]+",\n/);
+  expect(JSON.parse(stdout)).toEqual({
+    format: 1,
+    version,
+    diagnostics: [],
+    tests: [
+      {
+        file: ".github/whynorun/fork-pr.test.yml",
+        label: "Fork PR",
+        findings: [
+          {
+            status: "changed",
+            key: "ci.yml › release",
+            value: "skipped",
+            changes: [{ field: "value", pinned: "runs", now: "skipped" }],
+          },
+          {
+            status: "pinned subject not found",
+            key: "ci.yml › tset",
+            candidates: ["ci.yml › release", "ci.yml › test"],
+          },
+          {
+            status: "changed",
+            key: "ci.yml › test › secrets",
+            value: "empty",
+            changes: [
+              { field: "value", pinned: "available", now: "empty" },
+              { field: "root", pinned: "FK-0", now: "FK-2" },
+            ],
+          },
+          { status: "match", key: "ci.yml › test" },
+        ],
+        note: null,
+      },
+    ],
+  });
+  expect(stderr.match(/^::error /gm)).toHaveLength(3);
+});
+
+test("test --json outside GitHub Actions prints no annotations, and a pin pinned as absent stays null", () => {
+  process.chdir(testsFixture("pass"));
+  const { code, stdout, stderr } = run("test", "--json");
+  expect(code).toBe(0);
+  expect(stderr).toBe("");
+  const doc = JSON.parse(stdout) as { tests: { findings: unknown[] }[] };
+  expect(doc.tests[0]!.findings).toEqual([
+    { status: "match", key: "ci.yml" },
+    { status: "match", key: "ci.yml › test" },
+    { status: "match", key: "ci.yml › release" },
+    { status: "match", key: "ci.yml › test › secrets" },
+  ]);
+});
+
+test("a failing pin in a pull_request_target Scenario adds the DB-4 note to its text, annotations, step summary and JSON", () => {
+  testRepo(testsFixture("pass"), {
+    ".github/whynorun/target.test.yml": `version: 1
+tests:
+  - label: Fork target
+    scenario:
+      event: { name: pull_request_target, actor: fork, ref: feature, base: main }
+      repo: { date: 2026-12-03 }
+    pins:
+      ci.yml › test: { value: runs }
+`,
+  });
+  const note = "this Verdict describes behaviour after merge (DB-4)";
+  const text = inActions();
+  expect(text.code).toBe(1);
+  expect(lastBlock(text.stdout)).toBe(
+    [
+      ".github/whynorun/target.test.yml: Fork target",
+      "ci.yml › test: runs → no-run",
+      `note: ${note}`,
+      "",
+    ].join("\n"),
+  );
+  expect(text.stderr).toBe(
+    `::error file=.github/workflows/ci.yml,line=2::Fork target (.github/whynorun/target.test.yml): ci.yml › test: runs → no-run; ${note}\n`,
+  );
+  expect(text.summary).toContain(
+    `\n- .github/whynorun/target.test.yml: Fork target: ${note}\n`,
+  );
+  vi.restoreAllMocks();
+  const json = inActions("--json");
+  expect(
+    (JSON.parse(json.stdout) as { tests: { note: string }[] }).tests[0]!.note,
+  ).toBe(note);
+});
+
+test("with GITHUB_ACTIONS=true, an unsupported Scenario is annotated at its event, and an Assumption that names no subject at its line", () => {
+  testRepo(testsFixture("pass"), {
+    ".github/whynorun/x.test.yml": `version: 1
+tests:
+  - label: Nightly
+    scenario:
+      event: { name: schedule }
+      repo: { date: 2026-12-03 }
+    pins:
+      ci.yml: { value: runs }
+  - label: Push
+    scenario:
+      event: { name: push }
+      repo: { date: 2026-12-03 }
+      assume: { "ci.yml › tset › outputs.ok": "true" }
+    pins:
+      ci.yml: { value: runs }
+`,
+  });
+  expect(inActions().stderr).toBe(
+    [
+      "::error file=.github/whynorun/x.test.yml,line=5::Nightly (.github/whynorun/x.test.yml): Scenario unsupported (root WN-3): event.name = schedule, event.actor = member",
+      "::error file=.github/whynorun/x.test.yml,line=13::Push (.github/whynorun/x.test.yml): assumed subject not found: ci.yml › tset › outputs.ok (candidates: ci.yml › release, ci.yml › test)",
+      "",
+    ].join("\n"),
+  );
 });
 
 test("show --from <file> --scenario <label> prints the Merge-readiness badges with --flow checks, and runs A and B with --flow concurrency", () => {

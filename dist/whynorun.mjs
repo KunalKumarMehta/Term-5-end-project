@@ -53,9 +53,9 @@ var require_identity = __commonJS({
     var NODE_TYPE = /* @__PURE__ */ Symbol.for("yaml.node.type");
     var isAlias3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
     var isDocument2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
-    var isMap3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
+    var isMap4 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar4 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR2;
+    var isScalar5 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR2;
     var isSeq3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection2(node) {
       if (node && typeof node === "object")
@@ -77,7 +77,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar4(node) || isCollection2(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar5(node) || isCollection2(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -89,10 +89,10 @@ var require_identity = __commonJS({
     exports.isAlias = isAlias3;
     exports.isCollection = isCollection2;
     exports.isDocument = isDocument2;
-    exports.isMap = isMap3;
+    exports.isMap = isMap4;
     exports.isNode = isNode;
     exports.isPair = isPair2;
-    exports.isScalar = isScalar4;
+    exports.isScalar = isScalar5;
     exports.isSeq = isSeq3;
   }
 });
@@ -4201,9 +4201,9 @@ var require_resolve_flow_collection = __commonJS({
     var blockMsg = "Block collections are not allowed within flow collections";
     var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
     function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onError, tag) {
-      const isMap3 = fc.start.source === "{";
-      const fcName = isMap3 ? "flow map" : "flow sequence";
-      const NodeClass = tag?.nodeClass ?? (isMap3 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
+      const isMap4 = fc.start.source === "{";
+      const fcName = isMap4 ? "flow map" : "flow sequence";
+      const NodeClass = tag?.nodeClass ?? (isMap4 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
       const coll = new NodeClass(ctx.schema);
       coll.flow = true;
       const atRoot = ctx.atRoot;
@@ -4239,7 +4239,7 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap3 && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap4 && ctx.options.strict && utilContainsNewline.containsNewline(key))
             onError(
               key,
               // checked by containsNewline()
@@ -4279,7 +4279,7 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap3 && !sep && !props.found) {
+        if (!isMap4 && !sep && !props.found) {
           const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
@@ -4302,7 +4302,7 @@ var require_resolve_flow_collection = __commonJS({
             startOnNewline: false
           });
           if (valueProps.found) {
-            if (!isMap3 && !props.found && ctx.options.strict) {
+            if (!isMap4 && !props.found && ctx.options.strict) {
               if (sep)
                 for (const st of sep) {
                   if (st === valueProps.found)
@@ -4334,7 +4334,7 @@ var require_resolve_flow_collection = __commonJS({
           const pair = new Pair.Pair(keyNode, valueNode);
           if (ctx.options.keepSourceTokens)
             pair.srcToken = collItem;
-          if (isMap3) {
+          if (isMap4) {
             const map = coll;
             if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
               onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4350,7 +4350,7 @@ var require_resolve_flow_collection = __commonJS({
           offset = valueNode ? valueNode.range[2] : valueProps.end;
         }
       }
-      const expectedEnd = isMap3 ? "}" : "]";
+      const expectedEnd = isMap4 ? "}" : "]";
       const [ce, ...ee] = fc.end;
       let cePos = offset;
       if (ce?.source === expectedEnd)
@@ -5637,7 +5637,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR2 = "";
     var isCollection2 = (token) => !!token && "items" in token;
-    var isScalar4 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar5 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -5721,7 +5721,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR2;
     exports.isCollection = isCollection2;
-    exports.isScalar = isScalar4;
+    exports.isScalar = isScalar5;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -6320,7 +6320,7 @@ var require_lexer = __commonJS({
 var require_line_counter = __commonJS({
   "node_modules/yaml/dist/parse/line-counter.js"(exports) {
     "use strict";
-    var LineCounter4 = class {
+    var LineCounter5 = class {
       constructor() {
         this.lineStarts = [];
         this.addNewLine = (offset) => this.lineStarts.push(offset);
@@ -6343,7 +6343,7 @@ var require_line_counter = __commonJS({
         };
       }
     };
-    exports.LineCounter = LineCounter4;
+    exports.LineCounter = LineCounter5;
   }
 });
 
@@ -7251,7 +7251,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument4(source, options = {}) {
+    function parseDocument5(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -7277,7 +7277,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver2 && typeof reviver2 === "object") {
         options = reviver2;
       }
-      const doc = parseDocument4(src, options);
+      const doc = parseDocument5(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning) => log.warn(doc.options.logLevel, warning));
@@ -7313,7 +7313,7 @@ var require_public_api = __commonJS({
     }
     exports.parse = parse;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument4;
+    exports.parseDocument = parseDocument5;
     exports.stringify = stringify;
   }
 });
@@ -8445,9 +8445,18 @@ var require_cronstrue = __commonJS({
 });
 
 // src/cli/main.ts
-import { globSync, readdirSync, readFileSync } from "node:fs";
+var import_yaml4 = __toESM(require_dist(), 1);
+import {
+  appendFileSync,
+  globSync,
+  readdirSync,
+  readFileSync
+} from "node:fs";
 import { join as join2, resolve as resolve3 } from "node:path";
 import { parseArgs } from "node:util";
+
+// src/core/testfile.ts
+var import_yaml3 = __toESM(require_dist(), 1);
 
 // src/core/reusable.ts
 var DIR = ".github/workflows/";
@@ -14314,15 +14323,15 @@ function parseWorkflowFile(path, text) {
   const lagging = schemaLag(doc, span);
   const diagnostics = [];
   for (const e of context.errors.getErrors()) {
-    const where = e.range ? at(
+    const where2 = e.range ? at(
       e.range.start.line,
       e.range.start.column,
       e.range.end.line,
       e.range.end.column
     ) : at(1, 1);
-    if (lagging.has(`${where.line}:${where.col}`)) continue;
+    if (lagging.has(`${where2.line}:${where2.col}`)) continue;
     const message = e.rawMessage.split("\n")[0].replace(/ at line \d+, column \d+:$/, "");
-    diagnostics.push({ ...where, message });
+    diagnostics.push({ ...where2, message });
   }
   return {
     ...indexOn(doc, span),
@@ -17128,607 +17137,6 @@ function side(d, run, label) {
   };
 }
 
-// src/core/names.ts
-var isMatrix = (job) => job.strategy !== void 0 && (!isMapping(job.strategy) || job.strategy.find("matrix") !== void 0);
-function namesOf(file, files, nameOf2) {
-  const called2 = new Map(calls(file).map((c) => [c.job.id.value, c]));
-  return file.jobs.flatMap((job) => {
-    const id = job.id.value;
-    const caller = nameOf2(job);
-    const call = called2.get(id);
-    if (!call)
-      return [{ id, ...caller, ...isMatrix(job) && { via: "matrix" } }];
-    if (call.path === void 0)
-      return [{ id, ...caller, via: "remote", uses: call.span }];
-    const callee = files.get(calleeKey(call.path) ?? "");
-    return (callee?.jobs ?? []).map((inner) => {
-      const own = nameOf2(inner);
-      const needed = caller.needed ?? own.needed;
-      return {
-        id: `${id}/${inner.id.value}`,
-        name: caller.name === void 0 || own.name === void 0 ? void 0 : `${caller.name} / ${own.name}`,
-        ...needed !== void 0 && { needed },
-        via: isMatrix(inner) ? "matrix" : "callee"
-      };
-    });
-  });
-}
-
-// src/core/baseline.ts
-var PLATFORM_BASELINE = [
-  "Actions are enabled for the repo, org and enterprise, and the GitHub workflow isn't disabled (PL-1, PL-2).",
-  "The event was created: no more than 3 tags or 5,000 branches pushed at once (PL-7), and no trigger or queue rate limit is hit (PL-8).",
-  "The event wasn't caused by `GITHUB_TOKEN` (PL-6).",
-  "No execution-protection actor rule, no event rule other than the `pull_request_target` event policy, and no Require-lockfile policy (PL-10, PRT-6, PRT-7).",
-  "The allowed-actions and SHA-pinning policies permit every `uses:` (PL-11).",
-  "The pull request has no merge conflict (PL-12, DB-5).",
-  "Environment protection rules and branch policies pass (PL-16).",
-  '"Allow GitHub Actions to create and approve pull requests" is on (PERM-10).',
-  "No runner-queue, run or job time limit is hit (PL-15), and there is no billing or storage stop (PL-17)."
-];
-
-// src/core/rules.ts
-var rows = [
-  {
-    id: "EV-0",
-    text: "A run is created only for GitHub workflows whose `on:` lists the triggering event; an event not listed creates no run.",
-    url: "https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows",
-    confidence: "High"
-  },
-  {
-    id: "EV-1",
-    text: "`pull_request` and `pull_request_target` with no `types:` run only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
-    confidence: "High"
-  },
-  {
-    id: "EV-4",
-    text: "The parser accepts a `stacked` activity type for `pull_request`, but GitHub's docs don't list it: valid syntax with undocumented meaning.",
-    url: "https://github.com/actions/languageservices/blob/4043eda/workflow-parser/src/workflow-v1.0.json",
-    confidence: "Med"
-  },
-  {
-    id: "EV-6",
-    text: "`merge_group` has one activity type, `checks_requested`: a merge queue asks for its required checks on the merge group's commit.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
-    confidence: "High"
-  },
-  {
-    id: "BR-1",
-    text: "`branches` and `branches-ignore` can't both appear on one event, and neither can `tags` and `tags-ignore`: GitHub rejects the file.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
-    confidence: "High"
-  },
-  {
-    id: "BR-2",
-    text: "For `pull_request` and `pull_request_target`, branch filters match the pull request's base branch.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpull_requestpull_request_targetbranchesbranches-ignore",
-    confidence: "High"
-  },
-  {
-    id: "BR-3",
-    text: "For `push`, filters match the pushed ref's name: with only branch filters a tag push doesn't run, and with only tag filters a branch push doesn't run.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
-    confidence: "High"
-  },
-  {
-    id: "BR-4",
-    text: "`branches` and `tags` patterns are tried in order and the last match wins: a `!` pattern excludes a ref an earlier pattern matched, and a later positive pattern includes it again.",
-    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
-    confidence: "High"
-  },
-  {
-    id: "BR-5",
-    text: "`branches-ignore` and `tags-ignore` skip the GitHub workflow when any pattern matches the ref.",
-    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
-    confidence: "High"
-  },
-  {
-    id: "BR-6",
-    text: "With both a branch or tag filter and a path filter on one event, both must pass for the GitHub workflow to run.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
-    confidence: "High"
-  },
-  {
-    id: "BR-8",
-    text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
-    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
-    confidence: "Low"
-  },
-  {
-    id: "BR-9",
-    text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
-    confidence: "Med"
-  },
-  {
-    id: "BR-10",
-    text: "For `merge_group`, `branches` and `branches-ignore` match the merge group's target branch. `merge_group` has no path filters.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
-    confidence: "High"
-  },
-  {
-    id: "GL-1",
-    text: "In a filter pattern `*` matches any characters except `/`, and `**` matches any characters including `/`.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
-    confidence: "High"
-  },
-  {
-    id: "GL-2",
-    text: "In a filter pattern `?` means zero or one of the preceding character, and `+` one or more of it.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
-    confidence: "High"
-  },
-  {
-    id: "GL-3",
-    text: "In a filter pattern `[]` matches one alphanumeric character from a set or an `a-z`, `A-Z` or `0-9` range.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
-    confidence: "High"
-  },
-  {
-    id: "GL-4",
-    text: "In a filter pattern `!` has meaning only as the first character, and `\\` makes the next character literal.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
-    confidence: "High"
-  },
-  {
-    id: "GL-5",
-    text: "A filter pattern starting with `*`, `[` or `!` must be quoted: unquoted, the YAML doesn't parse and the GitHub workflow doesn't run.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
-    confidence: "High"
-  },
-  {
-    id: "GL-6",
-    text: "GitHub's docs don't say whether filter patterns are case-sensitive.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
-    confidence: "Low"
-  },
-  {
-    id: "PA-1",
-    text: "`paths` and `paths-ignore` can't both appear on one event: GitHub rejects the file.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
-    confidence: "High"
-  },
-  {
-    id: "PA-2",
-    text: "With `paths`, the GitHub workflow runs if at least one changed file matches, the patterns tried in order with the last match winning. With `paths-ignore`, it is skipped only if every changed file matches.",
-    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
-    confidence: "High"
-  },
-  {
-    id: "PA-3",
-    text: "With a path filter, if no files changed the GitHub workflow doesn't run.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
-    confidence: "High"
-  },
-  {
-    id: "PA-4",
-    text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
-    confidence: "Med"
-  },
-  {
-    id: "PA-5",
-    text: "A diff of more than 3,000 files runs a `paths` GitHub workflow only if a match is among the first 3,000 files; GitHub's docs don't say how `paths-ignore` treats such a diff.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
-    confidence: "High"
-  },
-  {
-    id: "PA-6",
-    text: "Path filters are not evaluated for pushes of tags; GitHub's docs don't say whether a push GitHub workflow with only `paths:` then runs or is skipped.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
-    confidence: "Low"
-  },
-  {
-    id: "PA-7",
-    text: "Path patterns match the whole path from the repository root.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#patterns-to-match-file-paths",
-    confidence: "High"
-  },
-  {
-    id: "SK-1",
-    text: "`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in the head commit's message, or a final `skip-checks: true` trailer after two empty lines, skips `push` and `pull_request` runs.",
-    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs",
-    confidence: "High"
-  },
-  {
-    id: "PL-9",
-    text: "GitHub doesn't start runs from a workflow file larger than 500 KB.",
-    url: "https://docs.github.com/en/actions/reference/limits",
-    confidence: "High"
-  },
-  {
-    id: "DB-2",
-    text: "A `push` runs the GitHub workflow as it is in the pushed commit.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push",
-    confidence: "High"
-  },
-  {
-    id: "DB-3",
-    text: "A `pull_request` runs the GitHub workflow as it is in the pull request's merge commit.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
-    confidence: "High"
-  },
-  {
-    id: "DB-4",
-    text: "A `pull_request_target` runs the GitHub workflow as it is on the default branch, whatever the pull request's base branch, with `GITHUB_REF` set to the default branch.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
-    confidence: "High"
-  },
-  {
-    id: "PRT-1",
-    text: "A repo, org or enterprise Actions policy with an event rule decides which events may trigger GitHub workflows: an event it doesn't allow fails the run with a policy error.",
-    url: "https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution",
-    confidence: "High"
-  },
-  {
-    id: "PRT-2",
-    text: "A default policy blocks `pull_request_target` in public repos that have no applicable Actions event policy. It doesn't apply to private or internal repos, and it doesn't override an event policy that already exists.",
-    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
-    confidence: "High"
-  },
-  {
-    id: "PRT-3",
-    text: "GitHub enforces the default `pull_request_target` policy from 2 December 2026, a date it has already moved once; until then the policy runs in evaluate mode, so runs continue.",
-    url: "https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/",
-    confidence: "High"
-  },
-  {
-    id: "PRT-4",
-    text: "Enforcement covers \"affected repositories that were using the default `pull_request_target` policy before general availability\" (2026-09-17); GitHub's docs don't say whether a public repo created after that gets the policy in active or evaluate mode.",
-    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
-    confidence: "Low"
-  },
-  {
-    id: "PRT-5",
-    text: "A run a policy blocks fails with an error, such as `Event 'workflow_dispatch' is not allowed to trigger Actions workflows`: a visible failed run, not a silent skip. GitHub's docs don't say what conclusion its check gets.",
-    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
-    confidence: "High"
-  },
-  {
-    id: "PL-10",
-    text: "An execution-protection event rule, such as the default `pull_request_target` policy, fails the run with a policy error.",
-    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
-    confidence: "High"
-  },
-  {
-    id: "CO-1",
-    text: "`actions/checkout` fails the step for a fork's `pull_request_target` when `repository` is the pull request's head repo, `ref` is `refs/pull/<n>/head` or `/merge`, or the commit is the pull request's head or merge commit: \"Refusing to check out fork pull request code from a 'pull_request_target' workflow. This workflow runs with the base repository's GITHUB_TOKEN, secrets, default-branch cache scope, and runner access.\"",
-    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
-    confidence: "High"
-  },
-  {
-    id: "CO-3",
-    text: "Every supported `actions/checkout` major except v1 got the refusal on 2026-07-20, so floating tags such as `@v4` have it; a version pinned to a SHA, minor or patch release before v7 may not.",
-    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
-    confidence: "High"
-  },
-  {
-    id: "CO-5",
-    text: "Whether checkout's `ref` or `repository` is the fork's head is known only once its value is: an expression reading a value the Scenario lacks leaves the refusal open.",
-    url: "https://github.com/actions/checkout/blob/main/src/unsafe-pr-checkout-helper.ts",
-    confidence: "Med"
-  },
-  {
-    id: "CO-6",
-    text: "Step-level `continue-on-error: true` on the refused checkout step keeps the job from failing: the step's outcome is `failure`, its conclusion `success`, and later steps run without the pull request's code.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepscontinue-on-error",
-    confidence: "High"
-  },
-  {
-    id: "PERM-1",
-    text: "With no `permissions:` block, the `GITHUB_TOKEN` gets the token default: permissive is read and write on every scope, restricted is read on `contents` and `packages` only.",
-    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#setting-the-permissions-of-the-github_token-for-your-repository",
-    confidence: "High"
-  },
-  {
-    id: "PERM-2",
-    text: "The token is resolved from the baseline, then the workflow-level and job-level `permissions:`; for a fork contributor's pull request event other than `pull_request_target`, every `write` then becomes `read`.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#how-permissions-are-calculated-for-a-workflow-job",
-    confidence: "High"
-  },
-  {
-    id: "PERM-3",
-    text: "In a `permissions:` block every scope it doesn't list is `none`; `read-all` and `write-all` set every scope, `{}` sets every scope to `none`, and `write` includes `read`.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions",
-    confidence: "High"
-  },
-  {
-    id: "PERM-4",
-    text: "A job-level `permissions:` block replaces the workflow-level block for that job; the two don't merge.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idpermissions",
-    confidence: "Med"
-  },
-  {
-    id: "PERM-5",
-    text: "`id-token` and `copilot-requests` take only `write` or `none`, and `vulnerability-alerts` only `read` or `none`; `read-all` and `write-all` give `vulnerability-alerts` `read`.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
-    confidence: "High"
-  },
-  {
-    id: "PERM-6",
-    text: "A fork pull request's `permissions:` can add or remove `read` access but can't get `write`, except through the private-repo setting \"Send write tokens to workflows from pull requests\".",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#changing-the-permissions-in-a-forked-repository",
-    confidence: "High"
-  },
-  {
-    id: "PERM-7",
-    text: "A called workflow's `GITHUB_TOKEN` can only keep or lower its caller's permissions: with no `permissions:` of its own it gets the caller's, and if the caller job sets none, the caller's workflow-level block or the token default.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
-    confidence: "High"
-  },
-  {
-    id: "PERM-8",
-    text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
-    confidence: "Low"
-  },
-  {
-    id: "FK-0",
-    text: "Same-repo runs get the full `secrets` context: repository secrets, the organization secrets the org's access policy and plan grant this repo, and environment secrets only in a job whose `environment` names that environment, once any required reviewers approve (PL-16). Which secrets exist is a repo fact the YAML can't show.",
-    url: "https://docs.github.com/en/actions/concepts/security/secrets",
-    confidence: "High"
-  },
-  {
-    id: "FK-2",
-    text: "A fork contributor's `pull_request` run gets no secrets except `GITHUB_TOKEN`, and that token is read-only.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories",
-    confidence: "High"
-  },
-  {
-    id: "FK-4",
-    text: "In a public repo, a fork contributor's run can wait for a user with write access to approve it before any job starts; by default first-time contributors need approval.",
-    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
-    confidence: "High"
-  },
-  {
-    id: "FK-6",
-    text: '`pull_request_target` runs "regardless of approval settings", because it runs the base branch\'s code.',
-    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
-    confidence: "High"
-  },
-  {
-    id: "FK-7",
-    text: "`pull_request_target` gets a read and write `GITHUB_TOKEN`, subject to `permissions:`, and secrets, even from a fork.",
-    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
-    confidence: "High"
-  },
-  {
-    id: "FK-8",
-    text: "A run `dependabot[bot]` triggers on `push` or `pull_request` gets a read-only `GITHUB_TOKEN` by default and only Dependabot secrets, not Actions secrets; unlike a fork's, its `permissions:` can raise the token's access.",
-    url: "https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions",
-    confidence: "High"
-  },
-  {
-    id: "RU-1",
-    text: "A called workflow gets only the secrets its caller job passes: with no `secrets:`, nothing but `GITHUB_TOKEN`; with a mapping, only the mapped names; with `secrets: inherit`, all of the caller's. Secrets go only to the directly called workflow.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
-    confidence: "High"
-  },
-  {
-    id: "RU-1a",
-    text: "A called workflow can only get what its caller's run has: a fork contributor's caller passes nothing but `GITHUB_TOKEN`, and a Dependabot caller only Dependabot secrets. GitHub's docs don't say this directly; it follows from RU-1, FK-2 and FK-8.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
-    confidence: "Med"
-  },
-  {
-    id: "RU-2",
-    text: "Passing a secret the called workflow doesn't declare in `on.workflow_call.secrets`, or leaving out one it declares `required: true`, fails the run. GitHub's docs don't say whether this shows as a startup failure with no jobs or as an error on the file.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_callsecrets",
-    confidence: "High"
-  },
-  {
-    id: "RU-4",
-    text: "A local `uses:` whose called workflow is missing at the caller's commit, or can't be parsed, makes GitHub reject the caller file each time a run is created (\"Invalid workflow file \u2026 error parsing called workflow\"): the run fails with 0 jobs, even jobs that don't call it. GitHub's docs don't say this; it was observed.",
-    url: "https://github.com/aspect-build/rules_buildx/actions/runs/23382324747",
-    confidence: "High"
-  },
-  {
-    id: "PL-0",
-    text: "GitHub reads workflow files only directly in `.github/workflows/`: a called workflow can't be in a subfolder, so a local `uses:` into one fails.",
-    url: "https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows",
-    confidence: "High"
-  },
-  {
-    id: "PL-5",
-    text: 'A run awaiting approval shows as "Awaiting approval": none of its jobs start, and after 30 days it expires and is marked failed.',
-    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks",
-    confidence: "High"
-  },
-  {
-    id: "PL-16",
-    text: "Environment protection rules and branch policies can hold a job or keep an environment's secrets from it; WhyNoRun assumes they pass, and doesn't model environment secrets in reusable workflows (RU-3).",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
-    confidence: "High"
-  },
-  {
-    id: "JG-1",
-    text: "A failed or skipped `needs` dependency skips the dependent job, down the whole chain, unless the dependent's `if:` has a status function that lets it run (`always()`, `failure()`, `cancelled()`, `!cancelled()`).",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds",
-    confidence: "High"
-  },
-  {
-    id: "JG-2",
-    text: "An `if:` with no status function gets an implicit `success() &&`, so it is false when a `needs` dependency failed or was skipped.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions",
-    confidence: "High"
-  },
-  {
-    id: "JG-3",
-    text: "A job's `if:` is evaluated before the job starts (and before any matrix expands); a false `if:` skips the whole job.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif",
-    confidence: "High"
-  },
-  {
-    id: "JG-11",
-    text: "Job-level `continue-on-error: true` keeps a failing job from failing the run, but GitHub's docs don't say whether its dependents see it as a success or a failure.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error",
-    confidence: "Low"
-  },
-  {
-    id: "RQ-0",
-    text: `A workflow job's required-check name is its job name: \`name:\` if set and non-empty, otherwise the job id, with any expression in it evaluated. "Required status checks do not take workflow, matrix, or event trigger types into account." Two jobs with one name give "ambiguous status check results", and GitHub's docs don't say whether matching a name ignores case.`,
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
-  },
-  {
-    id: "RQ-1",
-    text: 'A GitHub workflow skipped by a path filter, a branch filter or a commit-message skip creates no check runs: its required checks stay Pending ("Waiting for status to be reported") and block merging.',
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
-  },
-  {
-    id: "RQ-2",
-    text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
-  },
-  {
-    id: "RQ-3",
-    text: 'A job skipped because a `needs` dependency failed "may not block merging". The fix is `if: always()` (or `!cancelled()`) on a required aggregator job.',
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
-  },
-  {
-    id: "RQ-4",
-    text: "A required check passes with a `success`, `skipped` or `neutral` conclusion on the latest head SHA.",
-    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging",
-    confidence: "High"
-  },
-  {
-    id: "RQ-6",
-    text: "With a merge queue, a required check must also be reported for the merge group: a GitHub workflow without a `merge_group` trigger never reports it there, so the merge waits and fails.",
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
-  },
-  {
-    id: "RQ-8",
-    text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "High"
-  },
-  {
-    id: "RQ-9",
-    text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
-    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
-    confidence: "Med"
-  },
-  {
-    id: "RQ-10",
-    text: `Strict mode ("Require branches to be up to date before merging"): a pull request behind its base can't merge even with every check green, and bringing it up to date creates a new head SHA whose required checks must pass again.`,
-    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging",
-    confidence: "High"
-  },
-  {
-    id: "CC-1",
-    text: "A concurrency group holds at most one running and, by default (`queue: single`), one pending job or run, across the whole repository and every workflow. A new item waits while another runs, and any item already pending in the group is cancelled and replaced, even without `cancel-in-progress`.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
-    confidence: "High"
-  },
-  {
-    id: "CC-2",
-    text: "`cancel-in-progress: true` on the arriving item also cancels the item running in its group. It may be an expression.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
-    confidence: "High"
-  },
-  {
-    id: "CC-3",
-    text: "`queue: max` lets up to 100 jobs or runs wait `pending` in a concurrency group, in the order each started waiting; once the queue is full, any more are cancelled. `queue: max` with `cancel-in-progress: true` is a workflow validation error.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs",
-    confidence: "High"
-  },
-  {
-    id: "CC-4",
-    text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
-    confidence: "High"
-  },
-  {
-    id: "CC-5",
-    text: "A workflow-level group may read `github`, `inputs` and `vars`, and a job-level one also `needs`, `strategy` and `matrix`. A property the event leaves undefined, such as `github.head_ref` on push, resolves to empty, so a fallback (`|| github.run_id`) is needed to keep groups apart.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-a-fallback-value",
-    confidence: "High"
-  },
-  {
-    id: "CC-6",
-    text: "Pending items in a concurrency group are ordered by when each started waiting, which isn't guaranteed because start times vary, so a queued run's place is likely, not certain, and which of two items one event starts in one group arrives first is undocumented.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
-    confidence: "High"
-  },
-  {
-    id: "CC-7",
-    text: "A called (reusable) workflow sees its caller's `github.workflow`, so the same group in the caller and the called workflow, with `cancel-in-progress: true`, cancels the workflow that's already running: the run cancels itself.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
-    confidence: "High"
-  },
-  {
-    id: "CC-8",
-    text: "A check waiting at the front of the queue on a full concurrency group shows the status `pending`.",
-    url: "https://docs.github.com/en/pull-requests/reference/status-checks#check-statuses-and-conclusions",
-    confidence: "High"
-  },
-  {
-    id: "CC-9",
-    text: "To cancel a run, GitHub re-evaluates the `if:` of every running job: a job whose condition is still true, such as `if: always()`, keeps running. No `if:` is treated as `success()`.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
-    confidence: "High"
-  },
-  {
-    id: "CC-11",
-    text: "Whether a cancelled run whose jobs keep running under CC-9 still holds its concurrency group isn't documented, so the run waiting on that group is uncertain.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
-    confidence: "Low"
-  },
-  {
-    id: "CC-12",
-    text: "Concurrency groups are shared across the repository regardless of the workflow, and the arriving item's `cancel-in-progress` decides whether the running item is cancelled. Items of one group with different `queue` modes are undocumented, so their outcome is uncertain.",
-    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
-    confidence: "Med"
-  },
-  {
-    id: "WN-1",
-    text: "Assumption: this job fails.",
-    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
-    confidence: "High"
-  },
-  {
-    id: "WN-2",
-    text: "Assumed to succeed, or assumed GitHub accepts the call: the job runs and WhyNoRun doesn't simulate its steps, nor check a remote reusable workflow's secrets contract (RU-2).",
-    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
-    confidence: "High"
-  },
-  {
-    id: "WN-3",
-    text: "Outside v1: WhyNoRun doesn't simulate this Event.",
-    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
-    confidence: "High"
-  },
-  {
-    id: "WN-4",
-    text: "Needs a run-time value the Scenario lacks, such as a step's output, which WhyNoRun never works out: supplying the value settles it, unless the value exists only at run time.",
-    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
-    confidence: "High"
-  },
-  {
-    id: "WN-5",
-    text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
-    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
-    confidence: "High"
-  },
-  {
-    id: "WN-6",
-    text: "Called workflow not loaded: WhyNoRun never fetches a reusable workflow from another repository, so it can't see the callee's jobs, `permissions:` or declared secrets.",
-    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
-    confidence: "High"
-  }
-];
-var RULES = Object.fromEntries(
-  rows.map((r) => [r.id, r])
-);
-
-// src/core/testfile.ts
-var import_yaml3 = __toESM(require_dist(), 1);
-
 // src/core/generated/validate-test-file.ts
 var validate_test_file_default = validate102;
 var schema37 = { "title": "Pin", "description": "A missing field isn't compared; null means the Verdict must not have that field. possible and continuing compare as sets.", "type": "object", "additionalProperties": false, "properties": { "value": { "type": "string" }, "possible": { "type": ["array", "null"], "items": { "type": "string" } }, "root": { "description": "The root cause's rule ID.", "type": ["string", "null"] }, "group": { "description": "A concurrency Verdict's resolved group.", "type": ["string", "null"] }, "continuing": { "description": "The job keys a cancelled run A keeps running.", "type": ["array", "null"], "items": { "type": "string" } } } };
@@ -18802,11 +18210,11 @@ function parseTestFile(path, text) {
         const segs = e.instancePath.split("/").slice(1).map((s) => s.replaceAll("~1", "/").replaceAll("~0", "~"));
         const extra = e.params.additionalProperty;
         if (extra !== void 0) segs.push(extra);
-        const where = extra === void 0 ? e.instancePath : `${e.instancePath}/${extra}`;
+        const where2 = extra === void 0 ? e.instancePath : `${e.instancePath}/${extra}`;
         const message = e.keyword === "type" && /^\/tests\/\d+\/scenario\/(repo\/vars|assume)\/[^/]+$/.test(
           e.instancePath
         ) ? STRINGS : e.keyword === "pattern" && e.instancePath.endsWith("/repo/repository") ? OWNER_REPO : e.message ?? "is invalid";
-        return `${lineOf(segs)}: ${where || "file"} ${message}`;
+        return `${lineOf(segs)}: ${where2 || "file"} ${message}`;
       })
     };
   const valid = file;
@@ -18918,6 +18326,604 @@ function findingText(finding) {
       return `Scenario unsupported (root WN-3): ${finding.reason}`;
   }
 }
+
+// src/core/names.ts
+var isMatrix = (job) => job.strategy !== void 0 && (!isMapping(job.strategy) || job.strategy.find("matrix") !== void 0);
+function namesOf(file, files, nameOf2) {
+  const called2 = new Map(calls(file).map((c) => [c.job.id.value, c]));
+  return file.jobs.flatMap((job) => {
+    const id = job.id.value;
+    const caller = nameOf2(job);
+    const call = called2.get(id);
+    if (!call)
+      return [{ id, ...caller, ...isMatrix(job) && { via: "matrix" } }];
+    if (call.path === void 0)
+      return [{ id, ...caller, via: "remote", uses: call.span }];
+    const callee = files.get(calleeKey(call.path) ?? "");
+    return (callee?.jobs ?? []).map((inner) => {
+      const own = nameOf2(inner);
+      const needed = caller.needed ?? own.needed;
+      return {
+        id: `${id}/${inner.id.value}`,
+        name: caller.name === void 0 || own.name === void 0 ? void 0 : `${caller.name} / ${own.name}`,
+        ...needed !== void 0 && { needed },
+        via: isMatrix(inner) ? "matrix" : "callee"
+      };
+    });
+  });
+}
+
+// src/core/baseline.ts
+var PLATFORM_BASELINE = [
+  "Actions are enabled for the repo, org and enterprise, and the GitHub workflow isn't disabled (PL-1, PL-2).",
+  "The event was created: no more than 3 tags or 5,000 branches pushed at once (PL-7), and no trigger or queue rate limit is hit (PL-8).",
+  "The event wasn't caused by `GITHUB_TOKEN` (PL-6).",
+  "No execution-protection actor rule, no event rule other than the `pull_request_target` event policy, and no Require-lockfile policy (PL-10, PRT-6, PRT-7).",
+  "The allowed-actions and SHA-pinning policies permit every `uses:` (PL-11).",
+  "The pull request has no merge conflict (PL-12, DB-5).",
+  "Environment protection rules and branch policies pass (PL-16).",
+  '"Allow GitHub Actions to create and approve pull requests" is on (PERM-10).',
+  "No runner-queue, run or job time limit is hit (PL-15), and there is no billing or storage stop (PL-17)."
+];
+
+// src/core/rules.ts
+var rows = [
+  {
+    id: "EV-0",
+    text: "A run is created only for GitHub workflows whose `on:` lists the triggering event; an event not listed creates no run.",
+    url: "https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows",
+    confidence: "High"
+  },
+  {
+    id: "EV-1",
+    text: "`pull_request` and `pull_request_target` with no `types:` run only for the `opened`, `synchronize` and `reopened` activity types; any other activity needs an explicit `types:` entry.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
+    confidence: "High"
+  },
+  {
+    id: "EV-4",
+    text: "The parser accepts a `stacked` activity type for `pull_request`, but GitHub's docs don't list it: valid syntax with undocumented meaning.",
+    url: "https://github.com/actions/languageservices/blob/4043eda/workflow-parser/src/workflow-v1.0.json",
+    confidence: "Med"
+  },
+  {
+    id: "EV-6",
+    text: "`merge_group` has one activity type, `checks_requested`: a merge queue asks for its required checks on the merge group's commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High"
+  },
+  {
+    id: "BR-1",
+    text: "`branches` and `branches-ignore` can't both appear on one event, and neither can `tags` and `tags-ignore`: GitHub rejects the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-2",
+    text: "For `pull_request` and `pull_request_target`, branch filters match the pull request's base branch.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpull_requestpull_request_targetbranchesbranches-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-3",
+    text: "For `push`, filters match the pushed ref's name: with only branch filters a tag push doesn't run, and with only tag filters a branch push doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-4",
+    text: "`branches` and `tags` patterns are tried in order and the last match wins: a `!` pattern excludes a ref an earlier pattern matched, and a later positive pattern includes it again.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High"
+  },
+  {
+    id: "BR-5",
+    text: "`branches-ignore` and `tags-ignore` skip the GitHub workflow when any pattern matches the ref.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High"
+  },
+  {
+    id: "BR-6",
+    text: "With both a branch or tag filter and a path filter on one event, both must pass for the GitHub workflow to run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "High"
+  },
+  {
+    id: "BR-8",
+    text: "GitHub's docs match patterns against the ref's short name and don't say whether a full `refs/heads/\u2026` pattern matches too.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "Low"
+  },
+  {
+    id: "BR-9",
+    text: '`pull_request_target`: "branches with names that match certain patterns (such as those which look similar to SHAs) may not trigger" the GitHub workflow; GitHub doesn\'t publish the patterns.',
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
+    confidence: "Med"
+  },
+  {
+    id: "BR-10",
+    text: "For `merge_group`, `branches` and `branches-ignore` match the merge group's target branch. `merge_group` has no path filters.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+    confidence: "High"
+  },
+  {
+    id: "GL-1",
+    text: "In a filter pattern `*` matches any characters except `/`, and `**` matches any characters including `/`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-2",
+    text: "In a filter pattern `?` means zero or one of the preceding character, and `+` one or more of it.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-3",
+    text: "In a filter pattern `[]` matches one alphanumeric character from a set or an `a-z`, `A-Z` or `0-9` range.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-4",
+    text: "In a filter pattern `!` has meaning only as the first character, and `\\` makes the next character literal.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-5",
+    text: "A filter pattern starting with `*`, `[` or `!` must be quoted: unquoted, the YAML doesn't parse and the GitHub workflow doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "High"
+  },
+  {
+    id: "GL-6",
+    text: "GitHub's docs don't say whether filter patterns are case-sensitive.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet",
+    confidence: "Low"
+  },
+  {
+    id: "PA-1",
+    text: "`paths` and `paths-ignore` can't both appear on one event: GitHub rejects the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "High"
+  },
+  {
+    id: "PA-2",
+    text: "With `paths`, the GitHub workflow runs if at least one changed file matches, the patterns tried in order with the last match winning. With `paths-ignore`, it is skipped only if every changed file matches.",
+    url: "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow",
+    confidence: "High"
+  },
+  {
+    id: "PA-3",
+    text: "With a path filter, if no files changed the GitHub workflow doesn't run.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High"
+  },
+  {
+    id: "PA-4",
+    text: "Changed files come from different diffs per event: a pull request compares its head with the merge base (three dots), a push to an existing branch compares before and after (two dots). WhyNoRun reuses the pull request's changed files for the push of its head branch, as an approximation.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "Med"
+  },
+  {
+    id: "PA-5",
+    text: "A diff of more than 3,000 files runs a `paths` GitHub workflow only if a match is among the first 3,000 files; GitHub's docs don't say how `paths-ignore` treats such a diff.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#git-diff-comparisons",
+    confidence: "High"
+  },
+  {
+    id: "PA-6",
+    text: "Path filters are not evaluated for pushes of tags; GitHub's docs don't say whether a push GitHub workflow with only `paths:` then runs or is skipped.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore",
+    confidence: "Low"
+  },
+  {
+    id: "PA-7",
+    text: "Path patterns match the whole path from the repository root.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#patterns-to-match-file-paths",
+    confidence: "High"
+  },
+  {
+    id: "SK-1",
+    text: "`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in the head commit's message, or a final `skip-checks: true` trailer after two empty lines, skips `push` and `pull_request` runs.",
+    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs",
+    confidence: "High"
+  },
+  {
+    id: "PL-9",
+    text: "GitHub doesn't start runs from a workflow file larger than 500 KB.",
+    url: "https://docs.github.com/en/actions/reference/limits",
+    confidence: "High"
+  },
+  {
+    id: "DB-2",
+    text: "A `push` runs the GitHub workflow as it is in the pushed commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push",
+    confidence: "High"
+  },
+  {
+    id: "DB-3",
+    text: "A `pull_request` runs the GitHub workflow as it is in the pull request's merge commit.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request",
+    confidence: "High"
+  },
+  {
+    id: "DB-4",
+    text: "A `pull_request_target` runs the GitHub workflow as it is on the default branch, whatever the pull request's base branch, with `GITHUB_REF` set to the default branch.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target",
+    confidence: "High"
+  },
+  {
+    id: "PRT-1",
+    text: "A repo, org or enterprise Actions policy with an event rule decides which events may trigger GitHub workflows: an event it doesn't allow fails the run with a policy error.",
+    url: "https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution",
+    confidence: "High"
+  },
+  {
+    id: "PRT-2",
+    text: "A default policy blocks `pull_request_target` in public repos that have no applicable Actions event policy. It doesn't apply to private or internal repos, and it doesn't override an event policy that already exists.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "High"
+  },
+  {
+    id: "PRT-3",
+    text: "GitHub enforces the default `pull_request_target` policy from 2 December 2026, a date it has already moved once; until then the policy runs in evaluate mode, so runs continue.",
+    url: "https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/",
+    confidence: "High"
+  },
+  {
+    id: "PRT-4",
+    text: "Enforcement covers \"affected repositories that were using the default `pull_request_target` policy before general availability\" (2026-09-17); GitHub's docs don't say whether a public repo created after that gets the policy in active or evaluate mode.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "Low"
+  },
+  {
+    id: "PRT-5",
+    text: "A run a policy blocks fails with an error, such as `Event 'workflow_dispatch' is not allowed to trigger Actions workflows`: a visible failed run, not a silent skip. GitHub's docs don't say what conclusion its check gets.",
+    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
+    confidence: "High"
+  },
+  {
+    id: "PL-10",
+    text: "An execution-protection event rule, such as the default `pull_request_target` policy, fails the run with a policy error.",
+    url: "https://docs.github.com/en/actions/concepts/about-actions-policies",
+    confidence: "High"
+  },
+  {
+    id: "CO-1",
+    text: "`actions/checkout` fails the step for a fork's `pull_request_target` when `repository` is the pull request's head repo, `ref` is `refs/pull/<n>/head` or `/merge`, or the commit is the pull request's head or merge commit: \"Refusing to check out fork pull request code from a 'pull_request_target' workflow. This workflow runs with the base repository's GITHUB_TOKEN, secrets, default-branch cache scope, and runner access.\"",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High"
+  },
+  {
+    id: "CO-3",
+    text: "Every supported `actions/checkout` major except v1 got the refusal on 2026-07-20, so floating tags such as `@v4` have it; a version pinned to a SHA, minor or patch release before v7 may not.",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High"
+  },
+  {
+    id: "CO-5",
+    text: "Whether checkout's `ref` or `repository` is the fork's head is known only once its value is: an expression reading a value the Scenario lacks leaves the refusal open.",
+    url: "https://github.com/actions/checkout/blob/main/src/unsafe-pr-checkout-helper.ts",
+    confidence: "Med"
+  },
+  {
+    id: "CO-6",
+    text: "Step-level `continue-on-error: true` on the refused checkout step keeps the job from failing: the step's outcome is `failure`, its conclusion `success`, and later steps run without the pull request's code.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepscontinue-on-error",
+    confidence: "High"
+  },
+  {
+    id: "PERM-1",
+    text: "With no `permissions:` block, the `GITHUB_TOKEN` gets the token default: permissive is read and write on every scope, restricted is read on `contents` and `packages` only.",
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#setting-the-permissions-of-the-github_token-for-your-repository",
+    confidence: "High"
+  },
+  {
+    id: "PERM-2",
+    text: "The token is resolved from the baseline, then the workflow-level and job-level `permissions:`; for a fork contributor's pull request event other than `pull_request_target`, every `write` then becomes `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#how-permissions-are-calculated-for-a-workflow-job",
+    confidence: "High"
+  },
+  {
+    id: "PERM-3",
+    text: "In a `permissions:` block every scope it doesn't list is `none`; `read-all` and `write-all` set every scope, `{}` sets every scope to `none`, and `write` includes `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions",
+    confidence: "High"
+  },
+  {
+    id: "PERM-4",
+    text: "A job-level `permissions:` block replaces the workflow-level block for that job; the two don't merge.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idpermissions",
+    confidence: "Med"
+  },
+  {
+    id: "PERM-5",
+    text: "`id-token` and `copilot-requests` take only `write` or `none`, and `vulnerability-alerts` only `read` or `none`; `read-all` and `write-all` give `vulnerability-alerts` `read`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    confidence: "High"
+  },
+  {
+    id: "PERM-6",
+    text: "A fork pull request's `permissions:` can add or remove `read` access but can't get `write`, except through the private-repo setting \"Send write tokens to workflows from pull requests\".",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#changing-the-permissions-in-a-forked-repository",
+    confidence: "High"
+  },
+  {
+    id: "PERM-7",
+    text: "A called workflow's `GITHUB_TOKEN` can only keep or lower its caller's permissions: with no `permissions:` of its own it gets the caller's, and if the caller job sets none, the caller's workflow-level block or the token default.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+    confidence: "High"
+  },
+  {
+    id: "PERM-8",
+    text: "GitHub's docs don't say what `id-token` and `copilot-requests`, which take only `write` or `none`, get when the token default or a fork or Dependabot run would give them another level.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    confidence: "Low"
+  },
+  {
+    id: "FK-0",
+    text: "Same-repo runs get the full `secrets` context: repository secrets, the organization secrets the org's access policy and plan grant this repo, and environment secrets only in a job whose `environment` names that environment, once any required reviewers approve (PL-16). Which secrets exist is a repo fact the YAML can't show.",
+    url: "https://docs.github.com/en/actions/concepts/security/secrets",
+    confidence: "High"
+  },
+  {
+    id: "FK-2",
+    text: "A fork contributor's `pull_request` run gets no secrets except `GITHUB_TOKEN`, and that token is read-only.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-4",
+    text: "In a public repo, a fork contributor's run can wait for a user with write access to approve it before any job starts; by default first-time contributors need approval.",
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-6",
+    text: '`pull_request_target` runs "regardless of approval settings", because it runs the base branch\'s code.',
+    url: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories",
+    confidence: "High"
+  },
+  {
+    id: "FK-7",
+    text: "`pull_request_target` gets a read and write `GITHUB_TOKEN`, subject to `permissions:`, and secrets, even from a fork.",
+    url: "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+    confidence: "High"
+  },
+  {
+    id: "FK-8",
+    text: "A run `dependabot[bot]` triggers on `push` or `pull_request` gets a read-only `GITHUB_TOKEN` by default and only Dependabot secrets, not Actions secrets; unlike a fork's, its `permissions:` can raise the token's access.",
+    url: "https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions",
+    confidence: "High"
+  },
+  {
+    id: "RU-1",
+    text: "A called workflow gets only the secrets its caller job passes: with no `secrets:`, nothing but `GITHUB_TOKEN`; with a mapping, only the mapped names; with `secrets: inherit`, all of the caller's. Secrets go only to the directly called workflow.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
+    confidence: "High"
+  },
+  {
+    id: "RU-1a",
+    text: "A called workflow can only get what its caller's run has: a fork contributor's caller passes nothing but `GITHUB_TOKEN`, and a Dependabot caller only Dependabot secrets. GitHub's docs don't say this directly; it follows from RU-1, FK-2 and FK-8.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idsecrets",
+    confidence: "Med"
+  },
+  {
+    id: "RU-2",
+    text: "Passing a secret the called workflow doesn't declare in `on.workflow_call.secrets`, or leaving out one it declares `required: true`, fails the run. GitHub's docs don't say whether this shows as a startup failure with no jobs or as an error on the file.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_callsecrets",
+    confidence: "High"
+  },
+  {
+    id: "RU-4",
+    text: "A local `uses:` whose called workflow is missing at the caller's commit, or can't be parsed, makes GitHub reject the caller file each time a run is created (\"Invalid workflow file \u2026 error parsing called workflow\"): the run fails with 0 jobs, even jobs that don't call it. GitHub's docs don't say this; it was observed.",
+    url: "https://github.com/aspect-build/rules_buildx/actions/runs/23382324747",
+    confidence: "High"
+  },
+  {
+    id: "PL-0",
+    text: "GitHub reads workflow files only directly in `.github/workflows/`: a called workflow can't be in a subfolder, so a local `uses:` into one fails.",
+    url: "https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows",
+    confidence: "High"
+  },
+  {
+    id: "PL-5",
+    text: 'A run awaiting approval shows as "Awaiting approval": none of its jobs start, and after 30 days it expires and is marked failed.',
+    url: "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks",
+    confidence: "High"
+  },
+  {
+    id: "PL-16",
+    text: "Environment protection rules and branch policies can hold a job or keep an environment's secrets from it; WhyNoRun assumes they pass, and doesn't model environment secrets in reusable workflows (RU-3).",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
+    confidence: "High"
+  },
+  {
+    id: "JG-1",
+    text: "A failed or skipped `needs` dependency skips the dependent job, down the whole chain, unless the dependent's `if:` has a status function that lets it run (`always()`, `failure()`, `cancelled()`, `!cancelled()`).",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds",
+    confidence: "High"
+  },
+  {
+    id: "JG-2",
+    text: "An `if:` with no status function gets an implicit `success() &&`, so it is false when a `needs` dependency failed or was skipped.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions",
+    confidence: "High"
+  },
+  {
+    id: "JG-3",
+    text: "A job's `if:` is evaluated before the job starts (and before any matrix expands); a false `if:` skips the whole job.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif",
+    confidence: "High"
+  },
+  {
+    id: "JG-11",
+    text: "Job-level `continue-on-error: true` keeps a failing job from failing the run, but GitHub's docs don't say whether its dependents see it as a success or a failure.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error",
+    confidence: "Low"
+  },
+  {
+    id: "RQ-0",
+    text: `A workflow job's required-check name is its job name: \`name:\` if set and non-empty, otherwise the job id, with any expression in it evaluated. "Required status checks do not take workflow, matrix, or event trigger types into account." Two jobs with one name give "ambiguous status check results", and GitHub's docs don't say whether matching a name ignores case.`,
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-1",
+    text: 'A GitHub workflow skipped by a path filter, a branch filter or a commit-message skip creates no check runs: its required checks stay Pending ("Waiting for status to be reported") and block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-2",
+    text: 'A job skipped by its own `if:` reports "Success", so a required check it produces doesn\'t block merging.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-3",
+    text: 'A job skipped because a `needs` dependency failed "may not block merging". The fix is `if: always()` (or `!cancelled()`) on a required aggregator job.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-4",
+    text: "A required check passes with a `success`, `skipped` or `neutral` conclusion on the latest head SHA.",
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging",
+    confidence: "High"
+  },
+  {
+    id: "RQ-6",
+    text: "With a merge queue, a required check must also be reported for the merge group: a GitHub workflow without a `merge_group` trigger never reports it there, so the merge waits and fails.",
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-8",
+    text: 'GitHub\'s guidance: "Avoid requiring workflows that can be skipped." Make the GitHub workflow always trigger and move the condition into a job-level `if:` (RQ-2), use `always()` with `needs` on gating jobs, add `merge_group` for a merge queue, and for a commit-message skip push a new commit without the skip text.',
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "High"
+  },
+  {
+    id: "RQ-9",
+    text: "A reusable workflow's job reports its check as `<caller job name> / <callee job name>`, each named as in RQ-0. GitHub's docs don't say how a matrix job's checks are named, so a name matched only through a matrix job's prefix is uncertain.",
+    url: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks",
+    confidence: "Med"
+  },
+  {
+    id: "RQ-10",
+    text: `Strict mode ("Require branches to be up to date before merging"): a pull request behind its base can't merge even with every check green, and bringing it up to date creates a new head SHA whose required checks must pass again.`,
+    url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging",
+    confidence: "High"
+  },
+  {
+    id: "CC-1",
+    text: "A concurrency group holds at most one running and, by default (`queue: single`), one pending job or run, across the whole repository and every workflow. A new item waits while another runs, and any item already pending in the group is cancelled and replaced, even without `cancel-in-progress`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-2",
+    text: "`cancel-in-progress: true` on the arriving item also cancels the item running in its group. It may be an expression.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-3",
+    text: "`queue: max` lets up to 100 jobs or runs wait `pending` in a concurrency group, in the order each started waiting; once the queue is full, any more are cancelled. `queue: max` with `cancel-in-progress: true` is a workflow validation error.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs",
+    confidence: "High"
+  },
+  {
+    id: "CC-4",
+    text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-5",
+    text: "A workflow-level group may read `github`, `inputs` and `vars`, and a job-level one also `needs`, `strategy` and `matrix`. A property the event leaves undefined, such as `github.head_ref` on push, resolves to empty, so a fallback (`|| github.run_id`) is needed to keep groups apart.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-a-fallback-value",
+    confidence: "High"
+  },
+  {
+    id: "CC-6",
+    text: "Pending items in a concurrency group are ordered by when each started waiting, which isn't guaranteed because start times vary, so a queued run's place is likely, not certain, and which of two items one event starts in one group arrives first is undocumented.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-7",
+    text: "A called (reusable) workflow sees its caller's `github.workflow`, so the same group in the caller and the called workflow, with `cancel-in-progress: true`, cancels the workflow that's already running: the run cancels itself.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+    confidence: "High"
+  },
+  {
+    id: "CC-8",
+    text: "A check waiting at the front of the queue on a full concurrency group shows the status `pending`.",
+    url: "https://docs.github.com/en/pull-requests/reference/status-checks#check-statuses-and-conclusions",
+    confidence: "High"
+  },
+  {
+    id: "CC-9",
+    text: "To cancel a run, GitHub re-evaluates the `if:` of every running job: a job whose condition is still true, such as `if: always()`, keeps running. No `if:` is treated as `success()`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
+    confidence: "High"
+  },
+  {
+    id: "CC-11",
+    text: "Whether a cancelled run whose jobs keep running under CC-9 still holds its concurrency group isn't documented, so the run waiting on that group is uncertain.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation",
+    confidence: "Low"
+  },
+  {
+    id: "CC-12",
+    text: "Concurrency groups are shared across the repository regardless of the workflow, and the arriving item's `cancel-in-progress` decides whether the running item is cancelled. Items of one group with different `queue` modes are undocumented, so their outcome is uncertain.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "Med"
+  },
+  {
+    id: "WN-1",
+    text: "Assumption: this job fails.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
+    confidence: "High"
+  },
+  {
+    id: "WN-2",
+    text: "Assumed to succeed, or assumed GitHub accepts the call: the job runs and WhyNoRun doesn't simulate its steps, nor check a remote reusable workflow's secrets contract (RU-2).",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
+    confidence: "High"
+  },
+  {
+    id: "WN-3",
+    text: "Outside v1: WhyNoRun doesn't simulate this Event.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
+    confidence: "High"
+  },
+  {
+    id: "WN-4",
+    text: "Needs a run-time value the Scenario lacks, such as a step's output, which WhyNoRun never works out: supplying the value settles it, unless the value exists only at run time.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High"
+  },
+  {
+    id: "WN-5",
+    text: "Assumed default for an unset Scenario field: set it to confirm it or to try another value.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High"
+  },
+  {
+    id: "WN-6",
+    text: "Called workflow not loaded: WhyNoRun never fetches a reusable workflow from another repository, so it can't see the callee's jobs, `permissions:` or declared secrets.",
+    url: "https://github.com/KunalKumarMehta/whynorun/issues/8",
+    confidence: "High"
+  }
+];
+var RULES = Object.fromEntries(
+  rows.map((r) => [r.id, r])
+);
 
 // src/core/index.ts
 var SUPPORTED = /* @__PURE__ */ new Set(["push", "pull_request", "pull_request_target"]);
@@ -19335,7 +19341,7 @@ var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref
                      [--flow access|all]
        whynorun show --from <test file> [--scenario <label>] [--repo <dir>]
                      [--flow access|checks|concurrency|all]
-       whynorun test [patterns\u2026]
+       whynorun test [--json] [patterns\u2026]
        whynorun --version
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
@@ -19386,9 +19392,16 @@ function readTestFile(path) {
 }
 var byCodeUnit = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 function runTests(args) {
-  let positionals;
+  let positionals, json;
   try {
-    ({ positionals } = parseArgs({ args, allowPositionals: true }));
+    ({
+      positionals,
+      values: { json }
+    } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: { json: { type: "boolean" } }
+    }));
   } catch (err) {
     return misuse(err.message);
   }
@@ -19423,19 +19436,59 @@ function runTests(args) {
     return unusable([
       `whynorun: no .github/workflows/ folder in ${resolve3(".")}`
     ]);
-  const blocks = [];
-  let diagnosed = false;
-  for (const { path, file } of files)
-    for (const test of file.tests) {
+  let diagnostics = [];
+  const runs = files.flatMap(
+    ({ path, file }) => file.tests.map((test, index) => {
       const result = simulate(workflows, test.scenario);
-      if (!diagnosed && result.diagnostics.length > 0)
-        blocks.push(
-          result.diagnostics.map((d) => `${d.path}:${d.line}: ${d.message}`)
-        );
-      diagnosed ||= result.diagnostics.length > 0;
-      const lines = compareTest(test, result).filter((f) => f.status !== "match").map(findingText);
-      if (lines.length > 0) blocks.push([`${path}: ${test.label}`, ...lines]);
-    }
+      if (diagnostics.length === 0) diagnostics = result.diagnostics;
+      const findings = compareTest(test, result);
+      const failed = findings.filter((f) => f.status !== "match");
+      const note = failed.length > 0 && test.scenario.event.name === "pull_request_target" ? DB4 : void 0;
+      return { path, index, test, result, findings, failed, note };
+    })
+  );
+  const failing = runs.filter((r) => r.failed.length > 0);
+  const code = diagnostics.length > 0 || failing.length > 0 ? 1 : 0;
+  if (process.env.GITHUB_ACTIONS === "true" && code === 1) {
+    for (const d of diagnostics) annotate(d.path, d.line, d.message);
+    for (const r of failing)
+      for (const f of r.failed) {
+        const at = where(r, f);
+        if (at)
+          annotate(
+            ...at,
+            `${r.test.label} (${r.path}): ${findingText(f)}${r.note ? `; ${r.note}` : ""}`
+          );
+      }
+    const summary = process.env.GITHUB_STEP_SUMMARY;
+    if (summary) appendFileSync(summary, summaryTable(diagnostics, failing));
+  }
+  if (json) {
+    const doc = {
+      format: 1,
+      version: "0.3.0",
+      diagnostics,
+      tests: runs.map((r) => ({
+        file: r.path,
+        label: r.test.label,
+        findings: r.findings,
+        note: r.note
+      }))
+    };
+    process.stdout.write(
+      `${JSON.stringify(doc, (_, v) => v ?? null, 2)}
+`
+    );
+    return code;
+  }
+  const blocks = [
+    ...diagnostics.length > 0 ? [diagnostics.map((d) => `${d.path}:${d.line}: ${d.message}`)] : [],
+    ...failing.map((r) => [
+      `${r.path}: ${r.test.label}`,
+      ...r.failed.map(findingText),
+      ...r.note ? [`note: ${r.note}`] : []
+    ])
+  ];
   process.stdout.write(
     [
       `whynorun ${"0.3.0"}`,
@@ -19444,7 +19497,76 @@ ${b.join("\n")}`),
       ""
     ].join("\n")
   );
-  return blocks.length > 0 ? 1 : 0;
+  return code;
+}
+var DB4 = "this Verdict describes behaviour after merge (DB-4)";
+var escapeData = (s) => s.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+var escapeProperty = (s) => escapeData(s).replaceAll(":", "%3A").replaceAll(",", "%2C");
+function annotate(file, line, message) {
+  process.stderr.write(
+    `::error file=${escapeProperty(file)},line=${line}::${escapeData(message)}
+`
+  );
+}
+function where(r, f) {
+  if (f.status === "file has Diagnostics") return void 0;
+  const key = f.status === "Scenario unsupported" ? "event" : f.key;
+  const span = r.result.verdicts.find((v) => v.key === key)?.causes[0]?.spans[0];
+  if (span) return [span.path, span.line];
+  const map = f.status === "assumed subject not found" ? ["scenario", "assume"] : f.status === "Scenario unsupported" ? ["scenario"] : ["pins"];
+  return [r.path, keyLine(r.path, ["tests", r.index, ...map], key)];
+}
+function keyLine(file, path, key) {
+  const lineCounter = new import_yaml4.LineCounter();
+  const doc = (0, import_yaml4.parseDocument)(readFileSync(file, "utf8"), { lineCounter });
+  const map = doc.getIn(path, true);
+  const pair = (0, import_yaml4.isMap)(map) ? map.items.find((p) => (0, import_yaml4.isScalar)(p.key) && String(p.key.value) === key) : void 0;
+  const range = (0, import_yaml4.isScalar)(pair?.key) ? pair.key.range : map?.range;
+  return lineCounter.linePos(range?.[0] ?? 0).line;
+}
+var cell = (s) => s.replaceAll("|", "\\|").replace(/\r?\n/g, " ");
+function diffCells(f) {
+  switch (f.status) {
+    case "match":
+      return [f.key, "\u2014", "matches"];
+    case "changed": {
+      const side2 = (pick) => f.changes.map(
+        (c) => c.field === "value" ? shown(pick(c)) : `${c.field} ${shown(pick(c))}`
+      ).join("; ");
+      return [f.key, side2((c) => c.pinned), side2((c) => c.now)];
+    }
+    case "pinned subject not found":
+    case "assumed subject not found":
+      return [
+        f.key,
+        "\u2014",
+        f.status + (f.candidates.length > 0 ? ` (candidates: ${f.candidates.join(", ")})` : "")
+      ];
+    case "file has Diagnostics":
+      return [f.file, "\u2014", f.status];
+    case "Scenario unsupported":
+      return ["event", "\u2014", findingText(f)];
+  }
+}
+function summaryTable(diagnostics, failing) {
+  const rows2 = [
+    ...diagnostics.map((d) => ["\u2014", `${d.path}:${d.line}`, "\u2014", d.message]),
+    ...failing.flatMap(
+      (r) => r.failed.map((f) => [`${r.path}: ${r.test.label}`, ...diffCells(f)])
+    )
+  ];
+  const notes = failing.flatMap(
+    (r) => r.note ? [`- ${r.path}: ${r.test.label}: ${r.note}`] : []
+  );
+  return [
+    `### whynorun ${"0.3.0"}`,
+    "",
+    "| Test | Subject | Pinned | Now |",
+    "| --- | --- | --- | --- |",
+    ...rows2.map((row) => `| ${row.map(cell).join(" | ")} |`),
+    ...notes.length > 0 ? ["", ...notes] : [],
+    ""
+  ].join("\n");
 }
 var SCENARIO_FLAGS = [
   "event",

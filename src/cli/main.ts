@@ -1,6 +1,14 @@
-import { globSync, readdirSync, readFileSync, type Dirent } from "node:fs";
+import {
+  appendFileSync,
+  globSync,
+  readdirSync,
+  readFileSync,
+  type Dirent,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { LineCounter, isMap, isScalar, parseDocument } from "yaml";
+import { shown } from "../core/testfile";
 import {
   PLATFORM_BASELINE,
   compareTest,
@@ -12,7 +20,12 @@ import {
   simulate,
   validateScenario,
   type ActorKind,
+  type Change,
+  type Diagnostic,
+  type Finding,
   type Scenario,
+  type SimulationResult,
+  type Test,
   type TestFile,
   type WorkflowFile,
 } from "../core";
@@ -25,7 +38,7 @@ const USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <r
                      [--flow access|all]
        whynorun show --from <test file> [--scenario <label>] [--repo <dir>]
                      [--flow access|checks|concurrency|all]
-       whynorun test [patterns…]
+       whynorun test [--json] [patterns…]
        whynorun --version
 `;
 
@@ -89,9 +102,16 @@ const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** `whynorun test [patterns…]`: every pattern a glob from the cwd (#10 §4–7, #13 §4). */
 function runTests(args: string[]): number {
-  let positionals;
+  let positionals, json;
   try {
-    ({ positionals } = parseArgs({ args, allowPositionals: true }));
+    ({
+      positionals,
+      values: { json },
+    } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: { json: { type: "boolean" } },
+    }));
   } catch (err) {
     return misuse((err as Error).message);
   }
@@ -132,22 +152,67 @@ function runTests(args: string[]): number {
       `whynorun: no .github/workflows/ folder in ${resolve(".")}`,
     ]);
 
-  const blocks: string[][] = [];
-  let diagnosed = false;
-  for (const { path, file } of files)
-    for (const test of file.tests) {
+  // Diagnostics never depend on the Scenario: listed once, and any of them fails the run.
+  let diagnostics: Diagnostic[] = [];
+  const runs: TestRun[] = files.flatMap(({ path, file }) =>
+    file.tests.map((test, index) => {
       const result = simulate(workflows, test.scenario);
-      // Diagnostics never depend on the Scenario: listed once, and any of them fails the run.
-      if (!diagnosed && result.diagnostics.length > 0)
-        blocks.push(
-          result.diagnostics.map((d) => `${d.path}:${d.line}: ${d.message}`),
-        );
-      diagnosed ||= result.diagnostics.length > 0;
-      const lines = compareTest(test, result)
-        .filter((f) => f.status !== "match")
-        .map(findingText);
-      if (lines.length > 0) blocks.push([`${path}: ${test.label}`, ...lines]);
-    }
+      if (diagnostics.length === 0) diagnostics = result.diagnostics;
+      const findings = compareTest(test, result);
+      const failed = findings.filter((f) => f.status !== "match");
+      const note =
+        failed.length > 0 && test.scenario.event.name === "pull_request_target"
+          ? DB4
+          : undefined;
+      return { path, index, test, result, findings, failed, note };
+    }),
+  );
+  const failing = runs.filter((r) => r.failed.length > 0);
+  const code = diagnostics.length > 0 || failing.length > 0 ? 1 : 0;
+
+  if (process.env.GITHUB_ACTIONS === "true" && code === 1) {
+    for (const d of diagnostics) annotate(d.path, d.line, d.message);
+    for (const r of failing)
+      for (const f of r.failed) {
+        const at = where(r, f);
+        if (at)
+          annotate(
+            ...at,
+            `${r.test.label} (${r.path}): ${findingText(f)}${r.note ? `; ${r.note}` : ""}`,
+          );
+      }
+    const summary = process.env.GITHUB_STEP_SUMMARY;
+    if (summary) appendFileSync(summary, summaryTable(diagnostics, failing));
+  }
+
+  if (json) {
+    // Covered by semver (#10 §7): `format` changes only with a new document shape.
+    const doc = {
+      format: 1,
+      version: __VERSION__,
+      diagnostics,
+      tests: runs.map((r) => ({
+        file: r.path,
+        label: r.test.label,
+        findings: r.findings,
+        note: r.note,
+      })),
+    };
+    process.stdout.write(
+      `${JSON.stringify(doc, (_, v: unknown) => v ?? null, 2)}\n`,
+    );
+    return code;
+  }
+  const blocks = [
+    ...(diagnostics.length > 0
+      ? [diagnostics.map((d) => `${d.path}:${d.line}: ${d.message}`)]
+      : []),
+    ...failing.map((r) => [
+      `${r.path}: ${r.test.label}`,
+      ...r.failed.map(findingText),
+      ...(r.note ? [`note: ${r.note}`] : []),
+    ]),
+  ];
   process.stdout.write(
     [
       `whynorun ${__VERSION__}`,
@@ -155,7 +220,122 @@ function runTests(args: string[]): number {
       "",
     ].join("\n"),
   );
-  return blocks.length > 0 ? 1 : 0;
+  return code;
+}
+
+const DB4 = "this Verdict describes behaviour after merge (DB-4)";
+
+interface TestRun {
+  path: string;
+  index: number;
+  test: Test;
+  result: SimulationResult;
+  findings: Finding[];
+  failed: Finding[];
+  note: string | undefined;
+}
+
+// GitHub's workflow-command escaping: properties also escape : and ,.
+const escapeData = (s: string) =>
+  s.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+const escapeProperty = (s: string) =>
+  escapeData(s).replaceAll(":", "%3A").replaceAll(",", "%2C");
+
+/** An `::error` annotation on stderr, which leaves stdout to `--json`. */
+function annotate(file: string, line: number, message: string): void {
+  process.stderr.write(
+    `::error file=${escapeProperty(file)},line=${line}::${escapeData(message)}\n`,
+  );
+}
+
+/**
+ * Where a failing pin is annotated (#10 §7): the YAML line of its new root cause, or else
+ * the line in the Test file that it comes from. A file's Diagnostics carry their own lines.
+ */
+function where(r: TestRun, f: Finding): [string, number] | undefined {
+  if (f.status === "file has Diagnostics") return undefined;
+  const key = f.status === "Scenario unsupported" ? "event" : f.key;
+  const span = r.result.verdicts.find((v) => v.key === key)?.causes[0]
+    ?.spans[0];
+  if (span) return [span.path, span.line];
+  const map =
+    f.status === "assumed subject not found"
+      ? ["scenario", "assume"]
+      : f.status === "Scenario unsupported"
+        ? ["scenario"]
+        : ["pins"];
+  return [r.path, keyLine(r.path, ["tests", r.index, ...map], key)];
+}
+
+/** The line of `key` in the Test file's map at `path`, or of the map when the key isn't there. */
+function keyLine(file: string, path: unknown[], key: string): number {
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(readFileSync(file, "utf8"), { lineCounter });
+  const map = doc.getIn(path, true);
+  const pair = isMap(map)
+    ? map.items.find((p) => isScalar(p.key) && String(p.key.value) === key)
+    : undefined;
+  const range = isScalar(pair?.key)
+    ? pair.key.range
+    : (map as { range?: number[] } | undefined)?.range;
+  return lineCounter.linePos(range?.[0] ?? 0).line;
+}
+
+const cell = (s: string) => s.replaceAll("|", "\\|").replace(/\r?\n/g, " ");
+
+/** Subject, Pinned and Now cells for one finding. */
+function diffCells(f: Finding): string[] {
+  switch (f.status) {
+    case "match":
+      return [f.key, "—", "matches"];
+    case "changed": {
+      const side = (pick: (c: Change) => unknown) =>
+        f.changes
+          .map((c) =>
+            c.field === "value"
+              ? shown(pick(c))
+              : `${c.field} ${shown(pick(c))}`,
+          )
+          .join("; ");
+      return [f.key, side((c) => c.pinned), side((c) => c.now)];
+    }
+    case "pinned subject not found":
+    case "assumed subject not found":
+      return [
+        f.key,
+        "—",
+        f.status +
+          (f.candidates.length > 0
+            ? ` (candidates: ${f.candidates.join(", ")})`
+            : ""),
+      ];
+    case "file has Diagnostics":
+      return [f.file, "—", f.status];
+    case "Scenario unsupported":
+      return ["event", "—", findingText(f)];
+  }
+}
+
+/** The Markdown diff table for `$GITHUB_STEP_SUMMARY`, then any DB-4 notes. */
+function summaryTable(diagnostics: Diagnostic[], failing: TestRun[]): string {
+  const rows = [
+    ...diagnostics.map((d) => ["—", `${d.path}:${d.line}`, "—", d.message]),
+    ...failing.flatMap((r) =>
+      r.failed.map((f) => [`${r.path}: ${r.test.label}`, ...diffCells(f)]),
+    ),
+  ];
+  const notes = failing.flatMap((r) =>
+    r.note ? [`- ${r.path}: ${r.test.label}: ${r.note}`] : [],
+  );
+  return [
+    `### whynorun ${__VERSION__}`,
+    "",
+    "| Test | Subject | Pinned | Now |",
+    "| --- | --- | --- | --- |",
+    ...rows.map((row) => `| ${row.map(cell).join(" | ")} |`),
+    ...(notes.length > 0 ? ["", ...notes] : []),
+    "",
+  ].join("\n");
 }
 
 // Flags that describe a Scenario, which `--from` can't be combined with (#10 §6).
