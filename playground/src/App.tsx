@@ -810,6 +810,7 @@ export function App() {
       states={scenarios.map(
         (s) => s.followUp && (s.followUp.runA ?? "in-progress"),
       )}
+      diagnosed={diagnostics.length > 0}
       open={open}
       onOpen={openExplanation}
       onAddFollowUp={(i) => focusField("follow-up-add", i)}
@@ -1057,6 +1058,27 @@ export function App() {
                   <option value="in-progress">in progress</option>
                   <option value="pending">pending</option>
                 </select>
+                <label htmlFor="follow-up-pending-runs">
+                  Runs already pending
+                </label>
+                <input
+                  id="follow-up-pending-runs"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={scenario.followUp.pendingRuns ?? 0}
+                  aria-describedby="follow-up-pending-runs-hint"
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    // The schema takes a whole number from 0: anything else is left as it was.
+                    if (Number.isInteger(n) && n >= 0)
+                      setInput(["followUp", "pendingRuns"], n);
+                  }}
+                />
+                <p id="follow-up-pending-runs-hint" className="hint">
+                  For a <code>queue: max</code> group: how many runs already
+                  wait in it besides run A. It holds up to 100 (CC-3).
+                </p>
                 <button type="button" onClick={() => remove(["followUp"])}>
                   Remove Follow-up event
                 </button>

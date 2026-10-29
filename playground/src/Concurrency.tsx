@@ -11,6 +11,7 @@ const ADD = "Add a Follow-up event to see what happens to run B";
 export function Concurrency({
   columns,
   states,
+  diagnosed,
   open,
   onOpen,
   onAddFollowUp,
@@ -18,6 +19,8 @@ export function Concurrency({
   columns: Column[];
   /** Each Scenario's run A state when B arrives; undefined with no Follow-up event. */
   states: (string | undefined)[];
+  /** Whether a file has Diagnostics, so its `concurrency:` wasn't read. */
+  diagnosed: boolean;
   open?: { key: string; i: number };
   onOpen: (key: string, i: number) => void;
   onAddFollowUp: (i: number) => void;
@@ -45,6 +48,23 @@ export function Concurrency({
     !c.blocked && c.verdicts && states[i] === undefined ? [i] : [],
   );
 
+  // #12 addendum F: what the empty line couldn't check.
+  const unchecked = [
+    ...(diagnosed ? ["files with Diagnostics"] : []),
+    ...(columns.some((c) =>
+      c.verdicts?.some((v) => v.causes.some((c) => c.rule === "WN-6")),
+    )
+      ? ["remote reusable workflows (WN-6)"]
+      : []),
+  ];
+  // CC-6: a queued run's place, behind the runs already pending and a pending run A.
+  const place = (v: Verdict, i: number) => {
+    const queued = v.causes.find((c) => c.rule === "CC-6")?.inputs[0]?.value;
+    return v.value === "pending" && typeof queued === "number"
+      ? queued + (states[i] === "pending" ? 1 : 0) + 1
+      : undefined;
+  };
+
   const cell = (v: Verdict, i: number) => (
     <>
       <button
@@ -66,6 +86,22 @@ export function Concurrency({
           </>
         )}
       </span>
+      {place(v, i) !== undefined && (
+        <span className="resolved">
+          {" "}
+          likely #{place(v, i)} in the queue, not certain (CC-6)
+        </span>
+      )}
+      {v.continuing && (
+        <div className="resolved">
+          continuing (CC-9):{" "}
+          <ul className="continuing" aria-label="continuing">
+            {v.continuing.map((k) => (
+              <li key={k}>{k}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </>
   );
   const run = (key: string) => {
@@ -104,6 +140,9 @@ export function Concurrency({
         <p>
           No GitHub workflow or job here declares <code>concurrency:</code>, so
           no run waits for or cancels another.
+          {unchecked.length > 0 && (
+            <> Not checked: {unchecked.join(" and ")}.</>
+          )}
         </p>
       ) : (
         <table className="grid concurrency">

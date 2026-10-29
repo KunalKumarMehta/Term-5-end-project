@@ -493,6 +493,22 @@ dialog form {
   font-style: italic;
 }
 
+/* CC-9 survivors, one line, comma-separated. */
+.continuing {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.continuing li {
+  display: inline;
+}
+
+.continuing li + li::before {
+  content: ", ";
+}
+
 /* body's overflow-wrap: anywhere would break a badge mid-word; wrapping at spaces keeps the table in its panel. */
 .grid .value {
   overflow-wrap: normal;
