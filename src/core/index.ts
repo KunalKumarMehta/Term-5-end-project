@@ -52,6 +52,16 @@ export {
   withDefaults,
 } from "./scenario";
 export type * from "./scenario";
+export {
+  compareTest,
+  findingText,
+  parseTestFile,
+  type Change,
+  type Finding,
+  type Pin,
+  type Test,
+  type TestFile,
+} from "./testfile";
 
 export interface WorkflowFile {
   /** Path from the repo root, such as `.github/workflows/ci.yml`. */
