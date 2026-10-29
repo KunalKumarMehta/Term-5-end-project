@@ -1,6 +1,6 @@
 # Third-party licences
 
-Packages bundled into `dist/whynorun.mjs`.
+Packages bundled into `dist/whynorun.mjs` and `dist/action.mjs`.
 
 ## @actions/expressions@0.3.61 (MIT)
 

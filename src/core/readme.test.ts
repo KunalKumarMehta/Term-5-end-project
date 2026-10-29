@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { PLATFORM_BASELINE, SHOW_DEFAULTS } from "./index";
+import { SCHEMA_LINE } from "./testfile";
 
 const readme = readFileSync(
   new URL("../../README.md", import.meta.url),
@@ -19,11 +20,21 @@ function section(name: string): string[] {
     .map((line) => line.slice(2));
 }
 
-test("the README's status line names package.json's version", () => {
-  const { version } = JSON.parse(
-    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-  ) as { version: string };
-  expect(readme).toContain(`\n**Status:** ${version}: `);
+const { version } = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as { version: string };
+
+test("from 1.0.0 the README has no status line and marks nothing planned", () => {
+  expect(readme).not.toContain("**Status:**");
+  expect(readme).not.toMatch(/planned/i);
+});
+
+test("the README's Action example pins the Action to package.json's version", () => {
+  expect(readme).toContain(`uses: KunalKumarMehta/whynorun@v${version}\n`);
+});
+
+test("the README shows the editor line the playground writes", () => {
+  expect(readme).toContain(`${SCHEMA_LINE}\n`);
 });
 
 test("the README's Platform baseline matches the core's export", () => {

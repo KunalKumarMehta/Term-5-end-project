@@ -10,7 +10,8 @@ export type Upload =
   | { files: WorkflowFile[]; ignored: string[] }
   | { error: "none" }
   | { error: "unreadable"; path: string }
-  | { error: "test"; name: string };
+  /** A single loose Test file, which goes to Open test (#12 §5). */
+  | { test: { name: string; read: () => Promise<ArrayBuffer> } };
 
 /** Files picked one at a time go to `.github/workflows/<filename>` (#12 §5). */
 export const fromPicked = (files: Iterable<File>) =>
@@ -24,9 +25,8 @@ export const fromPicked = (files: Iterable<File>) =>
 /** A drop: loose files are placed like picked ones, folders are searched (#12 §5). */
 export async function fromDropped(entries: FileSystemEntry[]): Promise<Upload> {
   const only = entries.length === 1 ? entries[0]! : undefined;
-  // shortcut: a loose Test file is refused until #83 routes it to Open test.
-  if (only?.isFile && /\.test\.ya?ml$/.test(only.name))
-    return { error: "test", name: only.name };
+  if (only && isFile(only) && /\.test\.ya?ml$/.test(only.name))
+    return { test: { name: only.name, read: foundFile(only, "").read } };
   const found: Found[] = [];
   for (const entry of entries) {
     if (isFile(entry)) found.push(foundFile(entry, ".github/workflows"));
@@ -104,4 +104,13 @@ async function load(found: Found[]): Promise<Upload> {
     }
   }
   return { files, ignored: paths.filter((p) => !isLoaded(p)) };
+}
+
+/** Downloads `text` as a file called `name`. */
+export function download(name: string, text: string, type: string): void {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

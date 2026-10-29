@@ -1,4 +1,4 @@
-// Builds dist/ from scratch: the CLI bundle plus the licences of every package bundled into it.
+// Builds dist/ from scratch: the CLI and Action bundles plus the licences of every package bundled into them.
 import { build } from "esbuild";
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,8 +9,10 @@ const { version } = readJson("package.json");
 rmSync("dist", { recursive: true, force: true });
 
 const { metafile } = await build({
-  entryPoints: ["src/cli/index.ts"],
-  outfile: "dist/whynorun.mjs",
+  // The Action bundle is committed but stays out of npm `files` (#13 §5).
+  entryPoints: { whynorun: "src/cli/index.ts", action: "src/action/index.ts" },
+  outdir: "dist",
+  outExtension: { ".js": ".mjs" },
   bundle: true,
   platform: "node",
   format: "esm",
@@ -56,7 +58,7 @@ writeFileSync(
   "dist/THIRD_PARTY_LICENSES.md",
   [
     "# Third-party licences\n",
-    "Packages bundled into `dist/whynorun.mjs`.\n",
+    "Packages bundled into `dist/whynorun.mjs` and `dist/action.mjs`.\n",
     ...(sections.length > 0 ? sections : ["None.\n"]),
   ].join("\n"),
 );

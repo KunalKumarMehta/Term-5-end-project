@@ -196,16 +196,41 @@ for (const [folder, items] of [
     ]);
   });
 
-test("the editor is part of the drop zone, and a loose Test file is left for Open test", async ({
+test("the editor is part of the drop zone, and a loose Test file goes to Open test", async ({
   page,
 }) => {
   await drop(page, { "docs.yml": workflow("pull_request") });
   await expect(tabs(page)).toHaveText(["docs.yml"]);
 
   await drop(page, { "push.test.yml": "version: 1\n" }, ".cm-content");
-  await expect(header(page).getByRole("alert")).toHaveText(
-    "push.test.yml is a Test file. Opening Test files isn’t supported yet, so nothing changed.",
+  const invalid = page.getByRole("alertdialog", {
+    name: "Couldn’t open push.test.yml",
+  });
+  await expect(invalid.getByRole("listitem")).toHaveText([
+    "push.test.yml:1: file must have required property 'tests'",
+  ]);
+  await invalid.getByRole("button", { name: "Close" }).click();
+  await expect(tabs(page)).toHaveText(["docs.yml"]);
+
+  await drop(
+    page,
+    {
+      "push.test.yaml": `version: 1
+tests:
+  - label: Docs
+    scenario: { event: { name: pull_request }, repo: { date: 2026-12-03 } }
+    pins: { docs.yml: { value: runs } }
+`,
+    },
+    ".cm-content",
   );
+  // The date set above changed Scenario 1, so opening asks first (#12 §1).
+  await page
+    .getByRole("alertdialog", { name: "Open push.test.yaml?" })
+    .getByRole("button", { name: "Open test" })
+    .click();
+  await expect(page.locator("#toasts")).toHaveText("Opened push.test.yaml");
+  await expect(page.getByLabel("Scenario label")).toHaveValue("Docs");
   await expect(tabs(page)).toHaveText(["docs.yml"]);
 
   await drop(page, { workflows }, ".cm-content");

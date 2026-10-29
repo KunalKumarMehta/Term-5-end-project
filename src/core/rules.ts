@@ -238,6 +238,18 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "CO-2",
+    text: "A checkout step with `allow-unsafe-pr-checkout: true` doesn't refuse, so the job runs, and its later steps run the fork's code with the base repository's token and secrets.",
+    url: "https://github.com/actions/checkout/blob/main/action.yml",
+    confidence: "High",
+  },
+  {
+    id: "CO-4",
+    text: "The refusal covers only a fork's code under `pull_request_target`: same-repo pull requests and the `pull_request` event check out as before, and `git fetch`, `gh pr checkout` and downloaded artifacts aren't covered.",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High",
+  },
+  {
     id: "CO-3",
     text: "Every supported `actions/checkout` major except v1 got the refusal on 2026-07-20, so floating tags such as `@v4` have it; a version pinned to a SHA, minor or patch release before v7 may not.",
     url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",

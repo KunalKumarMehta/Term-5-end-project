@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -10,23 +11,42 @@ import { createPortal } from "react-dom";
 import {
   PLATFORM_BASELINE,
   RULES,
+  blocksUpdate,
+  compareTest,
+  isCheck,
+  isConcurrency,
   isJobKey,
   isLoaded,
+  parseTestFile,
   producedChecks,
   setScenarioValue,
   settleValue,
   simulate,
+  updatedPins,
   validateScenario,
   type ActorKind,
   type Diagnostic,
+  type Finding,
+  type Pin,
   type Scenario,
   type Span,
+  type TestFile,
+  type UnmatchedAssumption,
   type Verdict,
   type WorkflowFile,
 } from "../../src/core";
 import { Access, isAccess } from "./Access";
 import { Concurrency } from "./Concurrency";
 import { ConfirmDialog, type Confirm } from "./ConfirmDialog";
+import {
+  KEY as DRAFT_KEY,
+  discardDraft,
+  readDraft,
+  toDraft,
+  when,
+  writeDraft,
+  type Held,
+} from "./draft";
 import { Editor, type Target } from "./Editor";
 import { EXAMPLE_FILES, EXAMPLE_LABEL, EXAMPLE_SCENARIO } from "./example";
 import {
@@ -40,15 +60,93 @@ import {
   type CauseLinks,
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
+import { ImportForm } from "./ImportForm";
+import {
+  importRepo,
+  type Failure,
+  type Imported,
+  type ImportedFacts,
+} from "./importRepo";
+import {
+  COULDNT,
+  MAX_LINK,
+  PENDING,
+  decodeLink,
+  encodeLink,
+  isLink,
+  type Opening,
+} from "./link";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
+import { InvalidTestDialog, TestPicker } from "./OpenTest";
 import { PasteDialog } from "./PasteDialog";
-import { RepoFacts, sourceOf, type Fact } from "./RepoFacts";
-import { fromDropped, fromPicked, type Upload } from "./upload";
+import {
+  OpenedTest,
+  PinToggle,
+  Pins,
+  SaveDialog,
+  type TestStatus,
+} from "./Pins";
+import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
+import { ShareDialog } from "./Share";
+import { download, fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
 
 const INTERNAL_ERROR =
   "WhyNoRun hit an internal error on this input; these results are from before your last change";
+
+const NOT_SAVING = "Not saving a draft in this browser";
+const SAVED_OVER = "Another WhyNoRun tab saved over this draft";
+const CLEARED = "Another WhyNoRun tab cleared the saved draft";
+
+/** A link in the fragment, removed before it's decoded so a crash can't repeat (#14 §6.1). */
+function takeLink(): string | undefined {
+  const fragment = location.hash;
+  if (!isLink(fragment)) return;
+  history.replaceState(history.state, "", location.pathname + location.search);
+  return fragment;
+}
+
+function pendingLink(): string | undefined {
+  try {
+    return sessionStorage.getItem(PENDING) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function forgetLink() {
+  try {
+    sessionStorage.removeItem(PENDING);
+  } catch {
+    // Nothing was kept where storage is blocked.
+  }
+}
+
+// A link at load, or one a reload left pending, which then opens again (#14 §9).
+const bootLink = takeLink() ?? pendingLink();
+
+/** The import messages of #7 and #12 §4, for a reference link that couldn't load (#14 §9). */
+function failureText(f: Failure): string {
+  switch (f.kind) {
+    case "repo":
+      return "Not found or private. Private repos aren’t supported.";
+    case "ref":
+      return "No branch, tag or commit with this SHA.";
+    case "folder":
+      return "No GitHub workflows at this ref.";
+    case "none":
+      return "No .yml/.yaml files directly in .github/workflows/.";
+    case "rate":
+      return `GitHub allows 60 requests an hour without sign-in, and they’re used up${
+        f.reset
+          ? ` until ${f.reset.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+          : ""
+      }.`;
+    case "network":
+      return `Couldn’t reach GitHub${f.status === undefined ? "" : ` (${f.status})`}.`;
+  }
+}
 
 const statusRegion = document.getElementById("status")!;
 const toastRegion = document.getElementById("toasts")!;
@@ -75,6 +173,21 @@ const BLANK: Scenario = { event: { name: "push" }, repo: { date: "" } };
 /** An Event name being typed: the field shows why, and the Scenario keeps its last results. */
 const unnamed = (s: Scenario) =>
   s.event.name.trim() === "" || s.followUp?.name.trim() === "";
+
+/** The Changed files field keeps the blank line being typed; simulate() gets only paths. */
+function withoutBlankPaths(s: Scenario): Scenario {
+  let input = s;
+  for (const on of ["event", "followUp"] as const) {
+    const changed = s[on]?.changed;
+    if (changed)
+      input = setScenarioValue(
+        input,
+        [on, "changed"],
+        changed.filter((path) => path !== ""),
+      );
+  }
+  return input;
+}
 
 // Diagnostics never depend on the Scenario, so this stands in for the date while it's empty.
 const ANY_DATE = "2000-01-01";
@@ -122,17 +235,59 @@ function unset(scenario: Scenario, path: string[]): Scenario {
   return copy as unknown as Scenario;
 }
 
+/** The Test file Open test loaded, and what it put in the Scenarios and tray (#12 §9). */
+export interface Opened {
+  name: string;
+  /** The file as opened, which the draft keeps so its unopened tests stay verbatim (#14 §2). */
+  text: string;
+  file: TestFile;
+  /** The tests opened as Scenario tabs, by index in the file. */
+  chosen: number[];
+  /** The Scenarios and pinned keys as opened, to tell when they've changed (#14 §10). */
+  scenarios: Scenario[];
+  keys: string[][];
+  /** Each Scenario's loaded pins with their own field lists, re-pointed ones under their new key. */
+  loaded: Record<string, Pin>[];
+}
+
+const failing = (f: Finding) =>
+  f.status !== "match" && f.status !== "file has Diagnostics";
+
 export function App() {
-  const [files, setFiles] = useState<WorkflowFile[]>([]);
-  const [origin, setOrigin] = useState<"example" | "pasted" | "uploaded">();
-  // The files as the example or an upload loaded them, to tell when they've been edited.
-  const [base, setBase] = useState<readonly WorkflowFile[]>();
+  // A readable draft restores on load, with no confirm: nothing in memory is replaced (#14 §4).
+  const [boot] = useState(readDraft);
+  const held = boot.held;
+  const [files, setFiles] = useState<WorkflowFile[]>(held?.files ?? []);
+  const [origin, setOrigin] = useState(held?.origin);
+  // The import behind an imported set; a Repo fact holding its value shows ⤓ imported (#9 §6).
+  const [imported, setImported] = useState(held?.imported);
+  // Whether the import form is open, and the files when its import started (#12 §1).
+  const [importing, setImporting] = useState(false);
+  const importStart = useRef<readonly WorkflowFile[]>([]);
+  // The files as the example, an upload or an import loaded them, to tell when they've been edited.
+  const [base, setBase] = useState(held?.base);
   // The last upload's inline error, or its loaded · ignored summary (#12 §5).
   const [uploadNote, setUploadNote] = useState<ReactNode>();
   const [active, setActive] = useState<string>();
   // One Scenario, or two with Compare on (#9 §8).
-  const [scenarios, setScenarios] = useState<Scenario[]>([BLANK]);
-  const [labels, setLabels] = useState(["Scenario 1"]);
+  const [scenarios, setScenarios] = useState<Scenario[]>(
+    held?.scenarios ?? [BLANK],
+  );
+  const [labels, setLabels] = useState(held?.labels ?? ["Scenario 1"]);
+  // Each Scenario's pinned subject keys, in the order pinned (#9 §3).
+  const [pins, setPins] = useState<string[][]>(held?.pins ?? [[]]);
+  const [saving, setSaving] = useState(false);
+  const [opened, setOpened] = useState(held?.opened);
+  // A Test file with more than two tests, waiting for the picker, or one that's invalid.
+  const [choosing, setChoosing] = useState<{
+    name: string;
+    text: string;
+    file: TestFile;
+  }>();
+  const [invalidTest, setInvalidTest] = useState<{
+    name: string;
+    errors: string[];
+  }>();
   // The Scenario the form shows, and the last label it refused (#12 §6).
   const [form, setForm] = useState(0);
   const [labelError, setLabelError] = useState<string>();
@@ -144,12 +299,14 @@ export function App() {
     "all",
   );
   // Whether the Maintainer changed Scenario 1; Load example fills only an untouched one (#14 §3).
-  const [touched, setTouched] = useState(false);
+  const [touched, setTouched] = useState(held?.touched ?? false);
   const [confirm, setConfirm] = useState<Confirm>();
   // The job picked in the Assumptions section, before Add.
   const [failPick, setFailPick] = useState("");
   // Each Scenario's Verdicts; undefined while it has no date.
   const [runs, setRuns] = useState<(Verdict[] | undefined)[]>([]);
+  // Each Scenario's Assumptions that point at nothing.
+  const [unmatched, setUnmatched] = useState<UnmatchedAssumption[][]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [target, setTarget] = useState<Target>();
   const [failed, setFailed] = useState(false);
@@ -163,6 +320,10 @@ export function App() {
   const sheet = useRef<HTMLElement>(null);
   const sheetScroll = useRef(0);
   const picker = useRef<HTMLInputElement>(null);
+  const testPicker = useRef<HTMLInputElement>(null);
+  // The last run's news, announced with the tray's count once both are rendered; null is silent.
+  const newsRef = useRef<string[] | null>([]);
+  const lastTray = useRef(0);
 
   // What the last run left on screen and what was last announced, read by the next run.
   const last = useRef<{
@@ -171,7 +332,8 @@ export function App() {
     failed: boolean;
     /** Set by a wholesale replacement, whose first run stays silent. */
     replaced?: boolean;
-  }>({ runs: [], counts: new Map(), failed: false });
+    // A restore is one too (#14 §12).
+  }>({ runs: [], counts: new Map(), failed: false, replaced: !!held });
 
   const announce = useCallback((message: string) => {
     setStatus((prev) => (message === "" || message === prev ? prev : message));
@@ -188,37 +350,32 @@ export function App() {
     const timer = setTimeout(() => {
       if (files.length === 0) {
         last.current = { runs: [], counts: new Map(), failed: false };
+        newsRef.current = null;
         setRuns([]);
+        setUnmatched([]);
         setDiagnostics([]);
         setFailed(false);
         return;
       }
       const { runs: before, counts: was, replaced } = last.current;
       const next: (Verdict[] | undefined)[] = [];
+      const nextUnmatched: UnmatchedAssumption[][] = [];
       let diagnostics: Diagnostic[] = [];
       try {
         for (const [i, s] of scenarios.entries()) {
           if (unnamed(s)) {
             next.push(before[i]);
+            nextUnmatched.push(unmatched[i] ?? []);
             continue;
           }
           const dated = s.repo.date !== "";
-          // The Changed files field keeps the blank line being typed; simulate() gets only paths.
-          let input = s;
-          for (const on of ["event", "followUp"] as const) {
-            const changed = s[on]?.changed;
-            if (changed)
-              input = setScenarioValue(
-                input,
-                [on, "changed"],
-                changed.filter((path) => path !== ""),
-              );
-          }
+          let input = withoutBlankPaths(s);
           if (!dated)
             input = setScenarioValue(input, ["repo", "date"], ANY_DATE);
           const result = simulate(files, input);
           diagnostics = result.diagnostics;
           next.push(dated ? result.verdicts : undefined);
+          nextUnmatched.push(dated ? result.unmatchedAssumptions : []);
         }
       } catch {
         if (!last.current.failed) announce(INTERNAL_ERROR);
@@ -240,13 +397,16 @@ export function App() {
       });
       if (n > 0)
         news.unshift(`Results updated: ${plural(n, "Verdict")} changed`);
-      if (!replaced) announce(news.join(" "));
+      newsRef.current = replaced ? null : news;
       last.current = { runs: next, counts, failed: false };
       setRuns(next);
+      setUnmatched(nextUnmatched);
       setDiagnostics(diagnostics);
       setFailed(false);
     }, 300);
     return () => clearTimeout(timer);
+    // unmatched only carries an unnamed Scenario's last result over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, scenarios, announce]);
 
   useEffect(() => {
@@ -306,6 +466,19 @@ export function App() {
     );
   };
 
+  // #12 §10: on a narrow screen this also switches to the YAML tab.
+  const showDiagnostic = (d: Diagnostic) => {
+    setPane("yaml");
+    setActive(d.path);
+    setTarget({ path: d.path, line: d.line, col: d.col });
+  };
+
+  /** Shows a pane, then focuses an element in it. */
+  const focusIn = (to: Pane, id: string) => {
+    setPane(to);
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  };
+
   /** Shows the pane and Scenario tab a field lives in, then focuses the field. */
   const focusField = (id: string, i = form) => {
     setPane("scenario");
@@ -313,7 +486,135 @@ export function App() {
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
-  const edited = base !== undefined && !sameFiles(files, base);
+  // An edited import from a link has no original files, only its reference (#14 §7).
+  const edited =
+    base !== undefined ? !sameFiles(files, base) : origin === "imported";
+
+  // #14 §4: the draft's save time, a failed store, another tab's notice and an unreadable draft.
+  const [saved, setSaved] = useState(boot.saved);
+  const [notSaving, setNotSaving] = useState(false);
+  const [tabNotice, setTabNotice] = useState<string>();
+  const [unreadable, setUnreadable] = useState(boot.unreadable);
+  const latest = useRef<Held>(undefined);
+  useLayoutEffect(() => {
+    latest.current = {
+      files,
+      origin,
+      imported,
+      base,
+      edited,
+      scenarios,
+      labels,
+      pins,
+      touched,
+      opened,
+    };
+  });
+  const autosave = useRef({
+    // Changes this tab hasn't written, and whether another tab's notice holds them back.
+    dirty: false,
+    paused: false,
+    timer: undefined as ReturnType<typeof setTimeout> | undefined,
+    failed: false,
+    // An unreadable draft under this version's key isn't overwritten until it's discarded.
+    blocked: boot.unreadable?.key === DRAFT_KEY,
+    watched: undefined as unknown[] | undefined,
+  });
+
+  const writeNow = useCallback(() => {
+    const a = autosave.current;
+    clearTimeout(a.timer);
+    const h = latest.current!;
+    // A Scenario whose Event name is being typed can't be read back, so it waits for the name.
+    if (a.blocked || h.scenarios.some(unnamed)) return;
+    const now = new Date();
+    const draft = toDraft(h, now);
+    a.dirty = false;
+    a.paused = false;
+    setTabNotice(undefined);
+    if (writeDraft(draft)) {
+      setNotSaving(false);
+      setSaved(draft && now);
+      return;
+    }
+    setNotSaving(true);
+    setSaved(undefined);
+    if (!a.failed) announce(NOT_SAVING);
+    a.failed = true;
+  }, [announce]);
+
+  // Each change marks this tab's work unwritten, and writes 500 ms after the last one.
+  useEffect(() => {
+    const a = autosave.current;
+    const now = [
+      files,
+      base,
+      imported,
+      scenarios,
+      labels,
+      pins,
+      touched,
+      opened,
+    ];
+    const was = a.watched;
+    a.watched = now;
+    if (!was || now.every((v, i) => Object.is(v, was[i]))) return;
+    a.dirty = true;
+    a.paused = false;
+    clearTimeout(a.timer);
+    a.timer = setTimeout(writeNow, 500);
+  }, [
+    files,
+    base,
+    imported,
+    scenarios,
+    labels,
+    pins,
+    touched,
+    opened,
+    writeNow,
+  ]);
+
+  useEffect(() => {
+    const flush = () => {
+      const a = autosave.current;
+      if (a.dirty && !a.paused) writeNow();
+    };
+    const hidden = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    // Only this key, or null for another page's clear() (#14 §4).
+    const storage = (e: StorageEvent) => {
+      if (e.storageArea !== localStorage) return;
+      if (e.key !== DRAFT_KEY && e.key !== null) return;
+      const a = autosave.current;
+      a.paused = true;
+      clearTimeout(a.timer);
+      const notice =
+        e.key === null || e.newValue === null ? CLEARED : SAVED_OVER;
+      setTabNotice(notice);
+      announce(notice);
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    window.addEventListener("storage", storage);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("storage", storage);
+    };
+  }, [writeNow, announce]);
+
+  // #14 §12: one announcement at load, once the first render has settled.
+  useEffect(() => {
+    const said = boot.saved
+      ? `Restored your draft, saved ${when(boot.saved)}`
+      : boot.unreadable?.reason;
+    // A link at load makes its own announcement.
+    if (!said || bootLink) return;
+    const timer = setTimeout(() => announce(said), 0);
+    return () => clearTimeout(timer);
+  }, [boot, announce]);
 
   /** The confirm-first rule (#12 §1): asks only when something would be lost. */
   const ask = (next: Confirm) => {
@@ -325,6 +626,7 @@ export function App() {
   const finish = (done: Confirm, accepted: boolean) => {
     setConfirm(undefined);
     if (accepted) done.run();
+    else done.keep?.();
     requestAnimationFrame(() => document.getElementById("set-source")?.focus());
   };
 
@@ -351,18 +653,24 @@ export function App() {
       title: "Load the example?",
       losses: [
         ...setLosses(),
-        ...(touched
+        ...(opened
           ? [
-              `${labels[0]} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
+              `${labels[0]} comes from ${opened.name}, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
             ]
-          : []),
+          : touched
+            ? [
+                `${labels[0]} keeps your changes, so it won't get the example's ${EXAMPLE_LABEL} Scenario.`,
+              ]
+            : []),
       ],
       action: "Load example",
       run: () => {
         replaceFiles(EXAMPLE_FILES);
         setOrigin("example");
+        setImported(undefined);
         setActive(undefined);
-        if (!touched) {
+        // #14 §3: only an untouched Scenario 1, with no Test file open.
+        if (!touched && !opened) {
           setScenarios((ss) => [EXAMPLE_SCENARIO, ...ss.slice(1)]);
           setLabels((ls) => [EXAMPLE_LABEL, ...ls.slice(1)]);
         }
@@ -370,21 +678,376 @@ export function App() {
       },
     });
 
+  // Restores the example's or the import's files (#9 §5).
   const reset = () =>
     ask({
-      title: "Reset to the example files?",
+      title: `Reset to the ${origin} files?`,
       losses: setLosses(),
       action: "Reset",
       run: () => {
-        replaceFiles(EXAMPLE_FILES);
-        setToast({ id: Date.now(), node: "Reset to example files" });
+        replaceFiles(base!);
+        setToast({ id: Date.now(), node: `Reset to ${origin} files` });
       },
     });
+
+  /** #14 §11: clears the set, the Scenarios, the tray and the opened Test file, and the draft. */
+  const startOver = () =>
+    ask({
+      title: "Start over?",
+      losses: [...setLosses(), ...openLosses()],
+      action: "Start over",
+      run: () => {
+        last.current.replaced = true;
+        setFiles([]);
+        setOrigin(undefined);
+        setImported(undefined);
+        setBase(undefined);
+        setUploadNote(undefined);
+        setActive(undefined);
+        setScenarios([BLANK]);
+        setLabels(["Scenario 1"]);
+        setPins([[]]);
+        setOpened(undefined);
+        setTouched(false);
+        setForm(0);
+        setLabelError(undefined);
+        setRepoDraft(undefined);
+        setOpen(undefined);
+        writeDraft(undefined);
+        setSaved(undefined);
+        setToast({ id: Date.now(), node: "Started over" });
+      },
+    });
+
+  /**
+   * #86: every file has arrived, so the import replaces the set under the confirm rule. A
+   * Re-import (same repo) refreshes only the facts that still hold the import's values, in
+   * every Scenario; a new import fills them all (#9 §5).
+   */
+  const finishImport = (got: Imported, focused: boolean) => {
+    setImporting(false);
+    const before =
+      origin === "imported" &&
+      imported?.owner === got.owner &&
+      imported.repo === got.repo
+        ? imported.facts
+        : undefined;
+    const sha7 = got.sha.slice(0, 7);
+    const next: Confirm = {
+      title: !sameFiles(files, importStart.current)
+        ? "Replace the edits you made during the import?"
+        : before
+          ? "Re-import?"
+          : "Import the repo?",
+      losses: setLosses(),
+      action: before ? "Re-import" : "Import",
+      run: () => {
+        replaceFiles(got.files);
+        setOrigin("imported");
+        setActive(undefined);
+        setScenarios((ss) =>
+          ss.map((s) => {
+            const repo = { ...s.repo };
+            for (const field of Object.keys(
+              got.facts,
+            ) as (keyof ImportedFacts)[])
+              if (!before || repo[field] === before[field])
+                Object.assign(repo, { [field]: got.facts[field] });
+            return { ...s, repo };
+          }),
+        );
+        setImported(got);
+        setToast({
+          id: Date.now(),
+          node: before
+            ? `Re-imported @ ${sha7}`
+            : `Imported ${got.owner}/${got.repo} @ ${sha7} · ${got.files.length} loaded${got.ignored.length > 0 ? ` · ${got.ignored.length} ignored` : ""}`,
+        });
+      },
+    };
+    if (next.losses.length > 0) return setConfirm(next);
+    next.run();
+    // #12 addendum E: from Cancel to the first file tab, as the form that started it is gone.
+    if (focused)
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>('[aria-label="Files"] [role="tab"]')
+          ?.focus(),
+      );
+  };
+
+  /** What opening a Test file would lose (#12 §1, #14 §10). */
+  const openLosses = () => {
+    const scenariosChanged = opened
+      ? scenarios.length !== opened.scenarios.length ||
+        scenarios.some((s, i) => s !== opened.scenarios[i]) ||
+        labels.some((l, i) => l !== opened.file.tests[opened.chosen[i]!]?.label)
+      : touched ||
+        (compare &&
+          (scenarios[1] !== scenarios[0] || labels[1] !== "Scenario 2"));
+    const pinsChanged =
+      opened !== undefined &&
+      (pins.some(
+        (p, i) => p.join("\n") !== (opened.keys[i] ?? []).join("\n"),
+      ) ||
+        // Accept all rewrote them (#14 §10).
+        opened.loaded.some(
+          (l, i) => l !== opened.file.tests[opened.chosen[i]!]?.pins,
+        ));
+    return [
+      ...(scenariosChanged
+        ? [`It replaces your changes to ${labels.join(" and ")}.`]
+        : []),
+      ...(pinsChanged
+        ? [`It drops your changes to the pins from ${opened.name}.`]
+        : !opened && pins.flat().length > 0
+          ? [
+              `It replaces your ${plural(pins.flat().length, "pinned Verdict")}.`,
+            ]
+          : []),
+    ];
+  };
+
+  // #14 §8–9: the share popover's link, and a link's banner: bad, loading or failed.
+  const [share, setShare] = useState<{ url?: string; error?: string }>();
+  const [linkNote, setLinkNote] = useState<{
+    text: string;
+    retry?: { opening: Opening; what: string };
+  }>();
+  const linkRun = useRef<AbortController>(undefined);
+
+  const copyLink = () => {
+    setShare({});
+    void encodeLink(latest.current!, open).then(async (fragment) => {
+      const url =
+        location.origin + location.pathname + location.search + fragment;
+      // Past 65,000 the popover refuses it; otherwise, never a link its own checks refuse.
+      const back =
+        url.length > MAX_LINK ? undefined : await decodeLink(fragment);
+      setShare(
+        back && "error" in back
+          ? {
+              error: `Can't share this as a link: ${back.error.replace(COULDNT, "")}`,
+            }
+          : { url },
+      );
+    });
+  };
+
+  /** #14 §9 steps 4–6: cancels a running import, loads the link's set, and only then replaces. */
+  const loadLink = async (opening: Opening, what: string) => {
+    // Closing the import form cancels its import, as its Cancel button does.
+    setImporting(false);
+    linkRun.current?.abort();
+    let next = opening.held;
+    const reference = opening.reference;
+    if (reference) {
+      const controller = new AbortController();
+      linkRun.current = controller;
+      setLinkNote({ text: "Opening the shared playground…" });
+      let got: Imported | Failure;
+      try {
+        got = await importRepo(
+          reference.owner,
+          reference.repo,
+          reference.sha,
+          () => {},
+          controller.signal,
+        );
+      } catch {
+        return; // Dismissed, or another link took its place.
+      }
+      if (!("files" in got)) {
+        // The pending key keeps the link, so a reload tries again (#14 §9).
+        const text = `The shared playground couldn't load: ${failureText(got)}`;
+        setLinkNote({ text, retry: { opening, what } });
+        announce(text);
+        return;
+      }
+      next = {
+        ...next,
+        files: got.files,
+        base: got.files,
+        imported: {
+          ...next.imported!,
+          ref: reference.ref,
+          files: got.files,
+          ignored: got.ignored,
+        },
+      };
+    }
+    linkRun.current = undefined;
+    setLinkNote(undefined);
+    // A wholesale replacement: the first run stays silent (#14 §12).
+    last.current.replaced = true;
+    newsRef.current = null;
+    setFiles(next.files);
+    setOrigin(next.origin);
+    setImported(next.imported);
+    setBase(next.base);
+    setUploadNote(undefined);
+    setActive(undefined);
+    setScenarios(next.scenarios);
+    setLabels(next.labels);
+    setPins(next.pins);
+    setOpened(undefined);
+    // Scenarios from a link count as touched (#14 §3).
+    setTouched(true);
+    setForm(0);
+    setLabelError(undefined);
+    setRepoDraft(undefined);
+    sheetScroll.current = 0;
+    setOpen(opening.open);
+    forgetLink();
+    setToast({ id: Date.now(), node: "Opened shared playground" });
+    announce(`Opened shared playground: ${what}`);
+  };
+
+  /** #14 §9: a link is checked, kept pending, and opened under the confirm-first rule. */
+  const openLink = async (fragment: string, atLoad = false) => {
+    const got = await decodeLink(fragment);
+    if ("error" in got) {
+      forgetLink();
+      setLinkNote({ text: got.error });
+      announce(
+        atLoad && boot.saved ? `${got.error}. Restored your draft` : got.error,
+      );
+      return;
+    }
+    try {
+      sessionStorage.setItem(PENDING, fragment);
+    } catch {
+      // Storage refuses: the link still opens, but a reload can't bring it back.
+    }
+    const { held: h } = got;
+    const what = h.imported
+      ? `${h.imported.owner}/${h.imported.repo} @ ${h.imported.sha.slice(0, 7)}`
+      : plural(h.files.length, "file");
+    ask({
+      title: `Open the shared playground (${what}, ${plural(h.scenarios.length, "Scenario")})?`,
+      losses: [...setLosses(), ...openLosses()],
+      action: "Open link",
+      run: () => void loadLink(got, what),
+      // Keep my draft leaves a running import alone, and forgets the link.
+      keep: forgetLink,
+    });
+  };
+  const openLinkRef = useRef<typeof openLink>(undefined);
+  useLayoutEffect(() => {
+    openLinkRef.current = openLink;
+  });
+
+  useEffect(() => {
+    // After the first render settles; its announcement stands in for the restore's (#14 §12).
+    const timer = setTimeout(
+      () => bootLink && void openLinkRef.current!(bootLink, true),
+      0,
+    );
+    // Links are also accepted through hashchange (#14 §9).
+    const changed = () => {
+      const fragment = takeLink();
+      if (fragment) void openLinkRef.current!(fragment);
+    };
+    window.addEventListener("hashchange", changed);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("hashchange", changed);
+    };
+  }, []);
+
+  /** Opens the chosen tests as the Scenario tabs, replacing the Scenarios and tray (#12 §9). */
+  const openTests = (
+    name: string,
+    text: string,
+    file: TestFile,
+    chosen: number[],
+  ) =>
+    ask({
+      title: `Open ${name}?`,
+      losses: openLosses(),
+      action: "Open test",
+      run: () => {
+        const tests = chosen.map((i) => file.tests[i]!);
+        const opening = tests.map((t) => t.scenario);
+        const keys = tests.map((t) => Object.keys(t.pins));
+        // #12 addendum E: the first run stays silent, as the toast speaks.
+        last.current.replaced = true;
+        newsRef.current = null;
+        setScenarios(opening);
+        setLabels(tests.map((t) => t.label));
+        setPins(keys);
+        setOpened({
+          name,
+          text,
+          file,
+          chosen,
+          scenarios: opening,
+          keys,
+          loaded: tests.map((t) => t.pins),
+        });
+        // Scenarios from a Test file count as touched (#14 §3).
+        setTouched(true);
+        setForm(0);
+        setLabelError(undefined);
+        setRepoDraft(undefined);
+        setOpen(undefined);
+        setToast({
+          id: Date.now(),
+          node: (
+            <>
+              Opened <code>{name}</code>
+            </>
+          ),
+        });
+      },
+    });
+
+  /** Open test… or a dropped Test file: invalid loads nothing, more than two tests asks which. */
+  const openTestFile = (name: string, text: string) => {
+    const parsed = parseTestFile(name, text);
+    if (parsed.errors) return setInvalidTest({ name, errors: parsed.errors });
+    if (parsed.file.tests.length > 2)
+      return setChoosing({ name, text, file: parsed.file });
+    openTests(
+      name,
+      text,
+      parsed.file,
+      parsed.file.tests.map((_, i) => i),
+    );
+  };
+
+  /** Re-points a pin, keeping its place and its loaded fields (#12 §9, addendum G). */
+  const repoint = (i: number, from: string, to: string) => {
+    setPins((ps) =>
+      ps.map((p, j) => (j === i ? p.map((k) => (k === from ? to : k)) : p)),
+    );
+    setOpened(
+      (o) =>
+        o && {
+          ...o,
+          loaded: o.loaded.map((l, j) =>
+            j === i
+              ? Object.fromEntries(
+                  Object.entries(l).map(([k, pin]) => [
+                    k === from ? to : k,
+                    pin,
+                  ]),
+                )
+              : l,
+          ),
+        },
+    );
+  };
 
   /** Upload and folder drop replace the whole set, under the confirm-first rule (#12 §1, §5). */
   const upload = async (reading: Promise<Upload>) => {
     setUploadNote(undefined);
     const read = await reading;
+    if ("test" in read)
+      return openTestFile(
+        read.test.name,
+        new TextDecoder().decode(await read.test.read()),
+      );
     if ("error" in read) {
       setUploadNote(
         <p className="error" role="alert">
@@ -392,11 +1055,6 @@ export function App() {
             <>
               Couldn&rsquo;t read <code>{read.path}</code>: it isn&rsquo;t
               readable UTF-8 text, so nothing changed.
-            </>
-          ) : read.error === "test" ? (
-            <>
-              <code>{read.name}</code> is a Test file. Opening Test files
-              isn&rsquo;t supported yet, so nothing changed.
             </>
           ) : (
             <>
@@ -418,6 +1076,8 @@ export function App() {
       run: () => {
         replaceFiles(next);
         setOrigin("uploaded");
+        // No import backs the facts any more, so they show as set (#9 §5).
+        setImported(undefined);
         setActive(undefined);
         if (ignored.length > 0)
           setUploadNote(
@@ -497,6 +1157,8 @@ export function App() {
   const setCompare = (on: boolean) => {
     setScenarios((ss) => (on ? [ss[0]!, ss[0]!] : [ss[0]!]));
     setLabels((ls) => (on ? [ls[0]!, "Scenario 2"] : [ls[0]!]));
+    setPins((ps) => (on ? [ps[0]!, []] : [ps[0]!]));
+    setOpened((o) => o && { ...o, loaded: o.loaded.slice(0, 1) });
     setForm(on ? 1 : 0);
     setLabelError(undefined);
     setRepoDraft(undefined);
@@ -564,13 +1226,33 @@ export function App() {
 
   // Assumptions, keyed by job key ("job X fails").
   const assume = scenario.assume ?? {};
+  // #12 §9: Assumptions that point at nothing, whether or not a Test file is open.
+  const notFound = new Map(
+    (unmatched[form] ?? []).map((u) => [u.key, u.candidates]),
+  );
+  /** Re-points an Assumption onto a job, keeping an output's path after it. */
+  const reassume = (from: string, job: string) =>
+    setScenario((s) => ({
+      ...s,
+      assume: Object.fromEntries(
+        Object.entries(s.assume ?? {}).map(([k, v]) => [
+          k === from ? onJob(from, job) : k,
+          v,
+        ]),
+      ),
+    }));
   const eventApprovalSource = sourceOf(scenario, "event.approval");
+  const repositorySource = sourceOf(
+    scenario,
+    "repo.repository",
+    imported?.facts,
+  );
   const remove = (path: string[]) => setScenario((s) => unset(s, path));
 
   const linksFor = (i: number): CauseLinks => ({
     files,
     focusField: (id) => focusField(id, i),
-    source: (path) => sourceOf(scenarios[i]!, path),
+    source: (path) => sourceOf(scenarios[i]!, path, imported?.facts),
     showLines: (span) => {
       setActive(span.path);
       setPane("yaml");
@@ -733,7 +1415,7 @@ export function App() {
       <button type="button" onClick={() => picker.current!.click()}>
         Upload
       </button>
-      <button type="button" disabled>
+      <button type="button" onClick={() => setImporting(true)}>
         Import repo
       </button>
     </div>
@@ -898,6 +1580,7 @@ export function App() {
               <span className="key">{v.key}</span> <Value verdict={v} />{" "}
               <span className="root">root {v.causes[0]?.rule}</span>
             </button>
+            <PinToggle i={0} subject={v.key} />
           </li>
         ))}
       </ul>
@@ -907,6 +1590,191 @@ export function App() {
   const wholeTab =
     files.length === 0 || (!compare && columns[0]!.blocked !== undefined);
   const counts = countByPath(diagnostics);
+
+  const pinned = (i: number, key: string) => pins[i]?.includes(key) ?? false;
+  const togglePin = (i: number, key: string) =>
+    setPins((ps) =>
+      ps.map((p, j) =>
+        j !== i
+          ? p
+          : p.includes(key)
+            ? p.filter((k) => k !== key)
+            : [...p, key],
+      ),
+    );
+  const inTab = (key: string, verdicts: Verdict[]) =>
+    tab === "access"
+      ? isAccess(key) || verdicts.some((v) => v.key === `${key} › secrets`)
+      : tab === "checks"
+        ? isCheck(key)
+        : tab === "concurrency"
+          ? isConcurrency(key)
+          : true;
+  // #9 §3: every Verdict of this tab, for the Scenarios shown.
+  const tabKeys = columns.map((c) =>
+    c.blocked || !c.verdicts
+      ? []
+      : c.verdicts.filter((v) => inTab(v.key, c.verdicts!)).map((v) => v.key),
+  );
+  const pinCount = pins.flat().length;
+  // Each Scenario's loaded pins still in the tray, in the tray's order.
+  const loadedPins = (i: number) => {
+    const loaded = opened?.loaded[i];
+    return loaded
+      ? Object.fromEntries(
+          (pins[i] ?? [])
+            .filter((k) => Object.hasOwn(loaded, k))
+            .map((k) => [k, loaded[k]!]),
+        )
+      : undefined;
+  };
+  // What `whynorun test` would report for each opened test (#12 §9), or why it's waiting.
+  const statuses = scenarios.map((s, i) => {
+    const loaded = loadedPins(i);
+    if (!loaded) return undefined;
+    const verdicts = runs[i];
+    const waiting =
+      files.length === 0
+        ? "waiting for a Workflow set"
+        : s.repo.date === ""
+          ? "waiting for the simulation date"
+          : undefined;
+    const test = { label: labels[i]!, scenario: s, pins: loaded };
+    const result =
+      waiting || !verdicts
+        ? undefined
+        : { verdicts, diagnostics, unmatchedAssumptions: unmatched[i] ?? [] };
+    const findings = result ? compareTest(test, result) : [];
+    return {
+      waiting,
+      findings,
+      pins: Object.keys(loaded).length,
+      test,
+      result,
+    };
+  });
+  const pinStatus = (i: number, key: string) =>
+    statuses[i]?.findings.find(
+      (f) => (f.status === "match" || f.status === "changed") && f.key === key,
+    );
+  // #12 §9: everything that would make the CLI exit 1, plus the pins still waiting.
+  const evaluated = statuses.some((t) => t && t.waiting === undefined);
+  const wouldFail =
+    statuses.reduce(
+      (n, t) => n + (t?.findings.filter(failing).length ?? 0),
+      0,
+    ) + (evaluated ? counts.size : 0);
+  const waitingPins = statuses.reduce(
+    (n, t) => n + (t?.waiting ? t.pins : 0),
+    0,
+  );
+
+  // #12 §9: Accept all mirrors `test --update`, all or nothing, listing what blocks it.
+  const blocking = statuses.flatMap((t, i) =>
+    (t?.findings ?? []).filter(blocksUpdate).map((f) => ({ f, i })),
+  );
+  const blockers = [
+    ...(
+      [
+        ["pinned subject not found", "pin", "not found"],
+        ["assumed subject not found", "Assumption", "not found"],
+        ["Scenario unsupported", "Scenario", "unsupported"],
+      ] as const
+    ).flatMap(([kind, word, what]) => {
+      const all = blocking.filter(({ f }) => f.status === kind);
+      const first = all[0];
+      if (!first) return [];
+      const { f, i } = first;
+      const go =
+        f.status === "assumed subject not found"
+          ? () => focusField(`assumed:${f.key}`, i)
+          : () =>
+              focusIn(
+                "results",
+                f.status === "pinned subject not found"
+                  ? `not-found:${labels[i]}:${f.key}`
+                  : `unsupported:${labels[i]}`,
+              );
+      return [
+        {
+          key: kind,
+          label: `${plural(all.length, word)} ${what}` as ReactNode,
+          go,
+        },
+      ];
+    }),
+    ...(evaluated
+      ? [...counts.keys()].map((path) => ({
+          key: path,
+          label: (
+            <>
+              <code>{basename(path)}</code> has Diagnostics
+            </>
+          ) as ReactNode,
+          go: () => showDiagnostic(diagnostics.find((d) => d.path === path)!),
+        }))
+      : []),
+  ];
+  const changedPins = statuses.reduce(
+    (n, t) =>
+      n + (t?.findings.filter((f) => f.status === "changed").length ?? 0),
+    0,
+  );
+  const canAccept =
+    blockers.length === 0 && waitingPins === 0 && changedPins > 0;
+
+  const acceptAll = () => {
+    const updates = statuses.map((t) =>
+      t?.result ? updatedPins(t.test, t.result) : {},
+    );
+    setOpened(
+      (o) =>
+        o && {
+          ...o,
+          loaded: o.loaded.map((l, i) =>
+            Object.keys(updates[i] ?? {}).length > 0
+              ? { ...l, ...updates[i] }
+              : l,
+          ),
+        },
+    );
+    setToast({
+      id: Date.now(),
+      node: `Accepted ${plural(changedPins, "changed pin")}`,
+    });
+  };
+  // The tray saves one Test file with an entry per Scenario that has a pinned Verdict,
+  // leaving out any Scenario `whynorun test` would reject: unnamed, or with no date.
+  const tests = scenarios.flatMap((s, i) => {
+    const pinnedVerdicts = (runs[i] ?? []).filter((v) => pinned(i, v.key));
+    const loaded = loadedPins(i);
+    return (pinnedVerdicts.length === 0 && !Object.keys(loaded ?? {}).length) ||
+      unnamed(s) ||
+      s.repo.date === ""
+      ? []
+      : [
+          {
+            label: labels[i]!,
+            scenario: withoutBlankPaths(s),
+            pinned: pinnedVerdicts,
+            loaded,
+          },
+        ];
+  });
+
+  // #12 addendum E: the run's news, then "· tray: N would fail" when that count changes.
+  useEffect(() => {
+    const said = newsRef.current;
+    newsRef.current = [];
+    const changed = wouldFail !== lastTray.current;
+    lastTray.current = wouldFail;
+    if (said === null) return;
+    announce(
+      [...said, ...(changed ? [`· tray: ${wouldFail} would fail`] : [])].join(
+        " ",
+      ),
+    );
+  }, [runs, wouldFail, announce]);
 
   return (
     <>
@@ -918,19 +1786,56 @@ export function App() {
               ? "No Workflow set"
               : origin === "example"
                 ? `Example${edited ? " · edited" : ""}`
-                : `Workflow set: ${files.length} ${origin} file${files.length === 1 ? "" : "s"}${edited ? " · edited" : ""}`}
+                : origin === "imported"
+                  ? `${imported!.owner}/${imported!.repo} @ ${imported!.sha.slice(0, 7)} (${imported!.ref})${edited ? " · edited since import" : ""}`
+                  : `Workflow set: ${files.length} ${origin} file${files.length === 1 ? "" : "s"}${edited ? " · edited" : ""}`}
           </span>
-          {edited && origin === "example" && (
-            <button type="button" onClick={reset}>
-              Reset
-            </button>
+          {edited &&
+            base &&
+            (origin === "example" || origin === "imported") && (
+              <button type="button" onClick={reset}>
+                Reset
+              </button>
+            )}
+          {notSaving ? (
+            <span className="hint">{NOT_SAVING}</span>
+          ) : (
+            saved && <span className="hint">Draft · saved {when(saved)}</span>
           )}
+          <button type="button" onClick={startOver}>
+            Start over
+          </button>
+          <button
+            type="button"
+            disabled={files.length === 0}
+            onClick={copyLink}
+          >
+            Copy link
+          </button>
+          <button type="button" onClick={() => setImporting(true)}>
+            {origin === "imported" ? "Re-import" : "Import repo"}
+          </button>
           <button type="button" onClick={() => setPasting(true)}>
             Paste
           </button>
           <button type="button" onClick={() => picker.current!.click()}>
             Upload
           </button>
+          <button type="button" onClick={() => testPicker.current!.click()}>
+            Open test…
+          </button>
+          <input
+            ref={testPicker}
+            type="file"
+            accept=".yml,.yaml"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // Picking the same file again still opens it.
+              if (file)
+                void file.text().then((t) => openTestFile(file.name, t));
+            }}
+          />
           <label className="row">
             <input
               type="checkbox"
@@ -950,6 +1855,86 @@ export function App() {
             }}
           />
           {uploadNote}
+          {linkNote && (
+            <p className="banner">
+              {linkNote.text}{" "}
+              {linkNote.retry && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void loadLink(linkNote.retry!.opening, linkNote.retry!.what)
+                  }
+                >
+                  Retry
+                </button>
+              )}{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  linkRun.current?.abort();
+                  forgetLink();
+                  setLinkNote(undefined);
+                }}
+              >
+                Dismiss
+              </button>
+            </p>
+          )}
+          {tabNotice && (
+            <p className="banner">
+              {tabNotice}{" "}
+              <button type="button" onClick={writeNow}>
+                Save this tab&rsquo;s work
+              </button>
+            </p>
+          )}
+          {unreadable && (
+            <p className="banner">
+              {unreadable.reason}{" "}
+              <button
+                type="button"
+                onClick={() =>
+                  download(
+                    "whynorun-draft.json",
+                    unreadable.raw,
+                    "application/json",
+                  )
+                }
+              >
+                Download
+              </button>{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  discardDraft(unreadable.key);
+                  autosave.current.blocked = false;
+                  setUnreadable(undefined);
+                }}
+              >
+                Discard
+              </button>
+            </p>
+          )}
+          {importing && (
+            <ImportForm
+              initial={
+                origin === "imported"
+                  ? {
+                      name: `${imported!.owner}/${imported!.repo}`,
+                      ref: imported!.ref,
+                    }
+                  : undefined
+              }
+              announce={(message) => {
+                // Each import speaks, even one that repeats the last: emptied, the region changes.
+                setStatus("");
+                requestAnimationFrame(() => announce(message));
+              }}
+              onStart={() => (importStart.current = files)}
+              onImported={finishImport}
+              onClose={() => setImporting(false)}
+            />
+          )}
         </div>
       </header>
 
@@ -1126,13 +2111,30 @@ export function App() {
                 Today
               </button>
             </div>
-            <RepoFacts scenario={scenario} onChange={setRepoFact} />
+            <RepoFacts
+              scenario={scenario}
+              imported={imported}
+              onChange={setRepoFact}
+            />
             {requiredChecks}
             <label htmlFor="repo-repository">
               <code>owner/repo</code>{" "}
               <span className="optional">(optional)</span>
-              {scenario.repo.repository !== undefined && (
-                <span className="source-tag set"> set</span>
+              {repositorySource && (
+                <>
+                  {" "}
+                  <span
+                    id="repo-repository-source"
+                    className={`source-tag ${repositorySource}`}
+                    title={
+                      repositorySource === "imported"
+                        ? titleOf(imported!)
+                        : undefined
+                    }
+                  >
+                    {tagText(repositorySource)}
+                  </span>
+                </>
               )}
             </label>
             <input
@@ -1187,6 +2189,27 @@ export function App() {
                     >
                       Remove
                     </button>
+                    {notFound.has(key) && (
+                      <p className="error" id={`assumed:${key}`} tabIndex={-1}>
+                        assumed subject not found
+                        {notFound.get(key)!.length > 0 && <> · re-point to </>}
+                        {notFound.get(key)!.map((job) => {
+                          const taken = Object.hasOwn(assume, onJob(key, job));
+                          return (
+                            // Re-pointing never overwrites or merges (addendum G).
+                            <button
+                              key={job}
+                              type="button"
+                              disabled={taken}
+                              onClick={() => reassume(key, job)}
+                            >
+                              {onJob(key, job)}
+                              {taken && " (already assumed)"}
+                            </button>
+                          );
+                        })}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1243,10 +2266,7 @@ export function App() {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      // #12 §10: on a narrow screen this also switches to the YAML tab.
-                      setPane("yaml");
-                      setActive(d.path);
-                      setTarget({ path: d.path, line: d.line, col: d.col });
+                      showDiagnostic(d);
                     }}
                   >
                     <code>
@@ -1259,8 +2279,97 @@ export function App() {
             </ul>
           )}
           {failed && !wholeTab && <p className="banner">{INTERNAL_ERROR}</p>}
+          {(tabKeys.flat().length > 0 || pinCount > 0) && (
+            <div className="row tray">
+              {tabKeys.flat().length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const already = tabKeys.flatMap((keys, i) =>
+                      keys.filter((k) => pinned(i, k)),
+                    ).length;
+                    setPins((ps) =>
+                      ps.map((p, i) => [
+                        ...p,
+                        ...(tabKeys[i] ?? []).filter((k) => !p.includes(k)),
+                      ]),
+                    );
+                    setToast({
+                      id: Date.now(),
+                      node: `Pinned ${tabKeys.flat().length - already} (${already} already pinned)`,
+                    });
+                  }}
+                >
+                  Pin all in this tab
+                </button>
+              )}
+              {pinCount > 0 && (
+                <button
+                  type="button"
+                  disabled={tests.length === 0}
+                  onClick={() => setSaving(true)}
+                >
+                  {pinCount} pinned · Save as Behaviour test…
+                </button>
+              )}
+              {opened && (
+                <span className="tray-status">
+                  {wouldFail} would fail
+                  {waitingPins > 0 && ` · ${waitingPins} waiting`}
+                </span>
+              )}
+              {opened && (
+                <button
+                  type="button"
+                  disabled={!canAccept}
+                  aria-describedby={
+                    blockers.length > 0 ? "blocked-by" : undefined
+                  }
+                  onClick={acceptAll}
+                >
+                  Accept all changes
+                </button>
+              )}
+              {opened && blockers.length > 0 && (
+                <span id="blocked-by" className="blocked-by">
+                  Blocked by:{" "}
+                  {blockers.map((b, k) => (
+                    <Fragment key={b.key}>
+                      {k > 0 && ", "}
+                      <button type="button" onClick={b.go}>
+                        {b.label}
+                      </button>
+                    </Fragment>
+                  ))}
+                </span>
+              )}
+            </div>
+          )}
+          {opened && (
+            <OpenedTest
+              name={opened.name}
+              tests={statuses.flatMap((t, i): TestStatus[] =>
+                t
+                  ? [
+                      {
+                        label: labels[i]!,
+                        waiting: t.waiting,
+                        findings: t.findings,
+                        pinned: (key) => pinned(i, key),
+                        repoint: (from, to) => repoint(i, from, to),
+                        remove: (key) => togglePin(i, key),
+                      },
+                    ]
+                  : [],
+              )}
+            />
+          )}
           <div className={failed && !wholeTab ? "stale" : undefined}>
-            {results}
+            <Pins.Provider
+              value={{ pinned, toggle: togglePin, status: pinStatus }}
+            >
+              {results}
+            </Pins.Provider>
           </div>
           {open !== undefined &&
             files.length > 0 &&
@@ -1318,6 +2427,64 @@ export function App() {
           onClose={() => setPasting(false)}
         />
       )}
+      {saving && (
+        <SaveDialog
+          tests={tests}
+          first={
+            unnamed(scenarios[0]!)
+              ? tests[0]!
+              : { label: labels[0]!, scenario: scenarios[0]! }
+          }
+          opened={
+            opened && {
+              name: opened.name,
+              file: opened.file,
+              labels: opened.chosen.map((i) => opened.file.tests[i]!.label),
+            }
+          }
+          onSaved={(name) =>
+            setToast({
+              id: Date.now(),
+              node: (
+                <>
+                  Download started: <code>{name}</code>
+                </>
+              ),
+            })
+          }
+          onClose={() => setSaving(false)}
+        />
+      )}
+      {share && (
+        <ShareDialog
+          url={share.url}
+          error={share.error}
+          reference={
+            origin === "imported" && edited
+              ? `${imported!.owner}/${imported!.repo}@${imported!.sha.slice(0, 7)}`
+              : undefined
+          }
+          pins={pinCount > 0}
+          onCopied={() => setToast({ id: Date.now(), node: "Link copied" })}
+          onClose={() => setShare(undefined)}
+        />
+      )}
+      {invalidTest && (
+        <InvalidTestDialog
+          {...invalidTest}
+          onClose={() => setInvalidTest(undefined)}
+        />
+      )}
+      {choosing && (
+        <TestPicker
+          name={choosing.name}
+          file={choosing.file}
+          onPick={(chosen) =>
+            openTests(choosing.name, choosing.text, choosing.file, chosen)
+          }
+          onClose={() => setChoosing(undefined)}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           confirm={confirm}
@@ -1336,6 +2503,10 @@ export function App() {
     </>
   );
 }
+
+/** An Assumption key moved onto another job: `file › job`, then an output's path if it has one. */
+const onJob = (key: string, job: string) =>
+  [job, ...key.split(" › ").slice(2)].join(" › ");
 
 /** Stored `path = value` entries in the section #8 §5 puts them in; nothing when there are none. */
 function Entries({

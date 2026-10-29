@@ -108,7 +108,7 @@ test("with no required checks the tab says so, and strict mode adds RQ-10 to the
   await input.press("Enter");
   await results(page).getByLabel("Mode").selectOption("strict");
   await expect(scenarioPane(page).getByLabel("Mode")).toHaveValue("strict");
-  await checkRow(page, "check › build").getByRole("button").click();
+  await checkRow(page, "check › build").locator(".verdict").click();
   await expect(
     page.getByRole("region", { name: "Explanation" }).getByLabel("Causes"),
   ).toContainText("RQ-10");
@@ -129,7 +129,7 @@ test('adding "job X fails" in Assumptions turns its dependent\'s check May not b
     .selectOption("ci.yml › changes");
   await scenario.getByRole("button", { name: "Add", exact: true }).click();
   await expect(checkRow(page, "check › e2e")).toContainText("may not block");
-  await checkRow(page, "check › e2e").getByRole("button").click();
+  await checkRow(page, "check › e2e").locator(".verdict").click();
   const causes = page
     .getByRole("region", { name: "Explanation" })
     .getByLabel("Causes");
