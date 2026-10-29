@@ -20,7 +20,9 @@ const simulate: typeof coreSimulate = (files, scenario) => {
   return result;
 };
 // Rules only another ticket's Diagnostic cites: GL-5 is #54's malformed-YAML Diagnostic.
-const citedElsewhere = ["GL-5"];
+// CO-2 and CO-4 are catalogued because #6's value table names them (rules.test.ts), but a
+// job they let run takes its usual root, and an Explanation never suggests the opt-out.
+const citedElsewhere = ["GL-5", "CO-2", "CO-4"];
 
 const date = "2026-12-03";
 // The GitHub workflow and job Verdicts, leaving out access keys, for tests not about access.

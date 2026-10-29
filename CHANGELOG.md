@@ -11,6 +11,24 @@ A released rule ID never changes meaning. A release that changes any pinned
 affected rule under `### Affected rules` as `- RULE-ID: what changed`
 ([ADR 0002](docs/adr/0002-test-files-embed-the-core-scenario.md)).
 
+## [1.0.0] - 2026-10-29
+
+Core flow 4, Behaviour tests, works end to end: the CLI and the Action fail a pull request that changes a pinned Verdict. From this release Test files pin rule IDs, so the rule catalogue is a public contract, and `v1` moves with each 1.x release.
+
+### Added
+
+- Behaviour tests (core flow 4): a Test file (`version: 1`, checked against `schemas/test-file.schema.json`, which ships in npm) holds one or more tests, each a label, a Scenario with every defaulted field written out, and pins of `value`, `possible`, `root`, `group` and `continuing`, where `null` means the Verdict must not have that field. Only the pinned fields are compared, `possible` and `continuing` as sets.
+- `whynorun test [patterns…]` checks committed Test files (by default `.github/whynorun/**/*.test.yml`) against the current folder's `.github/workflows/`, printing one line per difference, such as `ci.yml › test › secrets: available → empty (root FK-0 → FK-2)`. It exits 0 when every pin matches; 1 on a difference, a pinned or assumed subject not found (with candidates of the same kind), a Diagnostic or an unsupported Scenario; and 2 for an invalid or unreadable file, no Test files or misuse. An unquoted variable or output Assumption is told to quote it.
+- In CI (`GITHUB_ACTIONS=true`), `whynorun test` annotates each difference on the YAML line of its new root cause, or else on the Test file line it comes from, annotates each Diagnostic at its own line, and appends a Test, Subject, Pinned, Now table to `$GITHUB_STEP_SUMMARY`. A failing pin in a `pull_request_target` Scenario notes that it describes behaviour after merge (DB-4). `--json` prints one JSON document starting with `"format": 1`, its shape covered by semver.
+- `whynorun test --update` accepts the changed pins in place, all or nothing, keeping comments and the rest of the file byte for byte. Pins are never added or removed, and a field the Maintainer deleted is never re-added.
+- `whynorun show --from <test file> [--scenario <label>]` takes the Scenario from a Test file, and with it `--flow checks` and `--flow concurrency`.
+- The Action, `KunalKumarMehta/whynorun@v1.0.0`: a `node24` JavaScript action that runs the committed `dist/action.mjs` with one input, `tests`. It runs `whynorun test` with the same annotations and step summary, and never comments on the PR. This repo's CI dogfoods it on `.github/whynorun/`'s Test files.
+- The playground's pins: a pin toggle beside every Verdict, Pin all in this tab, and the tray's Save as Behaviour test, which downloads a Test file starting with the `yaml-language-server` `$schema` line. Open test… (or dropping a `*.test.yml`) opens one or two of a Test file's tests as the Scenario tabs, marks each pin ✓ or changed, lists pins not found with candidates to re-point to, and counts what would make `whynorun test` fail. Saving over an opened file keeps its other tests as they were, and Accept all changes mirrors `whynorun test --update`.
+- Import repo: a public repo's `.github/workflows/` at one commit, with no token. Visibility, creation date, default branch and owner/repo fill Repo facts, tagged ⤓ imported; Reset restores the imported files, and Re-import refreshes them.
+- The draft: the playground autosaves to this browser and restores it on load, says when another tab saves over it or clears it, and Start over clears it. Each Scenario in a draft or a share link loads through its Test file version's loader (ADR 0002).
+- Share links: Copy link puts the Workflow set (an unedited import as its repo and commit) and both Scenarios into the URL fragment (ADR 0004), and opening one asks before replacing a draft. Drafts and share links are checked as untrusted input before anything loads.
+- Rules CO-2 and CO-4, so the catalogue has every rule ID #6's value and badge tables name. Neither is ever a cause.
+
 ## [0.3.0] - 2026-10-29
 
 Core flow 3, the Concurrency outcome, works end to end.

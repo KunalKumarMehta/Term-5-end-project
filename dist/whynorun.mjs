@@ -18655,6 +18655,18 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "CO-2",
+    text: "A checkout step with `allow-unsafe-pr-checkout: true` doesn't refuse, so the job runs, and its later steps run the fork's code with the base repository's token and secrets.",
+    url: "https://github.com/actions/checkout/blob/main/action.yml",
+    confidence: "High"
+  },
+  {
+    id: "CO-4",
+    text: "The refusal covers only a fork's code under `pull_request_target`: same-repo pull requests and the `pull_request` event check out as before, and `git fetch`, `gh pr checkout` and downloaded artifacts aren't covered.",
+    url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
+    confidence: "High"
+  },
+  {
     id: "CO-3",
     text: "Every supported `actions/checkout` major except v1 got the refusal on 2026-07-20, so floating tags such as `@v4` have it; a version pinned to a SHA, minor or patch release before v7 may not.",
     url: "https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/",
@@ -19404,7 +19416,7 @@ var USAGE = `usage: whynorun show --event <name> --date <YYYY-MM-DD> [--ref <ref
 `;
 function main(argv, stdin = () => readFileSync(0, "utf8")) {
   if (argv.length === 1 && argv[0] === "--version") {
-    process.stdout.write(`whynorun ${"0.3.0"}
+    process.stdout.write(`whynorun ${"1.0.0"}
 `);
     return 0;
   }
@@ -19545,7 +19557,7 @@ function runTests(args) {
   if (json) {
     const doc = {
       format: 1,
-      version: "0.3.0",
+      version: "1.0.0",
       diagnostics,
       tests: runs.map((r) => ({
         file: r.path,
@@ -19571,7 +19583,7 @@ function runTests(args) {
   ];
   process.stdout.write(
     [
-      `whynorun ${"0.3.0"}`,
+      `whynorun ${"1.0.0"}`,
       ...blocks.map((b) => `
 ${b.join("\n")}`),
       ""
@@ -19639,7 +19651,7 @@ function summaryTable(diagnostics, failing) {
     (r) => r.note ? [`- ${r.path}: ${r.test.label}: ${r.note}`] : []
   );
   return [
-    `### whynorun ${"0.3.0"}`,
+    `### whynorun ${"1.0.0"}`,
     "",
     "| Test | Subject | Pinned | Now |",
     "| --- | --- | --- | --- |",
@@ -19737,7 +19749,7 @@ function show(args, stdin) {
   ].sort(([a], [b]) => byCodeUnit(a, b)).map(([, text]) => text);
   process.stdout.write(
     [
-      `whynorun ${"0.3.0"}`,
+      `whynorun ${"1.0.0"}`,
       "",
       "What WhyNoRun always assumes:",
       ...PLATFORM_BASELINE.map((item) => `- ${item}`),
