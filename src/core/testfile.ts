@@ -313,7 +313,7 @@ export function writeTestFile(
         JSON.stringify(withDefaults(scenario).scenario),
       ) as Scenario,
       pins: Object.fromEntries(pinned.map((v) => [v.key, pinOf(v)])),
-    })),
+    })) as TestFile["tests"],
   };
   // The YAML 1.2 core schema the loader reads with, so a string "true" stays quoted (#10 §1).
   return `${SCHEMA_LINE}\n${stringify(file, { version: "1.2", schema: "core", lineWidth: 0 })}`;
