@@ -1,15 +1,18 @@
 import {
+  accessSync,
   appendFileSync,
+  constants,
   globSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
   type Dirent,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LineCounter, isMap, isScalar, parseDocument } from "yaml";
-import { shown } from "../core/testfile";
 import {
   PLATFORM_BASELINE,
   blocksUpdate,
@@ -19,8 +22,10 @@ import {
   isCheck,
   isConcurrency,
   parseTestFile,
+  shown,
   simulate,
   updateTestFile,
+  withCandidates,
   validateScenario,
   type ActorKind,
   type Change,
@@ -87,7 +92,10 @@ function readWorkflows(repo: string): WorkflowFile[] | undefined {
     }));
 }
 
-function readTestFile(path: string): ReturnType<typeof parseTestFile> {
+/** A Test file parsed, with the text it was read from. */
+function readTestFile(
+  path: string,
+): ReturnType<typeof parseTestFile> & { text?: string } {
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -98,7 +106,7 @@ function readTestFile(path: string): ReturnType<typeof parseTestFile> {
       ],
     };
   }
-  return parseTestFile(path, text);
+  return { text, ...parseTestFile(path, text) };
 }
 
 const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -141,12 +149,12 @@ function runTests(args: string[]): number {
     for (const match of matches) paths.add(match);
   }
 
-  const files: { path: string; file: TestFile }[] = [];
+  const files: { path: string; text: string; file: TestFile }[] = [];
   const errors: string[] = [];
   for (const path of [...paths].sort(byCodeUnit)) {
     const read = readTestFile(path);
     if (read.errors) errors.push(...read.errors);
-    else files.push({ path, file: read.file });
+    else files.push({ path, text: read.text!, file: read.file });
   }
   if (errors.length > 0) return unusable(errors);
   const workflows = readWorkflows(".");
@@ -157,7 +165,7 @@ function runTests(args: string[]): number {
 
   // Diagnostics never depend on the Scenario: listed once, and any of them fails the run.
   let diagnostics: Diagnostic[] = [];
-  const runs: TestRun[] = files.flatMap(({ path, file }) =>
+  const runs: TestRun[] = files.flatMap(({ path, text, file }) =>
     file.tests.map((test, index) => {
       const result = simulate(workflows, test.scenario);
       if (diagnostics.length === 0) diagnostics = result.diagnostics;
@@ -167,7 +175,7 @@ function runTests(args: string[]): number {
         failed.length > 0 && test.scenario.event.name === "pull_request_target"
           ? DB4
           : undefined;
-      return { path, index, test, result, findings, failed, note };
+      return { path, text, index, test, result, findings, failed, note };
     }),
   );
   const failing = runs.filter((r) => r.failed.length > 0);
@@ -181,22 +189,16 @@ function runTests(args: string[]): number {
     diagnostics.length === 0 &&
     !failing.some((r) => r.failed.some(blocksUpdate))
   ) {
-    const writes = files.flatMap(({ path, file }) => {
-      const text = updateTestFile(
-        readFileSync(path, "utf8"),
+    const writes = files.flatMap(({ path, text, file }) => {
+      const next = updateTestFile(
+        text,
         file,
         runs.filter((r) => r.path === path).map((r) => r.result),
       );
-      return text === undefined ? [] : [{ path, text }];
+      return next === undefined ? [] : [{ path, text: next }];
     });
-    for (const { path, text } of writes)
-      try {
-        writeFileSync(path, text);
-      } catch (err) {
-        return unusable([
-          `${path}: can't write it (${(err as NodeJS.ErrnoException).code})`,
-        ]);
-      }
+    const failed = writeAll(writes);
+    if (failed) return unusable([failed]);
     updated = writes.map((w) => w.path);
     code = 0;
   }
@@ -261,8 +263,35 @@ function runTests(args: string[]): number {
 
 const DB4 = "this Verdict describes behaviour after merge (DB-4)";
 
+/**
+ * Writes every file or none (#10 §6): each target must be writable, each new text goes to a
+ * temporary file beside it, and only then are they all renamed over their targets.
+ * Returns the error, if any.
+ */
+function writeAll(
+  writes: { path: string; text: string }[],
+): string | undefined {
+  const temps: string[] = [];
+  let at = "";
+  try {
+    for (const { path } of writes) accessSync((at = path), constants.W_OK);
+    for (const { path, text } of writes) {
+      at = path;
+      temps.push(`${path}.whynorun-${process.pid}`);
+      writeFileSync(temps.at(-1)!, text, { flag: "wx" });
+    }
+  } catch (err) {
+    for (const temp of temps) rmSync(temp, { force: true });
+    return `${at}: can't write it (${(err as NodeJS.ErrnoException).code})`;
+  }
+  writes.forEach(({ path }, i) => renameSync(temps[i]!, path));
+  return undefined;
+}
+
 interface TestRun {
   path: string;
+  /** The Test file's text, as parsed. */
+  text: string;
   index: number;
   test: Test;
   result: SimulationResult;
@@ -300,13 +329,13 @@ function where(r: TestRun, f: Finding): [string, number] | undefined {
       : f.status === "Scenario unsupported"
         ? ["scenario"]
         : ["pins"];
-  return [r.path, keyLine(r.path, ["tests", r.index, ...map], key)];
+  return [r.path, keyLine(r.text, ["tests", r.index, ...map], key)];
 }
 
-/** The line of `key` in the Test file's map at `path`, or of the map when the key isn't there. */
-function keyLine(file: string, path: unknown[], key: string): number {
+/** The line of `key` in the Test file text's map at `path`, or of the map when the key isn't there. */
+function keyLine(text: string, path: unknown[], key: string): number {
   const lineCounter = new LineCounter();
-  const doc = parseDocument(readFileSync(file, "utf8"), { lineCounter });
+  const doc = parseDocument(text, { lineCounter });
   const map = doc.getIn(path, true);
   const pair = isMap(map)
     ? map.items.find((p) => isScalar(p.key) && String(p.key.value) === key)
@@ -337,14 +366,7 @@ function diffCells(f: Finding): string[] {
     }
     case "pinned subject not found":
     case "assumed subject not found":
-      return [
-        f.key,
-        "—",
-        f.status +
-          (f.candidates.length > 0
-            ? ` (candidates: ${f.candidates.join(", ")})`
-            : ""),
-      ];
+      return [f.key, "—", f.status + withCandidates(f.candidates)];
     case "file has Diagnostics":
       return [f.file, "—", f.status];
     case "Scenario unsupported":

@@ -270,7 +270,8 @@ export function shown(value: unknown): string {
   return String(value);
 }
 
-const withCandidates = (candidates: string[]) =>
+/** ` (candidates: a, b)`, or nothing when there are none. */
+export const withCandidates = (candidates: string[]) =>
   candidates.length > 0 ? ` (candidates: ${candidates.join(", ")})` : "";
 
 /** One line of `whynorun test` output, such as `ci.yml › test › secrets: available → empty (root FK-0 → FK-2)`. */
