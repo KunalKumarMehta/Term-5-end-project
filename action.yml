@@ -1,0 +1,10 @@
+name: WhyNoRun
+description: Check your Behaviour tests against your GitHub workflows, with annotations and a step summary. It never comments on the PR.
+author: KunalKumarMehta
+inputs:
+  tests:
+    description: Test file glob patterns, one per line, relative to the workspace.
+    default: .github/whynorun/**/*.test.yml
+runs:
+  using: node24
+  main: dist/action.mjs
