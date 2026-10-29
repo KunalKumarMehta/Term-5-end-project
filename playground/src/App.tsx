@@ -61,7 +61,13 @@ import {
 } from "./Explanation";
 import { Grid, Value, same, type Column } from "./Grid";
 import { ImportForm } from "./ImportForm";
-import type { Imported, ImportedFacts } from "./importRepo";
+import {
+  importRepo,
+  type Failure,
+  type Imported,
+  type ImportedFacts,
+} from "./importRepo";
+import { PENDING, decodeLink, encodeLink, isLink, type Opening } from "./link";
 import { MergeReadiness, RequiredChecks, producedNews } from "./MergeReadiness";
 import { InvalidTestDialog, TestPicker } from "./OpenTest";
 import { PasteDialog } from "./PasteDialog";
@@ -73,6 +79,7 @@ import {
   type TestStatus,
 } from "./Pins";
 import { RepoFacts, sourceOf, tagText, titleOf, type Fact } from "./RepoFacts";
+import { ShareDialog } from "./Share";
 import { fromDropped, fromPicked, type Upload } from "./upload";
 
 type Pane = "yaml" | "scenario" | "results";
@@ -83,6 +90,55 @@ const INTERNAL_ERROR =
 const NOT_SAVING = "Not saving a draft in this browser";
 const SAVED_OVER = "Another WhyNoRun tab saved over this draft";
 const CLEARED = "Another WhyNoRun tab cleared the saved draft";
+
+/** A link in the fragment, removed before it's decoded so a crash can't repeat (#14 §6.1). */
+function takeLink(): string | undefined {
+  const fragment = location.hash;
+  if (!isLink(fragment)) return;
+  history.replaceState(history.state, "", location.pathname + location.search);
+  return fragment;
+}
+
+function pendingLink(): string | undefined {
+  try {
+    return sessionStorage.getItem(PENDING) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function forgetLink() {
+  try {
+    sessionStorage.removeItem(PENDING);
+  } catch {
+    // Nothing was kept where storage is blocked.
+  }
+}
+
+// A link at load, or one a reload left pending, which then opens again (#14 §9).
+const bootLink = takeLink() ?? pendingLink();
+
+/** The import messages of #7 and #12 §4, for a reference link that couldn't load (#14 §9). */
+function failureText(f: Failure): string {
+  switch (f.kind) {
+    case "repo":
+      return "Not found or private. Private repos aren’t supported.";
+    case "ref":
+      return "No branch, tag or commit with this SHA.";
+    case "folder":
+      return "No GitHub workflows at this ref.";
+    case "none":
+      return "No .yml/.yaml files directly in .github/workflows/.";
+    case "rate":
+      return `GitHub allows 60 requests an hour without sign-in, and they’re used up${
+        f.reset
+          ? ` until ${f.reset.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+          : ""
+      }.`;
+    case "network":
+      return `Couldn’t reach GitHub${f.status === undefined ? "" : ` (${f.status})`}.`;
+  }
+}
 
 const statusRegion = document.getElementById("status")!;
 const toastRegion = document.getElementById("toasts")!;
@@ -422,7 +478,9 @@ export function App() {
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
-  const edited = base !== undefined && !sameFiles(files, base);
+  // An edited import from a link has no original files, only its reference (#14 §7).
+  const edited =
+    base !== undefined ? !sameFiles(files, base) : origin === "imported";
 
   // #14 §4: the draft's save time, a failed store, another tab's notice and an unreadable draft.
   const [saved, setSaved] = useState(boot.saved);
@@ -544,7 +602,8 @@ export function App() {
     const said = boot.saved
       ? `Restored your draft, saved ${when(boot.saved)}`
       : boot.unreadable?.reason;
-    if (!said) return;
+    // A link at load makes its own announcement.
+    if (!said || bootLink) return;
     const timer = setTimeout(() => announce(said), 0);
     return () => clearTimeout(timer);
   }, [boot, announce]);
@@ -559,6 +618,7 @@ export function App() {
   const finish = (done: Confirm, accepted: boolean) => {
     setConfirm(undefined);
     if (accepted) done.run();
+    else done.keep?.();
     requestAnimationFrame(() => document.getElementById("set-source")?.focus());
   };
 
@@ -739,6 +799,144 @@ export function App() {
           : []),
     ];
   };
+
+  // #14 §8–9: the share popover's link, and a link's banner: bad, loading or failed.
+  const [share, setShare] = useState<{ url?: string }>();
+  const [linkNote, setLinkNote] = useState<{
+    text: string;
+    retry?: { opening: Opening; what: string };
+  }>();
+  const linkRun = useRef<AbortController>(undefined);
+
+  const copyLink = () => {
+    setShare({});
+    void encodeLink(latest.current!, open).then((fragment) =>
+      setShare({
+        url: location.origin + location.pathname + location.search + fragment,
+      }),
+    );
+  };
+
+  /** #14 §9 steps 4–6: cancels a running import, loads the link's set, and only then replaces. */
+  const loadLink = async (opening: Opening, what: string) => {
+    // Closing the import form cancels its import, as its Cancel button does.
+    setImporting(false);
+    linkRun.current?.abort();
+    let next = opening.held;
+    const reference = opening.reference;
+    if (reference) {
+      const controller = new AbortController();
+      linkRun.current = controller;
+      setLinkNote({ text: "Opening the shared playground…" });
+      let got: Imported | Failure;
+      try {
+        got = await importRepo(
+          reference.owner,
+          reference.repo,
+          reference.sha,
+          () => {},
+          controller.signal,
+        );
+      } catch {
+        return; // Dismissed, or another link took its place.
+      }
+      if (!("files" in got)) {
+        // The pending key keeps the link, so a reload tries again (#14 §9).
+        const text = `The shared playground couldn't load: ${failureText(got)}`;
+        setLinkNote({ text, retry: { opening, what } });
+        announce(text);
+        return;
+      }
+      next = {
+        ...next,
+        files: got.files,
+        base: got.files,
+        imported: {
+          ...next.imported!,
+          ref: reference.ref,
+          files: got.files,
+          ignored: got.ignored,
+        },
+      };
+    }
+    linkRun.current = undefined;
+    setLinkNote(undefined);
+    // A wholesale replacement: the first run stays silent (#14 §12).
+    last.current.replaced = true;
+    newsRef.current = null;
+    setFiles(next.files);
+    setOrigin(next.origin);
+    setImported(next.imported);
+    setBase(next.base);
+    setUploadNote(undefined);
+    setActive(undefined);
+    setScenarios(next.scenarios);
+    setLabels(next.labels);
+    setPins(next.pins);
+    setOpened(undefined);
+    // Scenarios from a link count as touched (#14 §3).
+    setTouched(true);
+    setForm(0);
+    setLabelError(undefined);
+    setRepoDraft(undefined);
+    sheetScroll.current = 0;
+    setOpen(opening.open);
+    forgetLink();
+    setToast({ id: Date.now(), node: "Opened shared playground" });
+    announce(`Opened shared playground: ${what}`);
+  };
+
+  /** #14 §9: a link is checked, kept pending, and opened under the confirm-first rule. */
+  const openLink = async (fragment: string, atLoad = false) => {
+    const got = await decodeLink(fragment);
+    if ("error" in got) {
+      forgetLink();
+      setLinkNote({ text: got.error });
+      announce(
+        atLoad && boot.saved ? `${got.error}. Restored your draft` : got.error,
+      );
+      return;
+    }
+    try {
+      sessionStorage.setItem(PENDING, fragment);
+    } catch {
+      // Storage refuses: the link still opens, but a reload can't bring it back.
+    }
+    const { held: h } = got;
+    const what = h.imported
+      ? `${h.imported.owner}/${h.imported.repo} @ ${h.imported.sha.slice(0, 7)}`
+      : plural(h.files.length, "file");
+    ask({
+      title: `Open the shared playground (${what}, ${plural(h.scenarios.length, "Scenario")})?`,
+      losses: [...setLosses(), ...openLosses()],
+      action: "Open link",
+      run: () => void loadLink(got, what),
+      // Keep my draft leaves a running import alone, and forgets the link.
+      keep: forgetLink,
+    });
+  };
+  const openLinkRef = useRef<typeof openLink>(undefined);
+  useLayoutEffect(() => {
+    openLinkRef.current = openLink;
+  });
+
+  useEffect(() => {
+    // After the first render settles; its announcement stands in for the restore's (#14 §12).
+    const timer = setTimeout(
+      () => bootLink && void openLinkRef.current!(bootLink, true),
+      0,
+    );
+    // Links are also accepted through hashchange (#14 §9).
+    const changed = () => {
+      const fragment = takeLink();
+      if (fragment) void openLinkRef.current!(fragment);
+    };
+    window.addEventListener("hashchange", changed);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("hashchange", changed);
+    };
+  }, []);
 
   /** Opens the chosen tests as the Scenario tabs, replacing the Scenarios and tray (#12 §9). */
   const openTests = (
@@ -1573,11 +1771,13 @@ export function App() {
                   ? `${imported!.owner}/${imported!.repo} @ ${imported!.sha.slice(0, 7)} (${imported!.ref})${edited ? " · edited since import" : ""}`
                   : `Workflow set: ${files.length} ${origin} file${files.length === 1 ? "" : "s"}${edited ? " · edited" : ""}`}
           </span>
-          {edited && (origin === "example" || origin === "imported") && (
-            <button type="button" onClick={reset}>
-              Reset
-            </button>
-          )}
+          {edited &&
+            base &&
+            (origin === "example" || origin === "imported") && (
+              <button type="button" onClick={reset}>
+                Reset
+              </button>
+            )}
           {notSaving ? (
             <span className="hint">{NOT_SAVING}</span>
           ) : (
@@ -1585,6 +1785,13 @@ export function App() {
           )}
           <button type="button" onClick={startOver}>
             Start over
+          </button>
+          <button
+            type="button"
+            disabled={files.length === 0}
+            onClick={copyLink}
+          >
+            Copy link
           </button>
           <button type="button" onClick={() => setImporting(true)}>
             {origin === "imported" ? "Re-import" : "Import repo"}
@@ -1629,6 +1836,31 @@ export function App() {
             }}
           />
           {uploadNote}
+          {linkNote && (
+            <p className="banner">
+              {linkNote.text}{" "}
+              {linkNote.retry && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void loadLink(linkNote.retry!.opening, linkNote.retry!.what)
+                  }
+                >
+                  Retry
+                </button>
+              )}{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  linkRun.current?.abort();
+                  forgetLink();
+                  setLinkNote(undefined);
+                }}
+              >
+                Dismiss
+              </button>
+            </p>
+          )}
           {tabNotice && (
             <p className="banner">
               {tabNotice}{" "}
@@ -2199,6 +2431,19 @@ export function App() {
             })
           }
           onClose={() => setSaving(false)}
+        />
+      )}
+      {share && (
+        <ShareDialog
+          url={share.url}
+          reference={
+            origin === "imported" && edited
+              ? `${imported!.owner}/${imported!.repo}@${imported!.sha.slice(0, 7)}`
+              : undefined
+          }
+          pins={pinCount > 0}
+          onCopied={() => setToast({ id: Date.now(), node: "Link copied" })}
+          onClose={() => setShare(undefined)}
         />
       )}
       {invalidTest && (
