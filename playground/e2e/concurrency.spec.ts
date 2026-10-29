@@ -129,7 +129,7 @@ test("a github.event value run B's group reads is settled on the Follow-up event
   await results(page).getByRole("tab", { name: "Concurrency" }).click();
   const b = row(page, "ci.yml › concurrency.B");
   await expect(b).toContainText("uncertain (pending, runs)");
-  await b.getByRole("button").click();
+  await b.locator(".verdict").click();
   const settleIt = page
     .getByRole("region", { name: "Explanation" })
     .getByRole("region", { name: "Settle it" });

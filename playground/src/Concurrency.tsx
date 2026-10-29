@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { isConcurrency, type Verdict } from "../../src/core";
 import { Value, same, type Column } from "./Grid";
+import { PinToggle } from "./Pins";
 
 const ADD = "Add a Follow-up event to see what happens to run B";
 
@@ -79,7 +80,8 @@ export function Concurrency({
         onClick={() => onOpen(v.key, i)}
       >
         <Value verdict={v} />
-      </button>{" "}
+      </button>
+      <PinToggle i={i} subject={v.key} />{" "}
       <span className="resolved">
         group {v.group === undefined ? "unknown" : <code>{v.group}</code>}
         {v.key.endsWith(".A") && (

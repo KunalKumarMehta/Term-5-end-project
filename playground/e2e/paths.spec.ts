@@ -34,7 +34,7 @@ test("a member's docs-only pull_request skips ci.yml at its paths: line, and a s
 
   await eventForm(page).getByLabel("Changed files").fill("docs/README.md");
   await expect(row(page, "ci.yml")).toHaveText("ci.yml skipped root PA-2");
-  await row(page, "ci.yml").getByRole("button").click();
+  await row(page, "ci.yml").locator(".verdict").click();
   await expect(page.getByRole("list", { name: "Causes" })).toContainText(
     "ci.yml:5",
   );

@@ -625,3 +625,43 @@ select.assumed {
     border-color: var(--wait);
   }
 }
+
+/* Pins (#9 §3): the icon beside each Verdict, pressed while pinned. */
+.verdicts li {
+  display: flex;
+  align-items: center;
+}
+
+.grid .verdict {
+  display: inline-block;
+}
+
+.pin {
+  margin-left: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  fill: none;
+  stroke: currentColor;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.pin[aria-pressed="true"] {
+  color: var(--fg);
+  fill: currentColor;
+}
+
+.pin:focus-visible {
+  outline: 2px solid var(--fg);
+}
+
+.preview {
+  max-height: 20rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  font-size: 0.8125rem;
+}

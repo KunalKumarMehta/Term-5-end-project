@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { isCheck, type Verdict } from "../../src/core";
+import { PinToggle } from "./Pins";
 
 const TONES: Record<string, string> = {
   runs: "good",
@@ -147,16 +148,19 @@ export function Grid({
                 <td key={i}>
                   <span className="tag">{c.label}</span>
                   {v ? (
-                    <button
-                      type="button"
-                      className="verdict"
-                      data-key={key}
-                      data-scenario={i}
-                      aria-expanded={open?.key === key && open.i === i}
-                      onClick={() => onOpen(key, i)}
-                    >
-                      <Value verdict={v} />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="verdict"
+                        data-key={key}
+                        data-scenario={i}
+                        aria-expanded={open?.key === key && open.i === i}
+                        onClick={() => onOpen(key, i)}
+                      >
+                        <Value verdict={v} />
+                      </button>
+                      <PinToggle i={i} subject={key} />
+                    </>
                   ) : (
                     "—"
                   )}
