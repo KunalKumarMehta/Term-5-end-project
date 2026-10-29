@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import {
   compareTest,
+  loadScenario,
   parseTestFile,
   simulate,
   writeTestFile,
@@ -301,4 +302,10 @@ tests:
   expect(saved.tests[0]).toEqual(original.tests[0]);
   expect(saved.tests[2]).toEqual(original.tests[2]);
   expect(Object.keys(saved.tests[1]!.pins)).toEqual(["check › build"]);
+});
+
+test("loadScenario brings a draft's Scenario through its Test file version's loader, and reads no version it doesn't know (ADR 0002, #14 §5)", () => {
+  expect(loadScenario(1, forkPr)).toEqual(forkPr);
+  for (const version of [2, "1", "constructor", undefined])
+    expect(loadScenario(version, forkPr)).toBeUndefined();
 });

@@ -40,6 +40,16 @@ const LOADERS: Record<number, (file: unknown) => unknown> = {
   1: (file) => file,
 };
 
+/**
+ * A playground draft's Scenario in the current shape, through the loader of the Test file
+ * `version` it was saved with; undefined for a version this WhyNoRun can't read (#14 §5).
+ */
+export function loadScenario(version: unknown, scenario: unknown): unknown {
+  if (typeof version !== "number" || !Object.hasOwn(LOADERS, version)) return;
+  const file = LOADERS[version]!({ version, tests: [{ scenario }] });
+  return (file as { tests: [{ scenario: unknown }] }).tests[0].scenario;
+}
+
 const STRINGS = "quote it: GitHub variables and job outputs are always strings";
 // The playground's owner/repo check says the same (#12 addendum B).
 const OWNER_REPO = "use the form owner/repo, e.g. acme/app";

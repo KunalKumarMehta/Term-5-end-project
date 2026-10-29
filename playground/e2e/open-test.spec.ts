@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { parse, stringify } from "yaml";
+import { fresh } from "./forms";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const header = (page: Page) => page.getByRole("banner");
@@ -93,7 +94,7 @@ test("re-opening the demo's fork-pr.test.yml waits for a Workflow set, then show
   const text = await saveDemo(page);
 
   // Order doesn't matter: opened before any Workflow set, the pins wait (#12 §9).
-  await page.goto("./");
+  await fresh(page);
   await openTest(page, "fork-pr.test.yml", text);
   await expect(toast(page)).toHaveText("Opened fork-pr.test.yml");
   await expect(page.getByLabel("Scenario label")).toHaveValue("Fork PR");
@@ -231,7 +232,7 @@ test("a loaded pin whose root the Maintainer deleted stays loose when saved", as
   delete demo.tests[0]!.pins["ci.yml › concurrency.A"]!.root;
   const loose = stringify(demo, { version: "1.2", schema: "core" });
 
-  await page.goto("./");
+  await fresh(page);
   await loadExample(page);
   await openTest(page, "fork-pr.test.yml", loose);
   await pasteCi(
@@ -349,7 +350,7 @@ test("with the demo's fork-pr.test.yml open, after editing ci.yml so A isn't can
   page,
 }) => {
   const text = await saveDemo(page);
-  await page.goto("./");
+  await fresh(page);
   await loadExample(page);
   await openTest(page, "fork-pr.test.yml", text);
   await expect(marks(page)).toHaveText(Array(4).fill("✓ matches its pin"));

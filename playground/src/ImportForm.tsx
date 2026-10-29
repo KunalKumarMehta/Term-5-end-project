@@ -5,7 +5,7 @@ import { importRepo, type Failure, type Imported } from "./importRepo";
 // Only the owner and repo are read from a link, never a ref: branch names can hold "/" (#7).
 const LINK = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/?#]+)\/([^/?#]+)/i;
 // #12 §6: only obvious garbage; whether the ref exists is GitHub's to say.
-const GARBAGE = /[\s~^:?*[\\]|\.\./;
+export const GARBAGE = /[\s~^:?*[\\]|\.\./;
 
 const INSTEAD = " Paste or upload instead.";
 

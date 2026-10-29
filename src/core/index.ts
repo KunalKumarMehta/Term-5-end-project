@@ -56,6 +56,7 @@ export {
   blocksUpdate,
   compareTest,
   findingText,
+  loadScenario,
   parseTestFile,
   shown,
   updatePin,

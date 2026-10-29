@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { eventForm } from "./forms";
+import { eventForm, fresh } from "./forms";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const card = (page: Page, job: string) =>
@@ -103,7 +103,7 @@ test("with Compare on, each card shows both Scenarios side by side", async ({
 
 /** Pastes each file into a fresh page, in place of the example, on a dated push. */
 async function paste(page: Page, files: Record<string, string>) {
-  await page.goto("./");
+  await fresh(page);
   for (const [path, yaml] of Object.entries(files)) {
     await page
       .getByRole("banner")
