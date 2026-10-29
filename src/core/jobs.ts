@@ -158,7 +158,7 @@ export function jobVerdicts(
     Object.hasOwn(assume, key(id)) && assume[key(id)] === "fails";
   const github = githubContext(scenario);
   const contexts = { github, vars: { ...scenario.repo.vars }, inputs: {} };
-  const { event, repo } = scenario;
+  const { event } = scenario;
   const unsettled = new Map<string, Unsettled>();
   // The activity types a run with no type on its Event may have: GitHub's defaults, narrowed
   // by the workflow's `types:` (a callee's caller narrows nothing here).
@@ -249,48 +249,8 @@ export function jobVerdicts(
           : lack(name);
       }
       if (context !== "github" || rest.length === 0) return undefined;
-      const field = rest[0]!.toLowerCase();
-      if (field === "repository" || field === "repository_owner") {
-        const got =
-          repo.repository === undefined
-            ? lack("repo.repository")
-            : { value: repo.repository };
-        if (!("value" in got) || field === "repository") return got;
-        return { value: String(got.value).split("/")[0] };
-      }
-      if (field === "actor" || field === "triggering_actor")
-        return event.actor === "dependabot"
-          ? { value: "dependabot[bot]" }
-          : event.login === undefined
-            ? lack("event.login")
-            : { value: event.login };
-      if (FROM_EVENT.has(field)) return undefined;
-      if (field !== "event") return lack(`github.${rest[0]}`);
-      if (rest.length === 1) return undefined;
-
-      // github.event.*: the Event's fields and its payload, read with Object.hasOwn.
-      const star = rest.indexOf("*");
-      const walk = rest.slice(1, star < 0 ? undefined : star);
-      let at: unknown = github.event;
-      for (const seg of walk) {
-        if (!isObj(at)) return { value: null };
-        const found = ownKey(at, seg);
-        if (found === undefined) {
-          if (ABSENT[event.name]?.includes(walk[0]!.toLowerCase()))
-            return { value: null };
-          // A pull request Event with no activity type is one of the types the run takes.
-          if (at === github.event && seg.toLowerCase() === "action")
-            return walk.length > 1 ? { value: null } : lack("event.type");
-          // A member's own repo is the base repo, so its full_name is the owner/repo fact.
-          if (
-            walk.join(".").toLowerCase() === "pull_request.head.repo.full_name"
-          )
-            return lack("repo.repository");
-          return lack(`github.event.${rest.slice(1).join(".")}`);
-        }
-        at = at[found];
-      }
-      return star < 0 ? { value: at } : undefined;
+      const got = readGithub(rest, scenario, github);
+      return got && "needed" in got ? lack(got.needed) : got;
     };
 
   const candidatesOf = (name: string, compared: unknown[]): unknown[] => {
@@ -699,6 +659,58 @@ export function jobVerdicts(
 }
 
 type Obj = Record<string, unknown>;
+
+/**
+ * Reads `github.<rest>` for the Scenario's Event (#8 §6): its value, the input the Scenario
+ * lacks, or undefined to read the worked-out `github` context as given.
+ */
+export function readGithub(
+  rest: string[],
+  { event, repo }: Scenario,
+  github: { event: Obj } & Obj,
+): { value: unknown } | { needed: string } | undefined {
+  const field = rest[0]!.toLowerCase();
+  if (field === "repository" || field === "repository_owner") {
+    const got =
+      repo.repository === undefined
+        ? { needed: "repo.repository" }
+        : { value: repo.repository };
+    if (!("value" in got) || field === "repository") return got;
+    return { value: String(got.value).split("/")[0] };
+  }
+  if (field === "actor" || field === "triggering_actor")
+    return event.actor === "dependabot"
+      ? { value: "dependabot[bot]" }
+      : event.login === undefined
+        ? { needed: "event.login" }
+        : { value: event.login };
+  if (FROM_EVENT.has(field)) return undefined;
+  if (field !== "event") return { needed: `github.${rest[0]}` };
+  if (rest.length === 1) return undefined;
+
+  // github.event.*: the Event's fields and its payload, read with Object.hasOwn.
+  const star = rest.indexOf("*");
+  const walk = rest.slice(1, star < 0 ? undefined : star);
+  let at: unknown = github.event;
+  for (const seg of walk) {
+    if (!isObj(at)) return { value: null };
+    const found = ownKey(at, seg);
+    if (found === undefined) {
+      if (ABSENT[event.name]?.includes(walk[0]!.toLowerCase()))
+        return { value: null };
+      // A pull request Event with no activity type is one of the types the run takes.
+      if (at === github.event && seg.toLowerCase() === "action")
+        return walk.length > 1 ? { value: null } : { needed: "event.type" };
+      // A member's own repo is the base repo, so its full_name is the owner/repo fact.
+      if (walk.join(".").toLowerCase() === "pull_request.head.repo.full_name")
+        return { needed: "repo.repository" };
+      return { needed: `github.event.${rest.slice(1).join(".")}` };
+    }
+    at = at[found];
+  }
+  return star < 0 ? { value: at } : undefined;
+}
+
 const isObj = (v: unknown): v is Obj =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 

@@ -34,8 +34,14 @@ test("in Member PR, a docs-only change makes both checks Pending and blocks merg
   const label = page.getByLabel("Scenario label");
   await label.fill("Member PR");
   await label.press("Enter");
-  await page.getByLabel("Actor kind").selectOption("member");
-  await page.getByLabel("Changed files").fill("docs/README.md");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Actor kind")
+    .selectOption("member");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Changed files")
+    .fill("docs/README.md");
 
   for (const key of ["check › build", "check › test"])
     await expect(checkRow(page, key).getByRole("cell")).toHaveText([
@@ -126,7 +132,7 @@ test('adding "job X fails" in Assumptions turns its dependent\'s check May not b
   await scenario
     .getByLabel("Assume this job fails")
     .selectOption("ci.yml › changes");
-  await scenario.getByRole("button", { name: "Add" }).click();
+  await scenario.getByRole("button", { name: "Add", exact: true }).click();
   await expect(checkRow(page, "check › e2e")).toContainText("may not block");
   await checkRow(page, "check › e2e").getByRole("button").click();
   const causes = page

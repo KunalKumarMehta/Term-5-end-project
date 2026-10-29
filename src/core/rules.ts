@@ -460,6 +460,36 @@ const rows: Rule[] = [
     confidence: "High",
   },
   {
+    id: "CC-1",
+    text: "A concurrency group holds at most one running and, by default (`queue: single`), one pending job or run, across the whole repository and every workflow. A new item waits while another runs, and any item already pending in the group is cancelled and replaced, even without `cancel-in-progress`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High",
+  },
+  {
+    id: "CC-2",
+    text: "`cancel-in-progress: true` on the arriving item also cancels the item running in its group. It may be an expression.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High",
+  },
+  {
+    id: "CC-4",
+    text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High",
+  },
+  {
+    id: "CC-5",
+    text: "A workflow-level group may read `github`, `inputs` and `vars`, and a job-level one also `needs`, `strategy` and `matrix`. A property the event leaves undefined, such as `github.head_ref` on push, resolves to empty, so a fallback (`|| github.run_id`) is needed to keep groups apart.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-a-fallback-value",
+    confidence: "High",
+  },
+  {
+    id: "CC-8",
+    text: "A check waiting at the front of the queue on a full concurrency group shows the status `pending`.",
+    url: "https://docs.github.com/en/pull-requests/reference/status-checks#check-statuses-and-conclusions",
+    confidence: "High",
+  },
+  {
     id: "WN-1",
     text: "Assumption: this job fails.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",

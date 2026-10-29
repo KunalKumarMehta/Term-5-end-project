@@ -14410,6 +14410,24 @@ function indexOn(doc, span) {
   const root = doc.contents.items.find(
     (p) => name(doc, p.key) === "permissions"
   );
+  const concurrency = (pair2, own2) => {
+    if (!pair2) return void 0;
+    const via = own2 ?? ((0, import_yaml2.isAlias)(pair2.value) ? span(pair2.value) : void 0);
+    const value2 = resolve2(doc, pair2.value);
+    const at = (key) => {
+      const v = (0, import_yaml2.isMap)(value2) ? resolve2(doc, value2.items.find((p) => name(doc, p.key) === key)?.value) : void 0;
+      return (0, import_yaml2.isScalar)(v) ? { value: v.value, span: via ?? span(v) } : void 0;
+    };
+    const group = (0, import_yaml2.isScalar)(value2) ? { value: value2.value, span: via ?? span(value2) } : at("group");
+    const cancel = at("cancel-in-progress");
+    return {
+      group: {
+        text: String(group?.value ?? ""),
+        span: group?.span ?? via ?? span(pair2.key)
+      },
+      ...cancel && { cancel }
+    };
+  };
   const jobsPair = doc.contents.items.find((p) => name(doc, p.key) === "jobs");
   const jobs = resolve2(doc, jobsPair?.value);
   for (const item of (0, import_yaml2.isMap)(jobs) ? jobs.items : []) {
@@ -14435,10 +14453,19 @@ function indexOn(doc, span) {
       environment: env && (own2 ?? span(env.pair.key)),
       checkouts: (0, import_yaml2.isSeq)(steps) ? checkouts(doc, steps.items, own2, span) : [],
       uses: field("uses")?.span,
-      secrets: field("secrets")?.span
+      secrets: field("secrets")?.span,
+      concurrency: concurrency(field("concurrency")?.pair, own2)
     });
   }
-  const workflow = { jobSpans, permissions: permissions(root, void 0) };
+  const workflow = {
+    jobSpans,
+    permissions: permissions(root, void 0),
+    name: name(doc, doc.contents.get("name", true)),
+    concurrency: concurrency(
+      doc.contents.items.find((p) => name(doc, p.key) === "concurrency"),
+      void 0
+    )
+  };
   const pair = doc.contents.items.find((p) => name(doc, p.key) === "on");
   if (!pair || !(0, import_yaml2.isScalar)(pair.key))
     return { ...workflow, onSpan: void 0, onEntries };
@@ -16001,7 +16028,7 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
   const fails = (id) => Object.hasOwn(assume, key(id)) && assume[key(id)] === "fails";
   const github = githubContext(scenario);
   const contexts = { github, vars: { ...scenario.repo.vars }, inputs: {} };
-  const { event, repo } = scenario;
+  const { event } = scenario;
   const unsettled = /* @__PURE__ */ new Map();
   const listed = parsed.events[event.name]?.types;
   const activityTypes = PR_DEFAULT_TYPES.filter(
@@ -16063,35 +16090,8 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
       return Object.hasOwn(assume, name2) ? { value: assume[name2] } : lack(name2);
     }
     if (context !== "github" || rest.length === 0) return void 0;
-    const field = rest[0].toLowerCase();
-    if (field === "repository" || field === "repository_owner") {
-      const got = repo.repository === void 0 ? lack("repo.repository") : { value: repo.repository };
-      if (!("value" in got) || field === "repository") return got;
-      return { value: String(got.value).split("/")[0] };
-    }
-    if (field === "actor" || field === "triggering_actor")
-      return event.actor === "dependabot" ? { value: "dependabot[bot]" } : event.login === void 0 ? lack("event.login") : { value: event.login };
-    if (FROM_EVENT.has(field)) return void 0;
-    if (field !== "event") return lack(`github.${rest[0]}`);
-    if (rest.length === 1) return void 0;
-    const star = rest.indexOf("*");
-    const walk2 = rest.slice(1, star < 0 ? void 0 : star);
-    let at = github.event;
-    for (const seg of walk2) {
-      if (!isObj(at)) return { value: null };
-      const found = ownKey(at, seg);
-      if (found === void 0) {
-        if (ABSENT[event.name]?.includes(walk2[0].toLowerCase()))
-          return { value: null };
-        if (at === github.event && seg.toLowerCase() === "action")
-          return walk2.length > 1 ? { value: null } : lack("event.type");
-        if (walk2.join(".").toLowerCase() === "pull_request.head.repo.full_name")
-          return lack("repo.repository");
-        return lack(`github.event.${rest.slice(1).join(".")}`);
-      }
-      at = at[found];
-    }
-    return star < 0 ? { value: at } : void 0;
+    const got = readGithub(rest, scenario, github);
+    return got && "needed" in got ? lack(got.needed) : got;
   };
   const candidatesOf = (name2, compared) => {
     if (name2.includes(".*.")) return [...compared.map((c) => [c]), [], [OTHER]];
@@ -16429,6 +16429,37 @@ function jobVerdicts(prefix, parsed, workflow, scenario, inputs) {
   };
   return ids.map(final);
 }
+function readGithub(rest, { event, repo }, github) {
+  const field = rest[0].toLowerCase();
+  if (field === "repository" || field === "repository_owner") {
+    const got = repo.repository === void 0 ? { needed: "repo.repository" } : { value: repo.repository };
+    if (!("value" in got) || field === "repository") return got;
+    return { value: String(got.value).split("/")[0] };
+  }
+  if (field === "actor" || field === "triggering_actor")
+    return event.actor === "dependabot" ? { value: "dependabot[bot]" } : event.login === void 0 ? { needed: "event.login" } : { value: event.login };
+  if (FROM_EVENT.has(field)) return void 0;
+  if (field !== "event") return { needed: `github.${rest[0]}` };
+  if (rest.length === 1) return void 0;
+  const star = rest.indexOf("*");
+  const walk2 = rest.slice(1, star < 0 ? void 0 : star);
+  let at = github.event;
+  for (const seg of walk2) {
+    if (!isObj(at)) return { value: null };
+    const found = ownKey(at, seg);
+    if (found === void 0) {
+      if (ABSENT[event.name]?.includes(walk2[0].toLowerCase()))
+        return { value: null };
+      if (at === github.event && seg.toLowerCase() === "action")
+        return walk2.length > 1 ? { value: null } : { needed: "event.type" };
+      if (walk2.join(".").toLowerCase() === "pull_request.head.repo.full_name")
+        return { needed: "repo.repository" };
+      return { needed: `github.event.${rest.slice(1).join(".")}` };
+    }
+    at = at[found];
+  }
+  return star < 0 ? { value: at } : void 0;
+}
 var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 function ownKey(obj, name2) {
   if (Object.hasOwn(obj, name2)) return name2;
@@ -16716,6 +16747,180 @@ function producerBadge({ job, workflow, spans }, pending, skipped) {
     settle: job.settle ?? [],
     ...job.hints && { hints: job.hints }
   };
+}
+
+// src/core/concurrency.ts
+var isConcurrency = (key) => / › concurrency\.[AB]$/.test(key);
+var CREATED = /* @__PURE__ */ new Set(["runs", "fails"]);
+function concurrencyVerdicts(prefix, declared, workflow, a, b) {
+  const sideA = side(declared, workflow, a, "A");
+  const sideB = b && side(declared, workflow, b, "B");
+  const state = a.scenario.followUp?.runA ?? "in-progress";
+  const runA = { path: "followUp.runA", value: state };
+  const at = (rule, cancel = false) => ({
+    rule,
+    spans: [
+      declared.group.span,
+      ...cancel && declared.cancel ? [declared.cancel.span] : []
+    ],
+    inputs: rule === "CC-8" || !sideB ? [] : [runA]
+  });
+  const outcomes = [];
+  for (const createdA of each(sideA.created))
+    for (const createdB of sideB ? each(sideB.created) : [false])
+      for (const collide of !sideB ? [false] : sideA.group !== void 0 && sideB.group !== void 0 ? [sideA.group.toLowerCase() === sideB.group.toLowerCase()] : [true, false])
+        for (const cancel of sideB ? each(sideB.cancel) : [false]) {
+          const noRun = (s) => ({
+            value: "no-run",
+            causes: s.run.verdict.causes
+          });
+          const mine = (s, o) => ({
+            ...o,
+            causes: [
+              ...o.causes,
+              ...collide && createdA && createdB && sideA.group !== sideB?.group ? [{ ...at("CC-4"), inputs: [] }] : [],
+              ...s.empty ? [{ ...at("CC-5"), inputs: [] }] : []
+            ]
+          });
+          const waiting = state === "pending";
+          const kept = {
+            value: waiting ? "pending" : "runs",
+            causes: [at("CC-1")]
+          };
+          let A = createdA ? kept : noRun(sideA);
+          let B = sideB && (createdB ? { value: "runs", causes: [at("CC-1")] } : noRun(sideB));
+          if (sideB && createdA && createdB && collide) {
+            A = waiting ? { value: "cancelled", causes: [at("CC-1")] } : cancel ? { value: "cancelled", causes: [at("CC-2", true)] } : kept;
+            B = cancel ? { value: "runs", causes: [at("CC-2", true)] } : { value: "pending", causes: [at("CC-1"), at("CC-8")] };
+          }
+          outcomes.push([
+            createdA ? mine(sideA, A) : A,
+            sideB && B && (createdB ? mine(sideB, B) : B)
+          ]);
+        }
+  const verdict = (s, other, i) => {
+    const results = outcomes.map((o) => o[i]);
+    const values = [...new Set(results.map((r) => r.value))];
+    const group = s.group === void 0 ? {} : {
+      group: s.group.toLowerCase().replace(
+        /(<run_[a-z]+:)([ab])>/g,
+        (_, f, r) => `${f}${r.toUpperCase()}>`
+      )
+    };
+    const base = {
+      key: `${prefix}concurrency.${s.label}`,
+      ...group,
+      groupSource: declared.group.text
+    };
+    if (s.run.verdict.value === "unsupported")
+      return { ...base, value: "unsupported", causes: s.run.verdict.causes };
+    if (values.length === 1) return { ...base, ...results[0] };
+    const lacks = (x) => [
+      ...x.created === void 0 ? x.run.verdict.causes : [],
+      ...x.needed.map((n) => ({
+        rule: "WN-4",
+        spans: [n.span],
+        inputs: []
+      }))
+    ];
+    const paths = (x) => [
+      ...x.created === void 0 ? x.run.verdict.settle ?? [] : [],
+      ...x.needed.map((n) => n.path).filter(settleable)
+    ].map((path) => ({ path, x }));
+    const listed = [...paths(s), ...other ? paths(other) : []].filter(
+      (p, i2, all) => all.findIndex((q) => q.path === p.path) === i2
+    );
+    const settle = listed.map((p) => p.path);
+    const hints = listed.map(({ path, x }) => {
+      const followUp = x.label === "B" && /^(github\.)?event\./.test(path);
+      return {
+        ...x.run.verdict.hints?.find((h) => h.path === path) ?? {
+          path,
+          text: path.startsWith("vars.") ? `repository variable \`${path.slice(5)}\`` : `\`${path}\` on the ${followUp ? "Follow-up event" : "Event"}`,
+          candidates: []
+        },
+        ...followUp && { on: "followUp" }
+      };
+    });
+    return {
+      ...base,
+      value: "uncertain",
+      causes: [...lacks(s), ...other ? lacks(other) : []],
+      ...values.length <= 3 && { possible: values.sort() },
+      settle,
+      ...settle.length > 0 && { hints }
+    };
+  };
+  return [
+    verdict(sideA, sideB, 0),
+    ...sideB ? [verdict(sideB, sideA, 1)] : []
+  ];
+}
+var each = (known) => known === void 0 ? [true, false] : [known];
+function side(declared, workflow, run, label) {
+  const { scenario, verdict } = run;
+  const github = {
+    ...githubContext(scenario),
+    workflow,
+    // Each run has its own: two runs never share one (#6).
+    run_id: `<run_id:${label}>`,
+    run_number: `<run_number:${label}>`,
+    run_attempt: `<run_attempt:${label}>`
+  };
+  const needed = [];
+  let empty = false;
+  const vars = scenario.repo.vars ?? {};
+  const resolve4 = (path) => {
+    const [context, ...rest] = path;
+    const lower = context.toLowerCase();
+    if (lower === "vars" && rest.length > 0) {
+      const found = Object.keys(vars).find(
+        (k) => k.toLowerCase() === rest[0].toLowerCase()
+      );
+      return found === void 0 ? { needed: `vars.${rest[0]}` } : { value: rest.length === 1 ? vars[found] : null };
+    }
+    if (lower === "inputs") return { value: null };
+    if (lower !== "github") return { needed: path.join(".") };
+    if (rest.length === 0) return void 0;
+    const field = rest[0].toLowerCase();
+    if (rest.length === 1 && (Object.hasOwn(github, field) || FROM_EVENT.has(field))) {
+      const value = github[field] ?? null;
+      if (value === null) empty = true;
+      return { value };
+    }
+    const got = readGithub(rest, scenario, github);
+    if (got && "value" in got && got.value === null) empty = true;
+    return got;
+  };
+  const contexts = {
+    github,
+    vars: {},
+    inputs: {},
+    needs: {},
+    strategy: {},
+    matrix: {}
+  };
+  const read = (span, f) => {
+    try {
+      return f();
+    } catch (e) {
+      if (!(e instanceof RuntimeValueNeeded)) throw e;
+      needed.push({ path: e.needed, span });
+      return void 0;
+    }
+  };
+  const group = read(
+    declared.group.span,
+    () => evaluateTemplate(declared.group.text, contexts, resolve4)
+  );
+  const given = label === "B" ? declared.cancel : void 0;
+  const cancel = typeof given?.value === "string" ? read(
+    given.span,
+    () => String(evaluateValue(given.value, contexts, resolve4)) === "true"
+  ) : given?.value === true;
+  const possible = verdict.possible ?? [];
+  const created = verdict.value !== "uncertain" ? CREATED.has(verdict.value) : possible.length > 0 && possible.every((p) => CREATED.has(p)) ? true : possible.length > 0 && !possible.some((p) => CREATED.has(p)) ? false : void 0;
+  return { run, label, created, group, cancel, needed, empty };
 }
 
 // src/core/names.ts
@@ -17210,6 +17415,36 @@ var rows = [
     confidence: "High"
   },
   {
+    id: "CC-1",
+    text: "A concurrency group holds at most one running and, by default (`queue: single`), one pending job or run, across the whole repository and every workflow. A new item waits while another runs, and any item already pending in the group is cancelled and replaced, even without `cancel-in-progress`.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-2",
+    text: "`cancel-in-progress: true` on the arriving item also cancels the item running in its group. It may be an expression.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-4",
+    text: "Concurrency group names are case-insensitive: `prod` and `Prod` are one group.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency",
+    confidence: "High"
+  },
+  {
+    id: "CC-5",
+    text: "A workflow-level group may read `github`, `inputs` and `vars`, and a job-level one also `needs`, `strategy` and `matrix`. A property the event leaves undefined, such as `github.head_ref` on push, resolves to empty, so a fallback (`|| github.run_id`) is needed to keep groups apart.",
+    url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-a-fallback-value",
+    confidence: "High"
+  },
+  {
+    id: "CC-8",
+    text: "A check waiting at the front of the queue on a full concurrency group shows the status `pending`.",
+    url: "https://docs.github.com/en/pull-requests/reference/status-checks#check-statuses-and-conclusions",
+    confidence: "High"
+  },
+  {
     id: "WN-1",
     text: "Assumption: this job fails.",
     url: "https://github.com/KunalKumarMehta/whynorun/issues/6",
@@ -17262,12 +17497,11 @@ function utf8Length(text) {
   return bytes;
 }
 var loaded = /^\.github\/workflows\/([^/]+\.ya?ml)$/;
-var isJobKey = (key) => key.split(" \u203A ").length === 2 && !isCheck(key);
+var isJobKey = (key) => key.split(" \u203A ").length === 2 && !isCheck(key) && !isConcurrency(key);
 function simulate(files, input) {
   const problems = validateScenario(input);
   if (problems.length > 0) throw new TypeError(problems.join("; "));
   const { scenario, filled } = withDefaults(input);
-  const { event } = scenario;
   const parsed = files.flatMap((file) => {
     const key = loaded.exec(file.path)?.[1];
     return key === void 0 ? [] : [
@@ -17291,26 +17525,13 @@ function simulate(files, input) {
   const diagnostics = parsed.flatMap((p) => p.diagnostics).sort(
     (a, b) => compare(a.path, b.path) || a.line - b.line || a.col - b.col
   );
-  const fork = event.actor === "fork";
-  const privateFork = fork && scenario.repo.visibility === "private";
-  if (!SUPPORTED.has(event.name) || fork && event.name === "push" || privateFork) {
-    const inputs = [
-      { path: "event.name", value: event.name },
-      { path: "event.actor", value: event.actor },
-      ...privateFork ? [{ path: "repo.visibility", value: "private" }] : []
-    ];
+  const outside = unsupported(scenario, "event");
+  if (outside)
     return {
-      verdicts: [
-        {
-          key: "event",
-          value: "unsupported",
-          causes: [{ rule: "WN-3", spans: [], inputs }]
-        }
-      ],
+      verdicts: [{ key: "event", ...outside }],
       diagnostics,
       unmatchedAssumptions: []
     };
-  }
   const verdicts = evaluate2(parsed, scenario);
   for (const path of filled) {
     const allowed = ASSUMED.get(path);
@@ -17353,6 +17574,22 @@ function unmatched(scenario, verdicts) {
     return [{ key, candidates }];
   });
 }
+function unsupported(scenario, on) {
+  const event = scenario[on];
+  const fork = event.actor === "fork";
+  const privateFork = fork && scenario.repo.visibility === "private";
+  if (SUPPORTED.has(event.name) && !(fork && event.name === "push") && !privateFork)
+    return void 0;
+  const inputs = [
+    { path: `${on}.name`, value: event.name },
+    { path: `${on}.actor`, value: event.actor },
+    ...privateFork ? [{ path: "repo.visibility", value: "private" }] : []
+  ];
+  return {
+    value: "unsupported",
+    causes: [{ rule: "WN-3", spans: [], inputs }]
+  };
+}
 function evaluate2(parsed, scenario) {
   const { event, repo } = scenario;
   const files = new Map(parsed.map((p) => [p.key, p]));
@@ -17364,6 +17601,13 @@ function evaluate2(parsed, scenario) {
   } : void 0;
   const queued = [];
   const pushed = event.name !== "push" && event.actor !== "fork" ? { ...scenario, event: { ...event, name: "push" } } : void 0;
+  const followed = scenario.followUp && {
+    ...scenario,
+    event: (({ runA: _a, pendingRuns: _p, ...event2 }) => event2)(
+      scenario.followUp
+    )
+  };
+  const outsideB = followed && unsupported(scenario, "followUp");
   const pa4 = {
     rule: "PA-4",
     spans: [],
@@ -17437,6 +17681,35 @@ function evaluate2(parsed, scenario) {
     if (queue) {
       const w = run(queue, true);
       queued.push(...producing(queue, jobsWithCallees(w, queue), w));
+    }
+    const declared = [
+      ...file.concurrency ? [{ id: void 0, at: file.concurrency }] : [],
+      ...file.jobs.flatMap((j) => {
+        const at = file.jobSpans.get(j.id.value)?.concurrency;
+        return at ? [{ id: j.id.value, at }] : [];
+      })
+    ];
+    if (declared.length > 0) {
+      const workflowB = followed && !outsideB && run(followed);
+      const jobsB = workflowB ? jobVerdicts(`${key} \u203A `, file, workflowB, followed) : [];
+      const name2 = file.name ?? `.github/workflows/${key}`;
+      for (const { id, at } of declared) {
+        const subject = id === void 0 ? key : `${key} \u203A ${id}`;
+        const of = (vs) => vs.find((v) => v.key === subject);
+        const b = followed && {
+          scenario: followed,
+          verdict: outsideB ? { key: subject, ...outsideB } : id === void 0 ? workflowB : of(jobsB)
+        };
+        verdicts.push(
+          ...concurrencyVerdicts(
+            `${subject} \u203A `,
+            at,
+            name2,
+            { scenario, verdict: id === void 0 ? workflow : of(jobs) },
+            b
+          )
+        );
+      }
     }
     verdicts.push(
       workflow,

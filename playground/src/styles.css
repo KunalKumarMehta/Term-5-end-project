@@ -481,6 +481,18 @@ dialog form {
   width: auto;
 }
 
+/* Concurrency: a run's resolved group beside the group as written, and the A-then-B step. */
+.grid .resolved,
+.grid .while td {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.grid .while td {
+  border-bottom: none;
+  font-style: italic;
+}
+
 /* body's overflow-wrap: anywhere would break a badge mid-word; wrapping at spaces keeps the table in its panel. */
 .grid .value {
   overflow-wrap: normal;

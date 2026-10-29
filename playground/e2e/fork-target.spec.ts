@@ -22,8 +22,14 @@ test("Fork target: on 2026-12-03 triage.yml fails (root PRT-2), and on 2026-12-0
   const label = page.getByLabel("Scenario label");
   await label.fill("Fork target");
   await label.press("Enter");
-  await page.getByLabel("Event name").fill("pull_request_target");
-  await page.getByLabel("Actor kind").selectOption("fork");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Event name")
+    .fill("pull_request_target");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Actor kind")
+    .selectOption("fork");
 
   await expect(row(page, "triage.yml").getByRole("cell")).toHaveText([
     "◆ differs",

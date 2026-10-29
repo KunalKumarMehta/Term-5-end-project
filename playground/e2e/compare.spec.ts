@@ -39,16 +39,24 @@ const differencesOnly = (page: Page) =>
 async function compareMainWithFeature(page: Page) {
   await paste(page, FILTERED, ".github/workflows/ci.yml");
   await paste(page, UNFILTERED, ".github/workflows/lint.yml");
-  await page.getByLabel("Ref").fill("main");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Ref")
+    .fill("main");
   await page.getByLabel("Simulation date").fill("2026-12-03");
   await page.getByRole("banner").getByLabel("Compare").check();
   await expect(
     page.getByRole("tab", { name: "Scenario 2", selected: true }),
   ).toBeVisible();
   // A full copy of Scenario 1.
-  await expect(page.getByLabel("Ref")).toHaveValue("main");
+  await expect(
+    page.getByRole("group", { name: "Event", exact: true }).getByLabel("Ref"),
+  ).toHaveValue("main");
   await expect(page.getByLabel("Simulation date")).toHaveValue("2026-12-03");
-  await page.getByLabel("Ref").fill("feature");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Ref")
+    .fill("feature");
 }
 
 test.beforeEach(async ({ page }) => {
@@ -87,7 +95,10 @@ test("differences only with no differences says so, and its link turns the filte
   page,
 }) => {
   await compareMainWithFeature(page);
-  await page.getByLabel("Ref").fill("main");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Ref")
+    .fill("main");
   await expect(row(page, "ci.yml")).not.toContainText("◆");
 
   await differencesOnly(page).check();
@@ -137,7 +148,10 @@ test("an unsupported Scenario 2 shows the grey panel in its header and only its 
   page,
 }) => {
   await compareMainWithFeature(page);
-  await page.getByLabel("Event name").fill("schedule");
+  await page
+    .getByRole("group", { name: "Event", exact: true })
+    .getByLabel("Event name")
+    .fill("schedule");
 
   await expect(grid(page).getByRole("columnheader").nth(3)).toContainText(
     "Unsupported Scenario: Outside v1: WhyNoRun doesn't simulate this Event. (WN-3)",
