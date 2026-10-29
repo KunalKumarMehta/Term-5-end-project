@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { eventForm } from "./forms";
 
 const results = (page: Page) => page.getByRole("region", { name: "Results" });
 const scenarioPane = (page: Page) =>
@@ -34,14 +35,8 @@ test("in Member PR, a docs-only change makes both checks Pending and blocks merg
   const label = page.getByLabel("Scenario label");
   await label.fill("Member PR");
   await label.press("Enter");
-  await page
-    .getByRole("group", { name: "Event", exact: true })
-    .getByLabel("Actor kind")
-    .selectOption("member");
-  await page
-    .getByRole("group", { name: "Event", exact: true })
-    .getByLabel("Changed files")
-    .fill("docs/README.md");
+  await eventForm(page).getByLabel("Actor kind").selectOption("member");
+  await eventForm(page).getByLabel("Changed files").fill("docs/README.md");
 
   for (const key of ["check › build", "check › test"])
     await expect(checkRow(page, key).getByRole("cell")).toHaveText([
